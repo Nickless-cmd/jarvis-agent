@@ -2076,45 +2076,7 @@ def run_agent(
             return {"text": reply, "meta": {"tool": None, "tool_used": False}}
     # Handle history and summary intents (already handled above)
     # if _summary_intent(prompt):
-    if session_id and _list_notes_intent(prompt):
-        since_dt = _note_list_since_intent(prompt)
-        if since_dt and user_id_int:
-            items = list_notes_since(user_id_int, since_dt.astimezone(timezone.utc).isoformat())
-        else:
-            items = list_notes(user_id_int, limit=10) if user_id_int else []
-        if not items:
-            reply = "Du har ingen noter endnu."
-        else:
-            lines = [
-                f"{i['id']}. {i.get('title','Note')} — udløber {_format_dt(i.get('expires_at',''))}"
-                for i in items
-            ]
-            reply = "Dine noter (seneste først):\n" + "\n".join(lines)
-        add_message(session_id, "assistant", reply)
-        return {"text": reply, "meta": {"tool": None, "tool_used": False}}
-    if session_id and "kort beskrivelse" in prompt.lower():
-        notes_context = any(
-            m.get("role") == "assistant" and "note" in (m.get("content") or "").lower()
-            for m in session_hist[-2:]
-        )
-        if _note_describe_intent(prompt) or notes_context:
-            items = list_notes(user_id_int, limit=10) if user_id_int else []
-            if not items:
-                reply = "Du har ingen noter endnu."
-            else:
-                lines = [f"{i['id']}. {_format_note_brief(i)}" for i in items[:10]]
-                reply = "Kort beskrivelse af dine noter:\n" + "\n".join(lines)
-            add_message(session_id, "assistant", reply)
-            return {"text": reply, "meta": {"tool": None, "tool_used": False}}
-    if session_id and _list_reminders_intent(prompt):
-        items = list_reminders(user_id_int, include_done=False, limit=10) if user_id_int else []
-        if not items:
-            reply = "Du har ingen aktive påmindelser."
-        else:
-            lines = [f"{i['id']}. {i['content']} — {_format_dt(i['remind_at'])}" for i in items]
-            reply = "Aktive påmindelser:\n" + "\n".join(lines)
-        add_message(session_id, "assistant", reply)
-        return {"text": reply, "meta": {"tool": None, "tool_used": False}}
+    # Notes and reminders
     if _cv_help_intent(prompt):
         reply = (
             "CV‑kommandoer:\n"
@@ -2139,69 +2101,17 @@ def run_agent(
             reply = _prepend_reminders(reply, reminders_due, user_id_int)
         add_message(session_id, "assistant", reply)
         return {"text": reply, "meta": {"tool": None, "tool_used": False}}
-    if session_id:
-        edit_note = _note_edit_intent(prompt)
-        if edit_note is not None:
-            note_id, content = edit_note
-            ok = update_note_content(user_id_int, note_id, content) if user_id_int else False
-            reply = "Noten er opdateret." if ok else "Kunne ikke opdatere noten."
-            add_message(session_id, "assistant", reply)
-            return {"text": reply, "meta": {"tool": None, "tool_used": False}}
-        note_id = _delete_note_intent(prompt)
-        if note_id is not None:
-            ok = delete_note(user_id_int, note_id) if user_id_int else False
-            reply = "Note slettet." if ok else "Kunne ikke finde den note."
-            add_message(session_id, "assistant", reply)
-            return {"text": reply, "meta": {"tool": None, "tool_used": False}}
-        remind_id = _note_remind_enable_intent(prompt)
-        if remind_id is not None:
-            ok = set_note_remind(user_id_int, remind_id, True) if user_id_int else False
-            reply = "Påmindelser er slået til for noten." if ok else "Kunne ikke finde den note."
-            add_message(session_id, "assistant", reply)
-            return {"text": reply, "meta": {"tool": None, "tool_used": False}}
-        stop_id = _note_remind_stop_intent(prompt)
-        if stop_id is not None:
-            ok = set_note_remind(user_id_int, stop_id, False) if user_id_int else False
-            reply = "Påmindelser er slået fra for noten." if ok else "Kunne ikke finde den note."
-            add_message(session_id, "assistant", reply)
-            return {"text": reply, "meta": {"tool": None, "tool_used": False}}
-        due_update = _note_update_due_intent(prompt)
-        if due_update is not None:
-            note_id, due_dt, remind_flag = due_update
-            ok = update_note_due(
-                user_id_int,
-                note_id,
-                due_dt.astimezone(timezone.utc).isoformat(),
-                remind_flag,
-            ) if user_id_int else False
-            reply = "Dato og tid er opdateret for noten." if ok else "Kunne ikke opdatere noten."
-            add_message(session_id, "assistant", reply)
-            return {"text": reply, "meta": {"tool": None, "tool_used": False}}
-        keep_id = _keep_note_intent(prompt)
-        if keep_id is not None:
-            ok = keep_note(user_id_int, keep_id) if user_id_int else False
-            reply = "Noten er fornyet i 30 dage." if ok else "Kunne ikke finde den note."
-            add_message(session_id, "assistant", reply)
-            return {"text": reply, "meta": {"tool": None, "tool_used": False}}
-        analyze_note_id = _analyze_note_intent(prompt)
-        if analyze_note_id is not None:
-            note = get_note(user_id_int, analyze_note_id) if user_id_int else None
-            if not note:
-                reply = "Jeg kan ikke finde den note."
-                add_message(session_id, "assistant", reply)
-                return {"text": reply, "meta": {"tool": None, "tool_used": False}}
-            messages = [
-                {"role": "system", "content": "Analyser teksten kort og præcist på dansk. Ingen gæt."},
-                {"role": "assistant", "content": note.get("content", "")},
-                {"role": "user", "content": "Lav en kort analyse."},
-            ]
-            res = call_ollama(messages)
-            reply = res.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
-            if not reply:
-                reply = "Jeg kunne ikke analysere noten lige nu."
-            add_message(session_id, "assistant", reply)
-            return {"text": reply, "meta": {"tool": None, "tool_used": False}}
-    result = handle_notes(prompt, session_id, user_id_int, display_name)
+    result = handle_notes(
+        prompt=prompt,
+        session_id=session_id,
+        user_id_int=user_id_int,
+        session_hist=session_hist,
+        reminders_due=reminders_due,
+        format_dt=_format_dt,
+        format_note_brief=_format_note_brief,
+        should_attach_reminders=_should_attach_reminders,
+        prepend_reminders=_prepend_reminders,
+    )
     if result:
         return result
     if session_id and _cv_intent(prompt) and not skip_cv_intent and not _load_state(get_cv_state(session_id)):

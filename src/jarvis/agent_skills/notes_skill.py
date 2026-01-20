@@ -2,11 +2,35 @@
 Notes skill handler - handles note and reminder intents.
 """
 
+from __future__ import annotations
+
 import json
 import re
-from datetime import datetime, timedelta, time
-from typing import Tuple
+from datetime import datetime, timedelta, time, timezone
+from typing import Any, Callable, Dict, List, Tuple
 from zoneinfo import ZoneInfo
+
+from jarvis.notes import (
+    add_note,
+    add_reminder,
+    delete_note,
+    get_note,
+    keep_note,
+    list_notes,
+    list_notes_since,
+    list_reminders,
+    set_note_remind,
+    update_note_content,
+    update_note_due,
+)
+from jarvis.session_store import (
+    add_message,
+    clear_pending_note,
+    clear_pending_reminder,
+    set_pending_note,
+    set_pending_reminder,
+    set_reminder_state,
+)
 
 
 def _note_intent(prompt: str) -> bool:
@@ -83,6 +107,13 @@ def _note_describe_intent(prompt: str) -> bool:
     return "kort beskrivelse" in p and ("note" in p or "noter" in p)
 
 
+def _analyze_note_intent(prompt: str) -> int | None:
+    match = re.search(r"\banaly[sz]er\s+note\s+(\d+)\b", prompt.lower())
+    if match:
+        return int(match.group(1))
+    return None
+
+
 def _remind_intent(prompt: str) -> bool:
     p = prompt.lower()
     return "mind mig" in p or "påmind" in p or "timer" in p
@@ -130,79 +161,139 @@ def _parse_timer_minutes(prompt: str) -> int | None:
 
 
 def handle_notes(
-    user_id: str,
     prompt: str,
-    session_id: str | None = None,
-    allowed_tools: list[str] | None = None,
-    ui_city: str | None = None,
-    ui_lang: str | None = None,
-):
+    session_id: str | None,
+    user_id_int: int | None,
+    session_hist: List[Dict[str, Any]],
+    reminders_due,
+    format_dt: Callable[[str], str],
+    format_note_brief: Callable[[dict], str],
+    should_attach_reminders: Callable[[str], bool],
+    prepend_reminders: Callable[[str, Any, Any], str],
+) -> Dict[str, Any] | None:
     """
-    Handle note and reminder intents.
-    Returns a response dict with 'text' and 'meta'.
+    Handle note and reminder intents. Returns response dict or None.
     """
-    # Local imports to avoid circular dependencies
-    from jarvis.agent import (
-        add_note, set_pending_note, add_message, _format_dt, get_user_profile,
-        add_reminder, set_reminder_state, set_pending_reminder, get_due_reminders, _should_attach_reminders, _prepend_reminders
-    )
-    import re
-    from datetime import datetime, timedelta, timezone
 
-    profile = get_user_profile(user_id)
-    user_id_int = (profile or {}).get("id")
-    reminders_due = get_due_reminders(user_id_int) if session_id and user_id_int else []
-
-    # Handle note intent
-    if session_id and _note_intent(prompt):
-        content = prompt.split(":", 1)[-1].strip() if ":" in prompt else prompt.replace("note", "", 1).strip()
-        if not content:
-            reply = "Hvad skal jeg gemme som note?"
-            if session_id:
-                set_pending_note(session_id, json.dumps({"awaiting_note": True}, ensure_ascii=False))
+    # List notes (with optional since)
+    if session_id and _list_notes_intent(prompt):
+        since_dt = _note_list_since_intent(prompt)
+        if since_dt and user_id_int:
+            items = list_notes_since(user_id_int, since_dt.astimezone(timezone.utc).isoformat())
         else:
-            item = add_note(user_id_int, content) if user_id_int else None
-            reply = f"Note gemt ({item['id']}) — {_format_dt(item['created_at'])}." if item else "Jeg kunne ikke gemme noten."
+            items = list_notes(user_id_int, limit=10) if user_id_int else []
+        if not items:
+            reply = "Du har ingen noter endnu."
+        else:
+            lines = [
+                f"{i['id']}. {i.get('title','Note')} — udløber {format_dt(i.get('expires_at',''))}"
+                for i in items
+            ]
+            reply = "Dine noter (seneste først):\n" + "\n".join(lines)
         add_message(session_id, "assistant", reply)
         return {"text": reply, "meta": {"tool": None, "tool_used": False}}
 
-    # Handle remind intent
-    if session_id and _remind_intent(prompt):
-        state = {}  # Simplified, assuming no state
-        if state.get("awaiting_time"):
-            when = _parse_time(prompt)
-            if not when:
-                reply = "Jeg mangler tidspunktet. Skriv fx 'i morgen kl 10:00'."
-                if session_id:
-                    set_pending_reminder(session_id, json.dumps({"awaiting_reminder": True}, ensure_ascii=False))
+    # Short description of notes
+    if session_id and "kort beskrivelse" in prompt.lower():
+        notes_context = any(
+            m.get("role") == "assistant" and "note" in (m.get("content") or "").lower()
+            for m in session_hist[-2:]
+        )
+        if _note_describe_intent(prompt) or notes_context:
+            items = list_notes(user_id_int, limit=10) if user_id_int else []
+            if not items:
+                reply = "Du har ingen noter endnu."
+            else:
+                lines = [f"{i['id']}. {format_note_brief(i)}" for i in items[:10]]
+                reply = "Kort beskrivelse af dine noter:\n" + "\n".join(lines)
+            add_message(session_id, "assistant", reply)
+            return {"text": reply, "meta": {"tool": None, "tool_used": False}}
+
+    # List reminders
+    if session_id and _list_reminders_intent(prompt):
+        items = list_reminders(user_id_int, include_done=False, limit=10) if user_id_int else []
+        if not items:
+            reply = "Du har ingen aktive påmindelser."
+        else:
+            lines = [f"{i['id']}. {i['content']} — {format_dt(i['remind_at'])}" for i in items]
+            reply = "Aktive påmindelser:\n" + "\n".join(lines)
+        add_message(session_id, "assistant", reply)
+        return {"text": reply, "meta": {"tool": None, "tool_used": False}}
+
+    # Edit note
+    if session_id:
+        edit_note = _note_edit_intent(prompt)
+        if edit_note is not None:
+            note_id, content = edit_note
+            ok = update_note_content(user_id_int, note_id, content) if user_id_int else False
+            reply = "Noten er opdateret." if ok else "Kunne ikke opdatere noten."
+            add_message(session_id, "assistant", reply)
+            return {"text": reply, "meta": {"tool": None, "tool_used": False}}
+
+        note_id = _delete_note_intent(prompt)
+        if note_id is not None:
+            ok = delete_note(user_id_int, note_id) if user_id_int else False
+            reply = "Note slettet." if ok else "Kunne ikke finde den note."
+            add_message(session_id, "assistant", reply)
+            return {"text": reply, "meta": {"tool": None, "tool_used": False}}
+
+        remind_id = _note_remind_enable_intent(prompt)
+        if remind_id is not None:
+            ok = set_note_remind(user_id_int, remind_id, True) if user_id_int else False
+            reply = "Påmindelser er slået til for noten." if ok else "Kunne ikke finde den note."
+            add_message(session_id, "assistant", reply)
+            return {"text": reply, "meta": {"tool": None, "tool_used": False}}
+
+        stop_id = _note_remind_stop_intent(prompt)
+        if stop_id is not None:
+            ok = set_note_remind(user_id_int, stop_id, False) if user_id_int else False
+            reply = "Påmindelser er slået fra for noten." if ok else "Kunne ikke finde den note."
+            add_message(session_id, "assistant", reply)
+            return {"text": reply, "meta": {"tool": None, "tool_used": False}}
+
+        due_update = _note_update_due_intent(prompt)
+        if due_update is not None:
+            note_id, due_dt, remind_flag = due_update
+            ok = (
+                update_note_due(
+                    user_id_int,
+                    note_id,
+                    due_dt.astimezone(timezone.utc).isoformat(),
+                    remind_flag,
+                )
+                if user_id_int
+                else False
+            )
+            reply = "Dato og tid er opdateret for noten." if ok else "Kunne ikke opdatere noten."
+            add_message(session_id, "assistant", reply)
+            return {"text": reply, "meta": {"tool": None, "tool_used": False}}
+
+        keep_id = _keep_note_intent(prompt)
+        if keep_id is not None:
+            ok = keep_note(user_id_int, keep_id) if user_id_int else False
+            reply = "Noten er fornyet i 30 dage." if ok else "Kunne ikke finde den note."
+            add_message(session_id, "assistant", reply)
+            return {"text": reply, "meta": {"tool": None, "tool_used": False}}
+
+        analyze_note_id = _analyze_note_intent(prompt)
+        if analyze_note_id is not None:
+            note = get_note(user_id_int, analyze_note_id) if user_id_int else None
+            if not note:
+                reply = "Jeg kan ikke finde den note."
                 add_message(session_id, "assistant", reply)
                 return {"text": reply, "meta": {"tool": None, "tool_used": False}}
-            item = add_reminder(user_id_int, state.get("content", "Påmindelse"), when.astimezone(timezone.utc).isoformat()) if user_id_int else None
-            set_reminder_state(session_id, json.dumps({}))
-            clear_pending_reminder(session_id)
-            reply = f"Påmindelse sat til {_format_dt(item['remind_at'])}." if item else "Jeg kunne ikke gemme påmindelsen."
-            add_message(session_id, "assistant", reply)
-            return {"text": reply, "meta": {"tool": None, "tool_used": False}}
-        when = _parse_time(prompt)
-        timer_minutes = _parse_timer_minutes(prompt)
-        content = prompt
-        content = re.sub(r"\bmind mig om\b", "", content, flags=re.I).strip()
-        if not content:
-            reply = "Hvad skal jeg minde dig om?"
-            add_message(session_id, "assistant", reply)
-            return {"text": reply, "meta": {"tool": None, "tool_used": False}}
-        if not when and timer_minutes:
-            tz = ZoneInfo("Europe/Copenhagen")
-            when = datetime.now(tz) + timedelta(minutes=timer_minutes)
-        if not when:
-            set_reminder_state(session_id, json.dumps({"awaiting_time": True, "content": content}))
-            set_pending_reminder(session_id, json.dumps({"awaiting_reminder": True}, ensure_ascii=False))
-            reply = "Hvornår skal jeg minde dig om det?"
-            add_message(session_id, "assistant", reply)
-            return {"text": reply, "meta": {"tool": None, "tool_used": False}}
-        item = add_reminder(user_id_int, content, when.astimezone(timezone.utc).isoformat()) if user_id_int else None
-        reply = f"Påmindelse sat til {_format_dt(item['remind_at'])}." if item else "Jeg kunne ikke gemme påmindelsen."
-        add_message(session_id, "assistant", reply)
-        return {"text": reply, "meta": {"tool": None, "tool_used": False}}
+            messages = [
+                {"role": "system", "content": "Analyser teksten kort og præcist på dansk. Ingen gæt."},
+                {"role": "assistant", "content": note.get("content", "")},
+                {"role": "user", "content": "Lav en kort analyse."},
+            ]
+            from jarvis import tools
 
-    return None  # No note or remind intent
+            res = tools.call_ollama(messages)  # type: ignore[attr-defined]
+            reply = res.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+            if not reply:
+                reply = "Jeg kunne ikke analysere noten lige nu."
+            add_message(session_id, "assistant", reply)
+            return {"text": reply, "meta": {"tool": None, "tool_used": False}}
+
+    return None

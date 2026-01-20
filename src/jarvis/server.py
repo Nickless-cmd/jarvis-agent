@@ -78,6 +78,9 @@ from jarvis.notifications.store import (
     add_event as add_notification_event,
     list_events as list_notification_events,
     mark_read,
+    add_notification,
+    list_notifications,
+    mark_notification_read,
 )
 from jarvis.watchers.repo_watcher import start_repo_watcher_if_enabled
 from jarvis.watchers.test_watcher import run_pytest_and_notify
@@ -1057,6 +1060,45 @@ async def dismiss_event_endpoint(
         return {"status": "ok"}
     else:
         raise HTTPException(404, detail="Event not found or already dismissed")
+
+
+@app.get("/v1/notifications")
+async def list_notifications_endpoint(
+    limit: int = 50,
+    since_id: int | None = None,
+    authorization: str | None = Header(None),
+    token: str | None = Depends(_resolve_token),
+):
+    if not _auth_or_token_ok(authorization, token):
+        raise HTTPException(401, detail="Invalid API key")
+    user = get_user_by_token(token)
+    if not user:
+        raise HTTPException(401, detail="Missing or invalid user token")
+    if user.get("is_disabled"):
+        raise HTTPException(403, detail="User is disabled")
+    _enforce_maintenance(user)
+    notifications = list_notifications(user["id"], limit=limit, since_id=since_id)
+    return {"notifications": notifications}
+
+
+@app.post("/v1/notifications/{notification_id}/read")
+async def mark_notification_read_endpoint(
+    notification_id: int,
+    authorization: str | None = Header(None),
+    token: str | None = Depends(_resolve_token),
+):
+    if not _auth_or_token_ok(authorization, token):
+        raise HTTPException(401, detail="Invalid API key")
+    user = get_user_by_token(token)
+    if not user:
+        raise HTTPException(401, detail="Missing or invalid user token")
+    if user.get("is_disabled"):
+        raise HTTPException(403, detail="User is disabled")
+    _enforce_maintenance(user)
+    if mark_notification_read(user["id"], notification_id):
+        return {"status": "ok"}
+    else:
+        raise HTTPException(404, detail="Notification not found or already read")
 
 
 @app.post("/v1/dev/run-tests")

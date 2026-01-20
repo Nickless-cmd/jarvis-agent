@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Dict, Any, Optional
 
 from jarvis.agent_core.state_service import AgentStateService
+from jarvis.notifications import add_notification
 
 @dataclass
 class TurnResult:
@@ -77,6 +78,23 @@ def build_response(
         "rendered_text": turn_result.rendered_text,
         "download_info": turn_result.download_info,
     }
+
+def emit_notification(user_id: str, level: str, title: str, body: str, meta: Dict[str, Any] = None):
+    """
+    Helper function for skills to emit notifications.
+    
+    Args:
+        user_id: The user ID to send the notification to
+        level: Notification level ('info', 'warning', 'error', 'success')
+        title: Short notification title
+        body: Notification body text
+        meta: Optional metadata dictionary
+    """
+    try:
+        add_notification(user_id, level, title, body, meta or {})
+    except Exception as e:
+        # Log error but don't fail the calling operation
+        print(f"Failed to emit notification: {e}")
 
 def handle_turn(
     user_id: str,

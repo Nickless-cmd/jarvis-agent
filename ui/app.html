@@ -37,6 +37,21 @@
         </select>
         <div id="globalSearchResults" class="search-results"></div>
       </div>
+      <div class="notifications-wrap">
+        <button id="notificationsBtn" class="notifications-btn" aria-label="Notifikationer">
+          🔔
+          <span id="notificationsBadge" class="notifications-badge hidden">0</span>
+        </button>
+        <div id="notificationsDropdown" class="notifications-dropdown hidden">
+          <div class="notifications-header">
+            <h3>Notifikationer</h3>
+            <button id="notificationsMarkAllRead" class="notifications-mark-all">Markér alle som læst</button>
+          </div>
+          <div id="notificationsList" class="notifications-list">
+            <div class="notifications-empty">Ingen notifikationer endnu.</div>
+          </div>
+        </div>
+      </div>
       <select id="modelSelect" class="hidden"></select>
     </div>
     <div id="eventsList" class="events-list" aria-live="polite"></div>

@@ -74,6 +74,11 @@ const chatPane = document.querySelector(".chat-pane");
 const modeChip = document.getElementById("modeChip");
 const modeChipLabel = document.getElementById("modeChipLabel");
 const eventsList = document.getElementById("eventsList");
+const notificationsBtn = document.getElementById("notificationsBtn");
+const notificationsBadge = document.getElementById("notificationsBadge");
+const notificationsDropdown = document.getElementById("notificationsDropdown");
+const notificationsList = document.getElementById("notificationsList");
+const notificationsMarkAllRead = document.getElementById("notificationsMarkAllRead");
 
 let currentSessionId = null;
 let sessionsCache = [];
@@ -92,6 +97,8 @@ let autoSessionInFlight = false;
 let maintenanceEnabled = false;
 let maintenanceMessage = "";
 let lastEventId = null;
+let notificationsCache = [];
+let notificationsLastId = null;
 
 function storeCurrentSession() {
   if (currentSessionId) {
@@ -2296,6 +2303,105 @@ if (themeSelect) {
   initTheme();
 }
 
+if (notificationsBtn) {
+  notificationsBtn.addEventListener("click", showNotificationsDropdown);
+}
+if (notificationsMarkAllRead) {
+  notificationsMarkAllRead.addEventListener("click", markAllNotificationsRead);
+}
+
+document.addEventListener("click", (e) => {
+  if (!notificationsDropdown || !notificationsBtn) return;
+  if (e.target === notificationsBtn || notificationsDropdown.contains(e.target)) return;
+  notificationsDropdown.classList.remove("open");
+});
+
+async function loadNotifications() {
+  if (!getToken()) return;
+  const url = "/v1/notifications" + (notificationsLastId ? `?since_id=${notificationsLastId}` : "");
+  const res = await apiFetch(url, { method: "GET" });
+  if (!res) return;
+  try {
+    const data = await res.json();
+    const notifications = data.notifications || [];
+    notificationsCache = [...notificationsCache, ...notifications];
+    if (notifications.length > 0) {
+      notificationsLastId = notifications[notifications.length - 1].id;
+    }
+    updateNotificationsBadge();
+    renderNotificationsDropdown();
+  } catch (err) {
+    console.error("Failed to load notifications:", err);
+  }
+}
+
+function updateNotificationsBadge() {
+  const unreadCount = notificationsCache.filter(n => !n.read).length;
+  if (notificationsBadge) {
+    notificationsBadge.textContent = unreadCount > 0 ? unreadCount : "";
+    notificationsBadge.style.display = unreadCount > 0 ? "inline" : "none";
+  }
+}
+
+function renderNotificationsDropdown() {
+  if (!notificationsList) return;
+  notificationsList.innerHTML = "";
+  if (notificationsCache.length === 0) {
+    notificationsList.innerHTML = '<div class="notifications-empty">Ingen notifikationer</div>';
+    return;
+  }
+  notificationsCache.slice(-10).reverse().forEach(notification => {
+    const item = document.createElement("div");
+    item.className = `notifications-item ${notification.read ? "" : "unread"}`;
+    item.innerHTML = `
+      <div class="notifications-title">${notification.title}</div>
+      <div class="notifications-body">${notification.body}</div>
+      <div class="notifications-time">${new Date(notification.created_at).toLocaleString()}</div>
+    `;
+    item.addEventListener("click", () => markNotificationRead(notification.id));
+    notificationsList.appendChild(item);
+  });
+}
+
+async function markNotificationRead(notificationId) {
+  try {
+    await apiFetch(`/v1/notifications/${notificationId}/read`, { method: "POST" });
+    const notification = notificationsCache.find(n => n.id === notificationId);
+    if (notification) {
+      notification.read = true;
+    }
+    updateNotificationsBadge();
+    renderNotificationsDropdown();
+  } catch (err) {
+    console.error("Failed to mark notification as read:", err);
+  }
+}
+
+async function markAllNotificationsRead() {
+  try {
+    const unreadIds = notificationsCache.filter(n => !n.read).map(n => n.id);
+    await Promise.all(unreadIds.map(id => apiFetch(`/v1/notifications/${id}/read`, { method: "POST" })));
+    notificationsCache.forEach(n => n.read = true);
+    updateNotificationsBadge();
+    renderNotificationsDropdown();
+  } catch (err) {
+    console.error("Failed to mark all notifications as read:", err);
+  }
+}
+
+function showNotificationsDropdown() {
+  if (!notificationsDropdown) return;
+  notificationsDropdown.classList.toggle("open");
+  if (notificationsDropdown.classList.contains("open")) {
+    loadNotifications();
+  }
+}
+
+function startNotificationPolling() {
+  loadNotifications();
+  setInterval(loadNotifications, 30000); // Poll every 30 seconds
+}
+
 loadSessions();
 loadModel();
 loadFooter();
@@ -2310,6 +2416,7 @@ loadRightPanels();
 loadRightNotes();
 loadRightLogs();
 startEventPolling();
+startNotificationPolling();
 setInterval(loadStatus, 30000);
 setInterval(loadFiles, 15000);
 setInterval(loadRightPanels, 60000);

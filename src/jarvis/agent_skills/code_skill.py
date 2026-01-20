@@ -37,6 +37,17 @@ def _code_question_intent(prompt: str) -> bool:
     return any(k in p for k in keywords)
 
 
+def _pytest_triage_intent(prompt: str) -> bool:
+    """Detect if the prompt contains pytest failure output or asks for pytest triage."""
+    p = prompt.lower()
+    if "pytest" in p and ("fejl" in p or "fail" in p or "triage" in p or "analys" in p):
+        return True
+    if "failures" in prompt or "FAILED" in prompt or "ERROR" in prompt:
+        if "::" in prompt or "E   " in prompt:
+            return True
+    return False
+
+
 def _file_explain_intent(prompt: str) -> str | None:
     match = re.search(r"(?:forklar|explain)\s+fil(?:e)?(?:n)?\s+([^\s]+)", prompt, flags=re.I)
     if match:
@@ -158,6 +169,68 @@ def handle_code_question(
     """Handle code questions via local code RAG. Returns response dict or None."""
     if allowed_tools is not None and "code" not in allowed_tools:
         return None
+
+    # Pytest triage flow
+    if _pytest_triage_intent(prompt):
+        from jarvis.triage.pytest_triage import parse_pytest_output, suggest_next_queries
+
+        parsed = parse_pytest_output(prompt)
+        queries = suggest_next_queries(parsed)
+        hits: list[CodeHit] = []
+        if queries:
+            try:
+                hits = search_code(" ".join(queries), k=5, repo_root=repo_root, index_dir=index_dir)
+            except Exception as exc:
+                reply = (
+                    f"I could not search the codebase right now: {exc}"
+                    if ui_lang and ui_lang.lower().startswith("en")
+                    else f"Jeg kunne ikke søge i kodebasen lige nu: {exc}"
+                )
+                add_memory("assistant", reply, user_id=user_id)
+                if session_id and state:
+                    state.add_message("assistant", reply)
+                return {"text": reply, "meta": {"tool": "pytest_triage", "tool_used": False}}
+
+        # Build response
+        lang_en = ui_lang and ui_lang.lower().startswith("en")
+        header = "Hypothesis" if lang_en else "Hypotese"
+        etype = parsed.get("error_type") or ("pytest failure" if lang_en else "pytest-fejl")
+        emsg = parsed.get("error_message")
+        lines = [f"{header}: {etype}"]
+        if emsg:
+            lines.append(emsg[:200])
+
+        if hits:
+            lines.append("Where:" if lang_en else "Hvor:")
+            for hit in hits[:3]:
+                snippet = _shorten(hit.excerpt or "", 120)
+                lines.append(f"- {hit.path}:{hit.start_line}-{hit.end_line} — {snippet}")
+        else:
+            lines.append("No code references yet; try sharing the failing test file.")
+
+        suggestions: list[str] = []
+        if parsed.get("error_type") == "ModuleNotFoundError":
+            suggestions.append("Check imports and ensure dependencies/modules are installed.")
+        if parsed.get("error_type") in {"AssertionError", "TypeError"}:
+            suggestions.append("Inspect the failing assertion and input types.")
+        suggestions.append("Re-run the single failing test with: pytest -q -k <name> -vv")
+        if lang_en:
+            lines.append("Next steps:")
+            lines.extend(f"- {s}" for s in suggestions[:3])
+        else:
+            lines.append("Næste skridt:")
+            lines.extend(f"- {s}" for s in suggestions[:3])
+
+        reply = "\n".join(lines)
+        if reminders_due and should_attach_reminders and should_attach_reminders(prompt):
+            reply = prepend_reminders(reply, reminders_due, user_id_int)  # type: ignore[arg-type]
+
+        payload = {"tool": "pytest_triage", "queries": queries, "parsed": parsed}
+        if session_id and state:
+            state.set_last_tool(json.dumps(payload, ensure_ascii=False))
+            state.add_message("assistant", reply)
+        add_memory("assistant", reply, user_id=user_id)
+        return {"text": reply, "meta": {"tool": "pytest_triage", "tool_used": True}}
 
     query = prompt
     short_answer = None

@@ -1,4 +1,4 @@
-from jarvis.triage.pytest_triage import triage_pytest_output
+from jarvis.triage.pytest_triage import parse_pytest_output, triage_pytest_output
 
 
 def test_triage_assertion_error():
@@ -38,3 +38,40 @@ def test_triage_key_error():
     assert "KeyError" in triage["query_terms"]
     assert "src/jarvis/utils.py" in triage["query_terms"]
     assert "get_value" in triage["query_terms"]
+
+
+def test_parse_module_not_found():
+    output = (
+        "=================================== FAILURES ===================================\n"
+        "__________________________ test_imports __________________________\n"
+        "E   ModuleNotFoundError: No module named 'jarvis'\n"
+        "tests/test_imports.py:5: in <module>\n"
+        "    import jarvis\n"
+    )
+    parsed = parse_pytest_output(output)
+    assert parsed["error_type"] == "ModuleNotFoundError"
+    assert "tests/test_imports.py" in parsed["file_paths"]
+
+
+def test_parse_assertion():
+    output = (
+        "FAILED tests/test_example.py::test_run - AssertionError: expected 1 == 2\n"
+        "E   AssertionError: expected 1 == 2\n"
+        "tests/test_example.py:10: in test_run\n"
+        "    assert 1 == 2\n"
+    )
+    parsed = parse_pytest_output(output)
+    assert parsed["error_type"] == "AssertionError"
+    assert "tests/test_example.py" in parsed["file_paths"]
+    assert 10 in parsed["line_numbers"]
+
+
+def test_parse_indentation_error():
+    output = (
+        "E   IndentationError: unexpected indent\n"
+        "src/jarvis/bad.py:3: in <module>\n"
+        "    def broken():\n"
+    )
+    parsed = parse_pytest_output(output)
+    assert parsed["error_type"] == "IndentationError"
+    assert "src/jarvis/bad.py" in parsed["file_paths"]

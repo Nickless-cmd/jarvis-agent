@@ -149,6 +149,9 @@ const I18N = {
     ariaLanguage: "Sprog",
     ariaTheme: "Tema",
     ariaResponseMode: "Svar mode",
+    statusThinking: "Tænker…",
+    statusSearching: "Søger…",
+    statusWriting: "Skriver…",
   },
   en: {
     searchPlaceholder: "Search docs, tickets, chats...",
@@ -176,6 +179,9 @@ const I18N = {
     ariaLanguage: "Language",
     ariaTheme: "Theme",
     ariaResponseMode: "Response mode",
+    statusThinking: "Thinking…",
+    statusSearching: "Searching…",
+    statusWriting: "Writing…",
   },
 };
 
@@ -705,18 +711,51 @@ function closeSessionMenus(except = null) {
   });
 }
 
+let statusTimeout = null;
+let lastStatusTime = 0;
+const MIN_STATUS_DURATION = 300; // ms
+
 function setStatus(text) {
-  statusBadge.textContent = text;
-  if (text === "Klar") {
-    statusInline.textContent = `${brandCoreLabel} er klar.`;
+  const now = Date.now();
+  const timeSinceLast = now - lastStatusTime;
+  if (statusTimeout) {
+    clearTimeout(statusTimeout);
+    statusTimeout = null;
+  }
+  if (timeSinceLast < MIN_STATUS_DURATION) {
+    const delay = MIN_STATUS_DURATION - timeSinceLast;
+    statusTimeout = setTimeout(() => setStatusImmediate(text), delay);
     return;
   }
-  statusInline.textContent = text.replace(/^JARVIS\b/i, brandCoreLabel);
+  setStatusImmediate(text);
+}
+
+function setStatusImmediate(text) {
+  lastStatusTime = Date.now();
+  const dict = I18N[getUiLang()] || I18N.da;
+  let translatedText = text;
+  if (text === "Klar") {
+    translatedText = dict.statusReady;
+  } else if (text === "JARVIS er klar.") {
+    translatedText = dict.statusReadyFull;
+  } else if (text === "Tænker…") {
+    translatedText = dict.statusThinking;
+  } else if (text === "Søger…") {
+    translatedText = dict.statusSearching;
+  } else if (text === "Skriver…") {
+    translatedText = dict.statusWriting;
+  }
+  statusBadge.textContent = translatedText;
+  if (translatedText === dict.statusReady) {
+    statusInline.textContent = dict.statusReadyFull;
+    return;
+  }
+  statusInline.textContent = translatedText.replace(/^JARVIS\b/i, brandCoreLabel);
   const lastAssistant = [...document.querySelectorAll(".message.assistant")].pop();
   if (lastAssistant) {
     const statusEl = lastAssistant.querySelector(".msg-status");
     if (statusEl) {
-      statusEl.textContent = `— ${text.replace(/^JARVIS\s*/i, "")}`;
+      statusEl.textContent = `— ${translatedText.replace(/^JARVIS\s*/i, "")}`;
     }
   }
 }
@@ -1855,27 +1894,34 @@ async function sendMessage(textOverride = null) {
       if (currentEvent === "status") {
         try {
           const st = JSON.parse(dataLine);
+          const dict = I18N[getUiLang()] || I18N.da;
           if (st.state === "using_tool") {
             const tool = st.tool || "";
             const map = {
-              news: "JARVIS henter nyheder...",
-              weather: "JARVIS henter vejr...",
-              search: "JARVIS søger...",
-              currency: "JARVIS henter valuta...",
-              system: "JARVIS henter systeminfo...",
-              ping: "JARVIS tester forbindelse...",
-              process: "JARVIS henter processer...",
+              news: dict.statusSearching,
+              weather: dict.statusSearching,
+              search: dict.statusSearching,
+              currency: dict.statusSearching,
+              system: dict.statusSearching,
+              ping: dict.statusSearching,
+              process: dict.statusSearching,
+              image: dict.statusSearching,
             };
-            setStatus(map[tool] || "JARVIS søger...");
-          } else if (st.state === "summarizing") {
-            setStatus("JARVIS opsummerer...");
+            setStatus(map[tool] || dict.statusSearching);
+            if (chatStatus) chatStatus.textContent = "";
+          } else if (st.state === "writing") {
+            setStatus(dict.statusWriting);
+            if (chatStatus) chatStatus.textContent = "▊";
           } else if (st.state === "thinking") {
-            setStatus("JARVIS tænker...");
+            setStatus(dict.statusThinking);
+            if (chatStatus) chatStatus.textContent = "";
           } else if (st.state === "idle") {
-            setStatus("Klar");
+            setStatus(dict.statusReady);
+            if (chatStatus) chatStatus.textContent = "";
           }
         } catch (err) {
           setStatus("JARVIS arbejder...");
+          if (chatStatus) chatStatus.textContent = "";
         }
         continue;
       }

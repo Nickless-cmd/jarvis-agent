@@ -2001,7 +2001,7 @@ async def chat(
                 ui_lang=ui_lang,
             )
             if result.get("meta", {}).get("tool_used"):
-                yield _status_event("summarizing", result.get("meta", {}).get("tool"))
+                yield _status_event("writing", result.get("meta", {}).get("tool"))
             text_stream = _butlerize_text(result.get("text", ""), user)
             if note_reminder:
                 text_stream = f"{note_reminder}\n\n{text_stream}"

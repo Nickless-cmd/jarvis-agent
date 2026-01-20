@@ -15,6 +15,19 @@ RELEVANT_EXT = {".py", ".md", ".txt", ".sh", ".toml", ".yml", ".yaml", ".ini"}
 EXCLUDE_DIRS = {".venv", "__pycache__", ".pytest_cache", "src/data", "data", "tts_cache", "ui/static"}
 EXCLUDE_EXT = {".pyc"}
 MAX_SIZE_BYTES = 2 * 1024 * 1024
+_recent_events: Dict[str, float] = {}
+RATE_WINDOW_SEC = 300  # 5 minutes
+
+
+def _should_emit(fingerprint: str, now_ts: float | None = None, window: int = RATE_WINDOW_SEC) -> bool:
+    """Return True if we should emit a notification for this fingerprint."""
+    ts_provider = time.time if hasattr(time, "time") else time
+    ts = now_ts if now_ts is not None else ts_provider()
+    last = _recent_events.get(fingerprint)
+    if last is not None and ts - last < window:
+        return False
+    _recent_events[fingerprint] = ts
+    return True
 
 
 class PollingRepoWatcher:
@@ -149,4 +162,3 @@ def start_repo_watcher_if_enabled() -> None:
     user_id = int(os.getenv("JARVIS_WATCHER_USER_ID", "1"))
     watcher = PollingRepoWatcher(repo_root=repo_root, user_id=user_id, interval_sec=interval, auto_reindex=auto_reindex)
     watcher.start()
-

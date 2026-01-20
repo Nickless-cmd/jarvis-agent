@@ -98,6 +98,37 @@ def test_repo_watcher_ignores_multiple_excluded_dirs(tmp_path, monkeypatch):
     assert len(events) == 2
 
 
+def test_repo_watcher_rate_limit(monkeypatch, tmp_path):
+    events = []
+    now = [1000.0]
+
+    def fake_add_event(user_id, type, title, body, severity="info", meta=None):
+        events.append(type)
+
+    def fake_time():
+        return now[0]
+
+    monkeypatch.setattr(repo_watcher, "add_event", fake_add_event)
+    monkeypatch.setattr(repo_watcher, "time", fake_time)
+
+    repo = tmp_path / "repo"
+    repo.mkdir(parents=True)
+    file_path = repo / "main.py"
+    file_path.write_text("print('hello')\n", encoding="utf-8")
+    repo_watcher._recent_events.clear()
+    watcher = repo_watcher.PollingRepoWatcher(repo_root=repo, user_id=1, interval_sec=1, auto_reindex=False)
+    watcher.scan_once()  # first emits
+    assert events.count("code_changed") == 1
+    # Second scan within rate window
+    watcher.scan_once()
+    assert events.count("code_changed") == 1  # no duplicate
+    # Advance time beyond window and modify file to trigger change
+    now[0] += 301
+    file_path.write_text("print('hello2')\n", encoding="utf-8")
+    watcher.scan_once()
+    assert events.count("code_changed") == 2
+
+
 def test_test_watcher_success(monkeypatch):
     events = []
 
@@ -165,6 +196,39 @@ def test_test_watcher_failure(monkeypatch):
     assert "Suggestions:" in body
     assert "Refs:" in body
     assert len(meta["refs"]) == 4  # All refs in meta
+
+
+def test_test_watcher_rate_limit(monkeypatch):
+    events = []
+    now = [2000.0]
+
+    def fake_add_event(user_id, type, title, body, severity="info", meta=None):
+        events.append(type)
+
+    def fake_time():
+        return now[0]
+
+    monkeypatch.setattr(test_watcher, "add_event", fake_add_event)
+    test_watcher._recent_events.clear()
+    monkeypatch.setattr(test_watcher, "time", fake_time)
+
+    def fake_run(cmd, **kwargs):
+        class FakeResult:
+            returncode = 1
+            stdout = "FAILED test_example.py::test_func\nE   AssertionError: expected 1 == 2\nE   assert 1 == 2\n"
+            stderr = ""
+        return FakeResult()
+
+    monkeypatch.setattr(test_watcher.subprocess, "run", fake_run)
+    monkeypatch.setattr(test_watcher, "search_code", lambda *args, **kwargs: [])
+
+    test_watcher.run_pytest_and_notify(1, "en")
+    assert events.count("tests_failed") == 1
+    test_watcher.run_pytest_and_notify(1, "en")
+    assert events.count("tests_failed") == 1  # suppressed
+    now[0] += 301
+    test_watcher.run_pytest_and_notify(1, "en")
+    assert events.count("tests_failed") == 2
 
 
 def test_triage_pytest_output_success():

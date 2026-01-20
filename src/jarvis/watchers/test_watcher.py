@@ -5,12 +5,14 @@ from __future__ import annotations
 import os
 import subprocess
 import threading
+import time
 from pathlib import Path
 from typing import Optional
 
 from jarvis.code_rag import search_code
 from jarvis.notifications.store import add_event
 from jarvis.triage.pytest_triage import triage_pytest_output
+from jarvis.code_rag.index import DEFAULT_REPO_ROOT
 
 
 def _truncate(text: str, limit: int = 8000) -> str:
@@ -25,6 +27,28 @@ def _format_body(stdout: str, stderr: str) -> str:
         parts.append(stderr.strip())
     body = "\n".join(parts).strip()
     return _truncate(body, 8000)
+
+
+_recent_events: dict[str, float] = {}
+RATE_WINDOW_SEC = 300  # 5 minutes
+
+
+def _fingerprint_from_triage(triage: dict) -> str:
+    parsed = triage.get("parsed") or {}
+    etype = parsed.get("error_type") or "unknown"
+    first_test = (parsed.get("failing_tests") or ["none"])[0]
+    first_file = (parsed.get("file_paths") or ["none"])[0]
+    return f"{etype}:{first_test}:{first_file}"
+
+
+def _should_emit(fingerprint: str, now_ts: float | None = None, window: int = RATE_WINDOW_SEC) -> bool:
+    ts_provider = time.time if hasattr(time, "time") else time
+    ts = now_ts if now_ts is not None else ts_provider()
+    last = _recent_events.get(fingerprint)
+    if last is not None and ts - last < window:
+        return False
+    _recent_events[fingerprint] = ts
+    return True
 
 
 def run_pytest_and_notify(user_id: int, ui_lang: Optional[str] = None) -> int:
@@ -59,6 +83,9 @@ def run_pytest_and_notify(user_id: int, ui_lang: Optional[str] = None) -> int:
         )
     else:
         triage = triage_pytest_output(body, ui_lang)
+        fingerprint = _fingerprint_from_triage(triage)
+        if not _should_emit(fingerprint):
+            return result.returncode
         # Get code refs for query terms
         refs = []
         if triage["query_terms"]:
@@ -83,7 +110,7 @@ def run_pytest_and_notify(user_id: int, ui_lang: Optional[str] = None) -> int:
             severity="error",
             title=triage["title"],
             body=_truncate(final_body, 8000),
-            meta={"refs": refs},  # Full refs in meta
+            meta={"refs": refs, "fingerprint": fingerprint, "parsed": triage.get("parsed")},
         )
     return result.returncode
 
@@ -125,6 +152,7 @@ class PollingTestWatcher:
         """Run tests once and emit event."""
         returncode, output = self._run_tests()
         triage = triage_pytest_output(output, "da")  # Assume da for watcher
+        fingerprint = _fingerprint_from_triage(triage)
         if returncode == 0:
             add_event(
                 self.user_id,
@@ -134,6 +162,9 @@ class PollingTestWatcher:
                 body=triage["body"],
             )
         else:
+            # Rate limit identical failures
+            if not _should_emit(fingerprint):
+                return
             # Get code refs for query terms
             refs = []
             if triage["query_terms"]:
@@ -149,7 +180,7 @@ class PollingTestWatcher:
             body = f"{triage['body']}\n\nSuggestions:\n" + "\n".join(f"- {s}" for s in suggestions[:3])
             if top_refs:
                 body += "\n\nRefs:\n" + "\n".join(f"- {r['path']}:{r['start_line']}-{r['end_line']}" for r in top_refs)
-            meta = {"refs": refs}  # Full refs in meta
+            meta = {"refs": refs, "fingerprint": fingerprint}  # Full refs in meta
             add_event(
                 self.user_id,
                 type="test_run_failed",

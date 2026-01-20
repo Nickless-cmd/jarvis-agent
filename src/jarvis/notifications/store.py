@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
+import os
+import time
+import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List
 
+import jarvis.db as db
 from jarvis.db import get_conn
-import time
-import uuid
 
 
 def _truncate_body(body: str, limit: int = 8000) -> str:
@@ -24,6 +26,8 @@ def add_event(
     meta: Dict[str, Any] | None = None,
 ) -> int | str:
     """Insert a new event for a user and return its id."""
+    _sync_db_path_from_env()
+    _ensure_table()
     meta_json = json.dumps(meta or {}, ensure_ascii=False)
     created = datetime.now(timezone.utc).isoformat()
     body = _truncate_body(body)
@@ -57,6 +61,7 @@ def add_event(
 
 def list_events(user_id: int, since_id: int | None = None, limit: int = 50) -> List[Dict[str, Any]]:
     """List events for a user in ascending id order."""
+    _sync_db_path_from_env()
     query = "SELECT id, created_utc, type, severity, title, body, meta_json, read FROM events WHERE user_id = ?"
     params: list[Any] = [user_id]
     if since_id is not None:
@@ -94,6 +99,7 @@ def list_events(user_id: int, since_id: int | None = None, limit: int = 50) -> L
 
 def mark_read(user_id: int, event_id: int) -> bool:
     """Mark an event as read."""
+    _sync_db_path_from_env()
     with get_conn() as conn:
         cur = conn.execute("UPDATE events SET read = 1 WHERE id = ? AND user_id = ?", (event_id, user_id))
         conn.commit()
@@ -127,3 +133,31 @@ def list_notifications(user_id: int, limit: int = 50, since_id: int | None = Non
 def mark_notification_read(user_id: int, notification_id: int) -> bool:
     """Mark a notification as read (alias for mark_read)."""
     return mark_read(user_id, notification_id)
+
+
+def _ensure_table() -> None:
+    """Create events table if it does not exist (idempotent)."""
+    with get_conn() as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS events (
+                id TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                created_utc TEXT NOT NULL,
+                type TEXT NOT NULL,
+                severity TEXT NOT NULL,
+                title TEXT NOT NULL,
+                body TEXT NOT NULL,
+                meta_json TEXT,
+                read INTEGER NOT NULL DEFAULT 0
+            )
+            """
+        )
+        conn.commit()
+
+
+def _sync_db_path_from_env() -> None:
+    """Ensure db module picks up JARVIS_DB_PATH for tests/dev overrides."""
+    env_db = os.getenv("JARVIS_DB_PATH")
+    if env_db:
+        db.DB_PATH = os.path.abspath(env_db)

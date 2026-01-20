@@ -12,3 +12,5 @@ comfyui/
 data/
 src/data/
 tts_cache/
+
+backups/*.tar.gz

@@ -544,98 +544,7 @@ def _extract_pid(prompt: str) -> int | None:
     return None
 
 
-def _process_action(prompt: str) -> str:
-    p = prompt.lower()
-    if any(k in p for k in ["dræb", "stop", "afslut", "kill"]):
-        return "kill"
-    if any(k in p for k in ["find", "søg"]):
-        return "find"
-    return "list"
 
-
-def _process_confirm_intent(prompt: str) -> bool:
-    p = prompt.lower()
-    return "bekræft" in p or "ja dræb" in p or "ja, dræb" in p
-
-
-def _process_analysis_intent(prompt: str) -> bool:
-    p = prompt.lower()
-    return any(
-        k in p
-        for k in [
-            "analys",
-            "beskriv",
-            "hvad er",
-            "hvad gør",
-            "forklar",
-            "hvad laver",
-            "identificer",
-        ]
-    )
-
-
-def _find_process_match(prompt: str, items: list[dict]) -> dict | None:
-    p = prompt.lower()
-    pid = _extract_pid(prompt)
-    if pid:
-        for i in items:
-            if i.get("pid") == pid:
-                return i
-    for i in items:
-        name = (i.get("name") or "").lower()
-        if name and name in p:
-            return i
-    return None
-
-
-def _system_fields_from_prompt(prompt: str) -> dict:
-    p = (prompt or "").lower()
-    wants_cpu = "cpu" in p
-    wants_mem = any(k in p for k in ["ram", "hukommelse", "memory"])
-    wants_disk = any(k in p for k in ["disk", "lagring", "storage"])
-    wants_ip = any(k in p for k in ["ip", "netværk", "netvaerk"])
-    wants_all = any(k in p for k in ["system", "ressourcer"])
-    if not any([wants_cpu, wants_mem, wants_disk, wants_ip]) or wants_all:
-        wants_cpu = wants_mem = wants_disk = wants_ip = True
-    wants_all_ips = any(k in p for k in ["alle ip", "alle ip'er", "alle ips"])
-    return {
-        "cpu": wants_cpu,
-        "mem": wants_mem,
-        "disk": wants_disk,
-        "ip": wants_ip,
-        "all_ips": wants_all_ips,
-    }
-
-
-def _format_system_info(info: dict, prompt: str) -> str:
-    cpu = info.get("cpu_percent")
-    mem = info.get("memory") or {}
-    disk = info.get("disk") or {}
-    ip = info.get("ip") or {}
-    fields = _system_fields_from_prompt(prompt)
-    lines = []
-    if fields["cpu"] and cpu is not None:
-        lines.append(f"CPU load: {cpu}%")
-    if fields["mem"] and mem:
-        lines.append(
-            f"Memory: {mem.get('used_mb')} MB brugt / {mem.get('total_mb')} MB total "
-            f"(buffered: {mem.get('buffered_mb')} MB)"
-        )
-    if fields["disk"] and disk:
-        lines.append(
-            f"Disk ({disk.get('mount')}): {disk.get('used_gb')} GB i brug / {disk.get('total_gb')} GB total "
-            f"(fri: {disk.get('free_gb')} GB)"
-        )
-    if fields["ip"]:
-        local_ip = ip.get("local_ip")
-        if local_ip:
-            lines.append(f"Lokal IP: {local_ip}")
-        if fields["all_ips"] and ip.get("all_ips"):
-            lines.append(f"Alle IP'er: {', '.join(ip.get('all_ips'))}")
-    return "\n".join(lines) if lines else "Jeg kan ikke hente systeminfo lige nu."
-
-
-def _butler_prefix(name: str) -> str:
     if name:
         return f"Selvfølgelig, {name}."
     return "Selvfølgelig."
@@ -1316,35 +1225,6 @@ def _resume_context_intent(prompt: str) -> bool:
     )
 
 
-def _ping_result_intent(prompt: str) -> bool:
-    p = prompt.lower()
-    return any(
-        k in p
-        for k in [
-            "sidste ping",
-            "seneste ping",
-            "ping resultat",
-            "pingresultat",
-            "vis ping",
-            "vis resultatet for ping",
-            "resultatet for de pings",
-        ]
-    )
-
-
-def _ping_count_intent(prompt: str) -> bool:
-    p = prompt.lower()
-    return any(
-        k in p
-        for k in [
-            "hvor mange ping",
-            "hvor mange pings",
-            "antal ping",
-            "hvor mange sendte du",
-            "hvor mange svar",
-        ]
-    )
-
 
 def _wants_weather_and_news(prompt: str) -> bool:
     p = prompt.lower()
@@ -1744,6 +1624,12 @@ def run_agent(
     if history_response:
         return history_response
 
+    # Handle process/system/ping intents
+    from jarvis.agent_skills.process_skill import handle_process
+    process_response = handle_process(user_id, prompt, session_id, allowed_tools, ui_city, ui_lang, reminders_due=reminders_due, user_id_int=user_id_int, display_name=display_name)
+    if process_response:
+        return process_response
+
     cv_state_active = _load_state(get_cv_state(session_id)) if session_id else None
     story_state_active = _load_state(get_story_state(session_id)) if session_id else None
     forced_tool = None
@@ -1936,53 +1822,6 @@ def run_agent(
             reply = _prepend_reminders(reply, reminders_due, user_id_int)
         add_message(session_id, "assistant", reply)
         return {"text": reply, "meta": {"tool": last.get("tool") if last else None, "tool_used": False}}
-    if session_id and _ping_result_intent(prompt):
-        last = _load_state(get_last_tool(session_id))
-        if not last or last.get("tool") != "ping":
-            if user_id_int:
-                detail = f"Ingen ping‑resultat.\nPrompt: {prompt}"
-                _safe_create_ticket(user_id_int, "Manglende ping‑resultat", detail, "moderat")
-            reply = "Jeg har ingen tidligere ping‑resultater at vise."
-        else:
-            host = last.get("host") or "host"
-            success = bool(last.get("success"))
-            wants_summary_only = bool(re.search(r"\b(vis|resultat|statistik)\b", prompt.lower()))
-            reply = ""
-            if not wants_summary_only:
-                reply = f"Ja, {host} svarer." if success else f"Nej, {host} svarer ikke."
-                reply += " "
-            reply += (
-                f"Ping {host} {'lykkedes' if success else 'fejlede'}: "
-                f"{last.get('loss_percent')}% pakketab, {last.get('avg_ms')} ms."
-            )
-            try:
-                if float(last.get("avg_ms") or 0) >= 100:
-                    reply += " Bemærk: Det er høj latency."
-            except Exception:
-                pass
-        if reminders_due and _should_attach_reminders(prompt):
-            reply = _prepend_reminders(reply, reminders_due, user_id_int)
-        add_message(session_id, "assistant", reply)
-        return {"text": reply, "meta": {"tool": "ping", "tool_used": False}}
-    if session_id and _ping_count_intent(prompt):
-        last = _load_state(get_last_tool(session_id))
-        if not last or last.get("tool") != "ping":
-            if user_id_int:
-                detail = f"Ingen ping‑kontekst.\nPrompt: {prompt}"
-                _safe_create_ticket(user_id_int, "Manglende ping‑kontekst", detail, "moderat")
-            reply = "Jeg har ingen tidligere ping‑data at tælle."
-        else:
-            host = last.get("host") or "host"
-            sent = last.get("sent")
-            received = last.get("received")
-            if sent is None or received is None:
-                reply = f"Jeg sendte 5 ping til {host}."
-            else:
-                reply = f"Jeg sendte {sent} ping til {host}, og {received} svar kom tilbage."
-        if reminders_due and _should_attach_reminders(prompt):
-            reply = _prepend_reminders(reply, reminders_due, user_id_int)
-        add_message(session_id, "assistant", reply)
-        return {"text": reply, "meta": {"tool": "ping", "tool_used": False}}
     if session_id and _tool_error_intent(prompt):
         last = _load_state(get_last_tool(session_id))
         if not last or not last.get("error"):
@@ -2958,116 +2797,17 @@ def run_agent(
             add_message(session_id, "assistant", reply)
         return {"text": reply, "meta": {"tool": "time", "tool_used": True}}
 
-    if tool == "system":
-        if not isinstance(tool_result, dict) or tool_result.get("error"):
-            reply = "Jeg kan ikke hente systeminfo lige nu."
-        else:
-            reply = _format_system_info(tool_result, prompt)
-        reply = f"{_butler_prefix(display_name)}\n{reply}"
-        if resume_prompt:
-            reply += f"\n\n{resume_prompt}"
-        if session_id:
-            last_payload = {"tool": "system", "source": "system_probe"}
-            set_last_tool(session_id, json.dumps(last_payload, ensure_ascii=False))
-        if reminders_due and _should_attach_reminders(prompt):
-            reply = _prepend_reminders(reply, reminders_due, user_id_int)
-        add_memory("assistant", reply, user_id=user_id)
-        if session_id:
-            add_message(session_id, "assistant", reply)
-        return {"text": reply, "data": tool_result, "meta": {"tool": "system", "tool_used": True}}
+    system_response = handle_process(user_id, prompt, session_id, allowed_tools, ui_city, ui_lang, tool="system", tool_result=tool_result, reminders_due=reminders_due, user_id_int=user_id_int, display_name=display_name, resume_prompt=resume_prompt)
+    if system_response:
+        return system_response
 
-    if tool == "ping":
-        if not isinstance(tool_result, dict) or tool_result.get("error"):
-            reply = "Jeg kan ikke køre ping lige nu. Angiv et hostnavn eller IP."
-        else:
-            host = tool_result.get("host")
-            success = bool(tool_result.get("success"))
-            wants_details = bool(re.search(r"\b(detaljer|resultat|pinget|statistik|ms|latens)\b", prompt.lower()))
-            if success:
-                reply = f"Ja, {host} svarer."
-            else:
-                reply = f"Nej, {host} svarer ikke."
-            if wants_details:
-                status = "lykkedes" if success else "fejlede"
-                reply += (
-                    f" Ping {host} {status}: "
-                    f"{tool_result.get('loss_percent')}% pakketab, {tool_result.get('avg_ms')} ms."
-                )
-        if resume_prompt:
-            reply += f"\n\n{resume_prompt}"
-        if session_id:
-            last_payload = {
-                "tool": "ping",
-                "source": "system_ping",
-                "host": tool_result.get("host") if isinstance(tool_result, dict) else None,
-                "success": tool_result.get("success") if isinstance(tool_result, dict) else None,
-                "loss_percent": tool_result.get("loss_percent") if isinstance(tool_result, dict) else None,
-                "avg_ms": tool_result.get("avg_ms") if isinstance(tool_result, dict) else None,
-                "sent": tool_result.get("sent") if isinstance(tool_result, dict) else None,
-                "received": tool_result.get("received") if isinstance(tool_result, dict) else None,
-            }
-            set_last_tool(session_id, json.dumps(last_payload, ensure_ascii=False))
-        if reminders_due and _should_attach_reminders(prompt):
-            reply = _prepend_reminders(reply, reminders_due, user_id_int)
-        add_memory("assistant", reply, user_id=user_id)
-        if session_id:
-            add_message(session_id, "assistant", reply)
-        return {"text": reply, "data": tool_result, "meta": {"tool": "ping", "tool_used": True}}
+    ping_response = handle_process(user_id, prompt, session_id, allowed_tools, ui_city, ui_lang, tool="ping", tool_result=tool_result, reminders_due=reminders_due, user_id_int=user_id_int, display_name=display_name, resume_prompt=resume_prompt)
+    if ping_response:
+        return ping_response
 
-    if tool == "process":
-        if not isinstance(tool_result, dict) or tool_result.get("error"):
-            reply = "Jeg kan ikke hente processer lige nu."
-        elif tool_result.get("type") == "kill":
-            reply = "Proces afsluttet." if tool_result.get("ok") else "Jeg kunne ikke afslutte processen."
-        else:
-            items = tool_result.get("items", [])
-            if not items:
-                reply = "Ingen processer fundet."
-            else:
-                sorted_items = sorted(items, key=lambda x: x.get("cpu", 0), reverse=True)
-                match = _find_process_match(prompt, items)
-                if match and _process_analysis_intent(prompt):
-                    name = match.get("name") or "processen"
-                    pid = match.get("pid")
-                    cpu = match.get("cpu")
-                    details = {
-                        "uvicorn": "Uvicorn er en ASGI‑server, typisk brugt til FastAPI‑apps.",
-                        "ollama": "Ollama er model‑serveren, der kører LLM‑inference lokalt.",
-                        "firefox": "Firefox er en webbrowser.",
-                        "code": "VS Code er en editor/IDE.",
-                        "python": "Python er fortolkeren, som kører scripts og services.",
-                        "node": "Node.js kører JavaScript‑services.",
-                        "postgres": "PostgreSQL er en database‑server.",
-                        "redis": "Redis er en hurtig nøgle‑/værdi‑database.",
-                        "docker": "Docker kører containere og relaterede processer.",
-                        "nginx": "Nginx er en webserver/reverse proxy.",
-                        "gnome-shell": "GNOME Shell er skrivebordsmiljøets proces.",
-                    }
-                    desc = details.get((name or "").lower(), "Det er en systemproces/applikation.")
-                    ownership = "Det ligner sandsynligvis Jarvis‑serveren her på maskinen." if (name or "").lower() == "uvicorn" else "Ud fra navnet alene kan jeg ikke bekræfte ejerskab."
-                    reply = (
-                        f"Som De ønsker. {name} (PID {pid}) bruger {cpu}% CPU.\n"
-                        f"{desc}\n{ownership}"
-                    )
-                else:
-                    top = sorted_items[0]
-                    head = f"Jeg bemærker, at {top['name']} (PID {top['pid']}) ligger højest med {top['cpu']}% CPU."
-                    lines = [
-                        f"{i['pid']} {i['name']} — CPU {i['cpu']}% • MEM {i['mem']}%"
-                        for i in sorted_items[:5]
-                    ]
-                    reply = f"{head}\n\nTop 5 processer:\n" + "\n".join(lines)
-        if resume_prompt:
-            reply += f"\n\n{resume_prompt}"
-        if session_id:
-            last_payload = {"tool": "process", "source": "system_process"}
-            set_last_tool(session_id, json.dumps(last_payload, ensure_ascii=False))
-        if reminders_due and _should_attach_reminders(prompt):
-            reply = _prepend_reminders(reply, reminders_due, user_id_int)
-        add_memory("assistant", reply, user_id=user_id)
-        if session_id:
-            add_message(session_id, "assistant", reply)
-        return {"text": reply, "data": tool_result, "meta": {"tool": "process", "tool_used": True}}
+    process_response = handle_process(user_id, prompt, session_id, allowed_tools, ui_city, ui_lang, tool="process", tool_result=tool_result, reminders_due=reminders_due, user_id_int=user_id_int, display_name=display_name, resume_prompt=resume_prompt)
+    if process_response:
+        return process_response
 
     if tool == "weather":
         if not tool_summary:

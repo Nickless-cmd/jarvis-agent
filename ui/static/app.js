@@ -136,6 +136,19 @@ const I18N = {
     tools: "Værktøjer:",
     modeChat: "Chat",
     modeDev: "Dev",
+    statusReady: "Klar",
+    statusReadyFull: "JARVIS er klar.",
+    langDa: "🇩🇰 DK",
+    langEn: "🇬🇧 EN",
+    themeDark: "🌙 Mørk",
+    themeLight: "☀ Lys",
+    themeSystem: "💻 System",
+    responseNormal: "📝 Normal",
+    responseShort: "💬 Kort",
+    responseDeep: "🔍 Dybt",
+    ariaLanguage: "Sprog",
+    ariaTheme: "Tema",
+    ariaResponseMode: "Svar mode",
   },
   en: {
     searchPlaceholder: "Search docs, tickets, chats...",
@@ -150,6 +163,19 @@ const I18N = {
     tools: "Tools:",
     modeChat: "Chat",
     modeDev: "Dev",
+    statusReady: "Ready",
+    statusReadyFull: "JARVIS is ready.",
+    langDa: "🇩🇰 DK",
+    langEn: "🇬🇧 EN",
+    themeDark: "🌙 Dark",
+    themeLight: "☀ Light",
+    themeSystem: "💻 System",
+    responseNormal: "📝 Normal",
+    responseShort: "💬 Short",
+    responseDeep: "🔍 Deep",
+    ariaLanguage: "Language",
+    ariaTheme: "Theme",
+    ariaResponseMode: "Response mode",
   },
 };
 
@@ -175,6 +201,36 @@ function applyUiLang(value) {
   if (quotaBar) {
     const label = quotaBar.querySelector(".quota-label span");
     if (label) label.textContent = dict.quota;
+  }
+  // Update status badge
+  if (statusBadge) statusBadge.textContent = dict.statusReady;
+  // Update status line
+  if (statusInline) statusInline.textContent = dict.statusReadyFull;
+  // Update select options
+  if (langSelect) {
+    const daOption = langSelect.querySelector('option[value="da"]');
+    const enOption = langSelect.querySelector('option[value="en"]');
+    if (daOption) daOption.textContent = dict.langDa;
+    if (enOption) enOption.textContent = dict.langEn;
+    langSelect.setAttribute('aria-label', dict.ariaLanguage);
+  }
+  if (themeSelect) {
+    const darkOption = themeSelect.querySelector('option[value="dark"]');
+    const lightOption = themeSelect.querySelector('option[value="light"]');
+    const systemOption = themeSelect.querySelector('option[value="system"]');
+    if (darkOption) darkOption.textContent = dict.themeDark;
+    if (lightOption) lightOption.textContent = dict.themeLight;
+    if (systemOption) systemOption.textContent = dict.themeSystem;
+    themeSelect.setAttribute('aria-label', dict.ariaTheme);
+  }
+  if (responseModeSelect) {
+    const normalOption = responseModeSelect.querySelector('option[value="normal"]');
+    const shortOption = responseModeSelect.querySelector('option[value="short"]');
+    const deepOption = responseModeSelect.querySelector('option[value="deep"]');
+    if (normalOption) normalOption.textContent = dict.responseNormal;
+    if (shortOption) shortOption.textContent = dict.responseShort;
+    if (deepOption) deepOption.textContent = dict.responseDeep;
+    responseModeSelect.setAttribute('aria-label', dict.ariaResponseMode);
   }
   updateToolsSummary();
   updateModeChipLabel();

@@ -9,6 +9,9 @@ from datetime import datetime
 from typing import List
 
 from jarvis.memory import add_memory, search_memory
+from jarvis.agent_format.ux_copy import ux_notice
+
+from jarvis.agent_format.ux_copy import ux_error, ux_notice
 
 
 @dataclass
@@ -140,7 +143,7 @@ def retrieve_context(user_id: str, prompt: str, k: int = 6) -> str:
     return "Relevant memory:\n" + "\n".join(bullets[:4])  # Limit to 4 bullets
 
 
-def handle_memory_commands(prompt: str, user_id: str) -> str | None:
+def handle_memory_commands(prompt: str, user_id: str, ui_lang: str = "da") -> str | None:
     """
     Handle user memory commands. Returns response if handled, None otherwise.
     """
@@ -151,13 +154,13 @@ def handle_memory_commands(prompt: str, user_id: str) -> str | None:
         if content:
             redacted = redact_sensitive(content)
             add_memory("user", f"User asked to remember: {redacted}", user_id)
-            return "Jeg husker det."
+            return ux_notice("memory_remembered", ui_lang)
         return "Hvad skal jeg huske?"
     
     if prompt_lower.startswith("glem det") or prompt_lower.startswith("forget that"):
         # This is tricky - we'd need to identify what to forget
         # For now, just acknowledge
-        return "Hvis du vil glemme noget specifikt, fortæl mig hvad."
+        return ux_notice("memory_forgotten", ui_lang)
     
     if prompt_lower in ["vis hvad du husker om mig", "show what you remember about me", "hvad husker du om mig"]:
         memories = search_memory("user preferences identity", k=10, user_id=user_id)
@@ -173,6 +176,6 @@ def handle_memory_commands(prompt: str, user_id: str) -> str | None:
     if prompt_lower in ["ryd hukommelse", "clear memory", "slet hukommelse"]:
         from jarvis.memory import purge_user_memory
         purge_user_memory(user_id)
-        return "Din hukommelse er ryddet."
+        return ux_notice("memory_cleared", ui_lang)
     
     return None

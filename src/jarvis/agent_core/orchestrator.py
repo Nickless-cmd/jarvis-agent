@@ -151,7 +151,7 @@ def handle_turn(
     # Memory retrieval
     from jarvis.agent_core.memory_manager import retrieve_context, handle_memory_commands
     memory_context = ""
-    memory_command_response = handle_memory_commands(prompt, user_id)
+    memory_command_response = handle_memory_commands(prompt, user_id, ui_lang)
     if memory_command_response:
         result = {
             "text": memory_command_response,

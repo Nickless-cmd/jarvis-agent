@@ -111,6 +111,7 @@ from jarvis.agent_policy.vision_guard import (
     _violates_vision_policy,
 )
 from jarvis.agent_policy.freshness import inject_time_context, is_time_sensitive
+from jarvis.agent_format.ux_copy import ux_error, ux_notice
 
 import jarvis.agent as agent
 print("JARVIS agent loaded from:", agent.__file__)
@@ -855,24 +856,10 @@ def _tool_failed(tool: str, tool_result) -> tuple[str | None, str | None] | None
     return None
 
 
-def _tool_failure_reply(tool: str, reason: str, detail: str | None) -> str:
-    tool_map = {
-        "weather": "vejr",
-        "news": "nyheder",
-        "search": "websøgning",
-        "currency": "valuta",
-    }
-    label = tool_map.get(tool, "værktøjet")
+def _tool_failure_reply(tool: str, reason: str, detail: str | None, ui_lang: str = "da") -> str:
+    label = _tool_label(tool)
     detail_text = f": {detail}" if detail else ""
-    if tool == "weather":
-        return (
-            f"Beklager, vejr-opslaget fejlede ({reason}{detail_text}). "
-            "Prøv \"Svendborg, DK\" eller et postnummer."
-        )
-    return (
-        f"Beklager, {label}-opslaget fejlede ({reason}{detail_text}). "
-        "Kan du prøve igen med en mere præcis forespørgsel?"
-    )
+    return ux_error("tool_failed", ui_lang, tool=f"{label} ({reason}{detail_text})")
 
 
 def _tool_source_intent(prompt: str) -> bool:
@@ -1376,10 +1363,9 @@ def _run_agent_core_fallback(
         return coerce_to_turn_result(result)
     if _farewell_intent(prompt):
         name = _first_name(profile, "")
+        reply = ux_notice("farewell", ui_lang)
         if name:
-            reply = f"Tak for i dag, {name}. Det bliver mig en fornøjelse at hjælpe igen i morgen."
-        else:
-            reply = "Tak for i dag. Det bliver mig en fornøjelse at hjælpe igen i morgen."
+            reply = f"{reply} {name}."
         add_memory("assistant", reply, user_id=user_id)
         return TurnResult(reply_text=reply, meta={"tool": None, "tool_used": False})
     idx = _read_news_index(prompt)
@@ -1529,7 +1515,7 @@ def _run_agent_core_fallback(
                         ensure_ascii=False,
                     ),
                 )
-            weather_reply = "Jeg mangler en by eller et postnummer for vejret."
+            weather_reply = ux_error("weather_city_missing", ui_lang)
         else:
             weather_now = tools.weather_now(weather_city)
             weather_forecast = tools.weather_forecast(weather_city)
@@ -1596,7 +1582,7 @@ def _run_agent_core_fallback(
         news_result = {"type": "news", "query": query, "items": items}
         news_reply = None
         if not items:
-            news_reply = "Jeg kan ikke hente nyheder lige nu. Prøv igen senere."
+            news_reply = ux_error("news_no_results", ui_lang)
         else:
             intro = "Seneste nyheder" if not query else f"Seneste nyheder om {query}"
             if len(items) < 3:
@@ -1724,7 +1710,7 @@ def _run_agent_core_fallback(
     failure = _tool_failed(tool, tool_result)
     if failure:
         reason, detail = failure
-        reply = _tool_failure_reply(tool, reason, detail)
+        reply = _tool_failure_reply(tool, reason, detail, ui_lang)
         if resume_prompt:
             reply += f"\n\n{resume_prompt}"
         if session_id:
@@ -1996,7 +1982,7 @@ def _run_agent_core_fallback(
 
     res = call_ollama(messages)
     if res.get("error"):
-        reply = "Beklager — modellen svarede ikke i tide. Prøv igen, eller brug et kortere spørgsmål."
+        reply = ux_error("model_timeout", ui_lang)
         if reminders_due and _should_attach_reminders(prompt):
             reply = _prepend_reminders(reply, reminders_due, user_id_int)
         add_memory("assistant", reply, user_id=user_id)
@@ -2011,7 +1997,7 @@ def _run_agent_core_fallback(
     reply = _dedupe_repeated_words(reply)
     if not reply or not reply.strip():
         print("⚠ Empty model reply; returning fallback message")
-        reply = "Beklager — jeg fik et tomt svar fra modellen. Prøv igen."
+        reply = ux_error("empty_reply", ui_lang)
     if resume_prompt:
         reply = f"{reply}\n\n{resume_prompt}"
 

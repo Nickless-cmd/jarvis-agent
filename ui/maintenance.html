@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="da">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Jarvis Vedligeholdelse</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="stylesheet" href="/static/app.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <h1 id="brandTopMaintenance">Jarvis</h1>
+      <span class="pill">Vedligeholdelse</span>
+    </div>
+  </header>
+  <main>
+    <section style="max-width: 520px; margin: 24px auto; text-align: center;">
+      <h2>Vi er i vedligeholdelse</h2>
+      <p id="maintenanceMessage" class="small"></p>
+      <div style="margin-top: 12px;">
+        <a href="/login" class="small">Tilbage til login</a>
+      </div>
+    </section>
+  </main>
+  <script>
+    async function loadBrand() {
+      const res = await fetch("/settings/brand");
+      if (!res.ok) return;
+      const data = await res.json();
+      const el = document.getElementById("brandTopMaintenance");
+      if (el) el.textContent = (data.top_label || "Jarvis").trim() || "Jarvis";
+    }
+    async function loadMessage() {
+      const res = await fetch("/settings/public");
+      if (!res.ok) return;
+      const data = await res.json();
+      const el = document.getElementById("maintenanceMessage");
+      if (el) {
+        el.textContent = data.maintenance_message || "Jarvis er midlertidigt lukket. Prøv igen senere.";
+      }
+    }
+    loadBrand();
+    loadMessage();
+  </script>
+</body>
+</html>

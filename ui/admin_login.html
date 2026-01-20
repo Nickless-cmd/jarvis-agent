@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="da">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Jarvis Admin Login</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="stylesheet" href="/static/app.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <h1 id="brandTopAdminLogin">Jarvis</h1>
+      <span class="pill">Admin</span>
+    </div>
+  </header>
+  <main>
+    <section style="max-width: 420px; margin: 24px auto;">
+      <h2>Admin login</h2>
+      <label>Brugernavn</label>
+      <input id="username" placeholder="bs" required />
+      <label>Password</label>
+      <input id="password" type="password" placeholder="••••••" required />
+      <div class="row" style="margin-top: 8px;">
+        <label class="inline">
+          <input id="rememberMe" type="checkbox" />
+          Husk mig
+        </label>
+      </div>
+      <div class="row" style="margin-top: 10px;">
+        <button id="loginBtn" class="secondary" type="button">Login</button>
+      </div>
+      <div class="row" style="margin-top: 8px;">
+        <a href="/login" class="small">Tilbage til login</a>
+      </div>
+      <div class="small" id="authStatus">Ingen bruger logget ind.</div>
+    </section>
+  </main>
+  <div id="cookieBanner" class="cookie-banner" style="display:none;">
+    <div class="cookie-card">
+      <div class="cookie-text">
+        <strong>Cookies</strong><br />
+        Vi bruger cookies til login og sikker session. I 24 timer gemmer vi din valgte indstilling.
+        <br />
+        <br />
+        <strong>Minimum</strong>: kun login/session.
+        <br />
+        <strong>Fuld</strong>: sprog, tidszone og (valgfrit) by til vejret.
+      </div>
+      <div class="cookie-actions">
+        <button id="cookieMinimal" class="secondary">Minimum</button>
+        <button id="cookieAccept">Fuld</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/auth.js?v=9"></script>
+  <script>
+    async function ensureAdminSession() {
+      if (!getToken()) return;
+      const res = await fetch("/account/profile", { headers: authHeaders() });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.is_admin) {
+          const last = getLastPath();
+          window.location.href = last && last.startsWith("/admin") ? last : "/admin";
+          return;
+        }
+      }
+      clearToken();
+    }
+    ensureAdminSession();
+
+    async function login() {
+      const statusEl = document.getElementById("authStatus");
+      try {
+        const username = document.getElementById("username").value;
+        const password = document.getElementById("password").value;
+        const res = await fetch("/auth/admin/login", {
+          method: "POST",
+          headers: authHeaders(),
+          body: JSON.stringify({ username, password })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok) {
+          setToken(data.token, document.getElementById("rememberMe").checked);
+          document.cookie = `jarvis_token=${encodeURIComponent(data.token)}; Path=/; SameSite=Lax`;
+          const last = getLastPath();
+          window.location.href = last && last.startsWith("/admin") ? last : "/admin";
+          return;
+        }
+        statusEl.textContent = data.detail || "Login mislykkedes.";
+      } catch (err) {
+        statusEl.textContent = `Login fejlede: ${err}`;
+      }
+    }
+
+    async function loadBrand() {
+      const res = await fetch("/settings/brand");
+      if (!res.ok) return;
+      const data = await res.json();
+      const el = document.getElementById("brandTopAdminLogin");
+      if (el) el.textContent = (data.top_label || "Jarvis").trim() || "Jarvis";
+    }
+
+    document.getElementById("loginBtn").addEventListener("click", login);
+    document.getElementById("password").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        login();
+      }
+    });
+    loadBrand();
+    if (typeof initCookieBanner === "function") {
+      initCookieBanner();
+    }
+  </script>
+</body>
+</html>

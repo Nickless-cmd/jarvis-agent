@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="da">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Jarvis Login</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="stylesheet" href="/static/app.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <h1 id="brandTopLogin">Jarvis</h1>
+      <span class="pill">Login</span>
+    </div>
+  </header>
+  <main>
+    <section style="max-width: 420px; margin: 24px auto;">
+      <h2>Log ind</h2>
+      <label>Brugernavn</label>
+      <input id="username" placeholder="bs" required />
+      <label>Password</label>
+      <input id="password" type="password" placeholder="••••••" required />
+      <div class="row" style="margin-top: 8px;">
+        <label class="inline">
+          <input id="rememberMe" type="checkbox" />
+          Husk mig
+        </label>
+      </div>
+      <label>Captcha</label>
+      <div class="row">
+        <input id="captchaQuestion" disabled />
+        <input id="captchaAnswer" placeholder="svar" />
+      </div>
+      <div class="row" style="margin-top: 10px;">
+        <a id="registerLink" href="/registere" class="secondary" style="padding: 8px 12px;">Opret konto</a>
+        <button id="loginBtn" class="secondary">Login</button>
+      </div>
+      <div class="row" style="margin-top: 8px;">
+        <a href="/admin-login" class="small">Admin login</a>
+      </div>
+      <div class="row" style="margin-top: 8px;">
+        <button id="googleLoginBtn" class="secondary" style="display:none;">Login med Google</button>
+      </div>
+      <div class="small" id="authStatus">Ingen bruger logget ind.</div>
+      <div class="small" id="maintenanceNotice" style="margin-top: 6px;"></div>
+    </section>
+  </main>
+  <div id="cookieBanner" class="cookie-banner" style="display:none;">
+    <div class="cookie-card">
+      <div class="cookie-text">
+        <strong>Cookies</strong><br />
+        Vi bruger cookies til login og sikker session. I 24 timer gemmer vi din valgte indstilling.
+        <br />
+        <br />
+        <strong>Minimum</strong>: kun login/session.
+        <br />
+        <strong>Fuld</strong>: sprog, tidszone og (valgfrit) by til vejret.
+      </div>
+      <div class="cookie-actions">
+        <button id="cookieMinimal" class="secondary">Minimum</button>
+        <button id="cookieAccept">Fuld</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/auth.js?v=9"></script>
+  <script>
+    async function ensureValidSession() {
+      if (!getToken()) return;
+      const res = await fetch("/account/profile", { headers: authHeaders() });
+      if (res.ok) {
+        const last = getLastPath();
+        window.location.href = last && !last.startsWith("/admin") ? last : "/app";
+      } else {
+        clearToken();
+      }
+    }
+    ensureValidSession();
+
+    let captchaToken = null;
+    async function loadCaptcha() {
+      const res = await fetch("/auth/captcha");
+      if (!res.ok) return;
+      const data = await res.json();
+      captchaToken = data.token;
+      document.getElementById("captchaQuestion").value = data.question;
+    }
+
+    async function login() {
+      const username = document.getElementById("username").value;
+      const password = document.getElementById("password").value;
+      const captchaAnswer = document.getElementById("captchaAnswer").value;
+      const res = await fetch("/auth/login", {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ username, password, captcha_token: captchaToken, captcha_answer: captchaAnswer })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        const remember = document.getElementById("rememberMe").checked;
+        sessionStorage.setItem("jarvisRememberMe", remember ? "1" : "0");
+        setToken(data.token, remember);
+        document.cookie = `jarvis_token=${encodeURIComponent(data.token)}; Path=/; SameSite=Lax`;
+        const last = getLastPath();
+        window.location.href = last && !last.startsWith("/admin") ? last : "/app";
+      } else {
+        document.getElementById("authStatus").textContent = data.detail;
+        loadCaptcha();
+      }
+    }
+
+    async function applySettings() {
+      const res = await fetch("/settings/public");
+      if (!res.ok) return;
+      const data = await res.json();
+      const registerLink = document.getElementById("registerLink");
+      if (!data.register_enabled) {
+        if (registerLink) {
+          registerLink.classList.add("disabled");
+          registerLink.textContent = "Registrering slået fra";
+          registerLink.removeAttribute("href");
+        }
+      }
+      const maintenanceNotice = document.getElementById("maintenanceNotice");
+      if (data.maintenance_enabled) {
+        if (maintenanceNotice) {
+          maintenanceNotice.textContent = data.maintenance_message || "Jarvis er i vedligeholdelse.";
+        }
+        document.getElementById("loginBtn").disabled = true;
+        if (registerLink) {
+          registerLink.classList.add("disabled");
+          registerLink.removeAttribute("href");
+        }
+      } else if (maintenanceNotice) {
+        maintenanceNotice.textContent = "";
+      }
+      const googleBtn = document.getElementById("googleLoginBtn");
+      if (googleBtn) {
+        if (data.google_auth_enabled && data.google_auth_ready) {
+          googleBtn.style.display = "inline-block";
+          googleBtn.disabled = false;
+        } else {
+          googleBtn.style.display = "none";
+          googleBtn.disabled = true;
+        }
+      }
+      if (!data.captcha_enabled) {
+        document.getElementById("captchaQuestion").value = "Captcha slået fra";
+        document.getElementById("captchaAnswer").disabled = true;
+      } else {
+        document.getElementById("captchaAnswer").disabled = false;
+      }
+    }
+
+    async function loadBrand() {
+      const res = await fetch("/settings/brand");
+      if (!res.ok) return;
+      const data = await res.json();
+      const el = document.getElementById("brandTopLogin");
+      if (el) el.textContent = (data.top_label || "Jarvis").trim() || "Jarvis";
+    }
+
+    const rememberStored = sessionStorage.getItem("jarvisRememberMe");
+    if (rememberStored !== null) {
+      document.getElementById("rememberMe").checked = rememberStored === "1";
+    }
+    document.getElementById("loginBtn").addEventListener("click", login);
+    const googleLoginBtn = document.getElementById("googleLoginBtn");
+    if (googleLoginBtn) {
+      googleLoginBtn.addEventListener("click", async () => {
+        const res = await fetch("/auth/google/start");
+        if (res.ok) {
+          const data = await res.json();
+          if (data.url) window.location.href = data.url;
+        } else {
+          const data = await res.json().catch(() => ({}));
+          document.getElementById("authStatus").textContent = data.detail || "Google login er ikke sat op.";
+        }
+      });
+    }
+    applySettings();
+    loadCaptcha();
+    loadBrand();
+    if (typeof initCookieBanner === "function") {
+      initCookieBanner();
+    }
+  </script>
+</body>
+</html>

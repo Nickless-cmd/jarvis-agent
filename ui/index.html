@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="da">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Jarvis Local UI</title>
+  <style>
+    @import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600&family=Fraunces:wght@600&display=swap");
+    :root {
+      --bg: #f2efe9;
+      --ink: #1e1c18;
+      --accent: #0d6b6f;
+      --accent-2: #d86a42;
+      --card: #fff9f2;
+      --muted: #5a554c;
+      --shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Space Grotesk", "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: radial-gradient(circle at 20% 10%, #ffe7d1, transparent 40%),
+                  radial-gradient(circle at 80% 0%, #d6f3f5, transparent 35%),
+                  var(--bg);
+      min-height: 100vh;
+    }
+    header {
+      padding: 28px 24px 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+    }
+    h1 {
+      font-family: "Fraunces", serif;
+      font-size: 28px;
+      margin: 0;
+      letter-spacing: 0.5px;
+    }
+    .pill {
+      background: var(--accent);
+      color: white;
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+    }
+    main {
+      display: grid;
+      grid-template-columns: minmax(260px, 1fr) 2fr;
+      gap: 24px;
+      padding: 12px 24px 32px;
+    }
+    section {
+      background: var(--card);
+      border-radius: 18px;
+      padding: 18px;
+      box-shadow: var(--shadow);
+    }
+    label {
+      display: block;
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 12px;
+      margin-bottom: 4px;
+    }
+    input, select, button, textarea {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #e2d9cd;
+      border-radius: 12px;
+      font-family: inherit;
+      font-size: 14px;
+      background: white;
+    }
+    button {
+      background: var(--accent);
+      color: white;
+      border: none;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    button.secondary {
+      background: var(--accent-2);
+    }
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .small {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 8px;
+    }
+    #chat {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      height: 60vh;
+      overflow: auto;
+      padding-right: 6px;
+    }
+    .msg {
+      padding: 12px 14px;
+      border-radius: 14px;
+      max-width: 85%;
+      white-space: pre-wrap;
+    }
+    .card {
+      border: 1px solid #e2d9cd;
+      border-radius: 14px;
+      padding: 10px 12px;
+      background: #fff7ee;
+      box-shadow: var(--shadow);
+      margin-bottom: 8px;
+      white-space: pre-wrap;
+    }
+    .card-title {
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+    .user {
+      align-self: flex-end;
+      background: #e6f3ef;
+    }
+    .assistant {
+      align-self: flex-start;
+      background: #fff;
+    }
+    .composer {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    @media (max-width: 900px) {
+      main { grid-template-columns: 1fr; }
+      #chat { height: 50vh; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Jarvis Local</h1>
+    <span class="pill">OpenAI-kompatibel</span>
+  </header>
+  <main>
+    <section>
+      <h2>Adgang</h2>
+      <label>API-nøgle</label>
+      <input id="apiKey" value="devkey" />
+
+      <label>Brugernavn</label>
+      <input id="username" placeholder="alice" />
+      <label>Password</label>
+      <input id="password" type="password" placeholder="••••••" />
+      <div class="row" style="margin-top: 10px;">
+        <button id="registerBtn">Register</button>
+        <button id="loginBtn" class="secondary">Login</button>
+      </div>
+      <div class="small" id="authStatus">Ingen bruger logget ind.</div>
+
+      <hr style="margin: 16px 0; border: none; border-top: 1px solid #e6ded3;" />
+
+      <h2>Sessioner</h2>
+      <label>Vælg session</label>
+      <select id="sessionSelect"></select>
+      <label>Ny session</label>
+      <input id="sessionName" placeholder="Projekt, brainstorm..." />
+      <button id="createSessionBtn" style="margin-top: 8px;">Opret session</button>
+      <div class="small">Sessioner kræver login.</div>
+    </section>
+
+    <section>
+      <h2>Chat</h2>
+      <div id="chat"></div>
+      <div class="composer">
+        <textarea id="prompt" rows="2" placeholder="Skriv til Jarvis..."></textarea>
+        <button id="sendBtn">Send</button>
+      </div>
+      <label style="display:flex;gap:8px;align-items:center;margin-top:8px;">
+        <input type="checkbox" id="streamToggle" checked style="width:auto;" />
+        Brug streaming
+      </label>
+      <div class="small" id="chatStatus"></div>
+    </section>
+  </main>
+
+  <script>
+    const chat = document.getElementById("chat");
+    const apiKey = document.getElementById("apiKey");
+    const authStatus = document.getElementById("authStatus");
+    const chatStatus = document.getElementById("chatStatus");
+    const sessionSelect = document.getElementById("sessionSelect");
+    const streamToggle = document.getElementById("streamToggle");
+
+    let userToken = localStorage.getItem("jarvisUserToken");
+
+    function headers(extra = {}) {
+      const base = {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey.value}`,
+      };
+      if (userToken) {
+        base["X-User-Token"] = userToken;
+      }
+      return { ...base, ...extra };
+    }
+
+    function addMessage(role, text) {
+      const div = document.createElement("div");
+      div.className = `msg ${role}`;
+      div.textContent = text;
+      chat.appendChild(div);
+      chat.scrollTop = chat.scrollHeight;
+      return div;
+    }
+
+    async function register() {
+      const username = document.getElementById("username").value;
+      const password = document.getElementById("password").value;
+      const res = await fetch("/auth/register", {
+        method: "POST",
+        headers: headers(),
+        body: JSON.stringify({ username, password })
+      });
+      const data = await res.json();
+      authStatus.textContent = res.ok ? `Registreret: ${data.username}` : data.detail;
+    }
+
+    async function login() {
+      const username = document.getElementById("username").value;
+      const password = document.getElementById("password").value;
+      const res = await fetch("/auth/login", {
+        method: "POST",
+        headers: headers(),
+        body: JSON.stringify({ username, password })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        userToken = data.token;
+        localStorage.setItem("jarvisUserToken", userToken);
+        authStatus.textContent = "Logget ind.";
+        await loadSessions();
+      } else {
+        authStatus.textContent = data.detail;
+      }
+    }
+
+    async function loadSessions() {
+      if (!userToken) {
+        sessionSelect.innerHTML = "";
+        return;
+      }
+      const res = await fetch("/sessions", { headers: headers() });
+      const data = await res.json();
+      sessionSelect.innerHTML = "";
+      (data.sessions || []).forEach((s) => {
+        const opt = document.createElement("option");
+        opt.value = s.id;
+        opt.textContent = s.name ? `${s.name} (${s.id.slice(0, 6)})` : s.id.slice(0, 10);
+        sessionSelect.appendChild(opt);
+      });
+    }
+
+    async function createSession() {
+      const name = document.getElementById("sessionName").value;
+      const res = await fetch("/sessions", {
+        method: "POST",
+        headers: headers(),
+        body: JSON.stringify({ name })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        await loadSessions();
+        sessionSelect.value = data.session_id;
+      } else {
+        authStatus.textContent = data.detail || "Kunne ikke oprette session";
+      }
+    }
+
+    async function sendMessage() {
+      const text = document.getElementById("prompt").value.trim();
+      if (!text) return;
+      document.getElementById("prompt").value = "";
+      addMessage("user", text);
+
+      const sessionId = sessionSelect.value || null;
+      const payload = {
+        model: "local",
+        stream: streamToggle.checked,
+        messages: [{ role: "user", content: text }],
+      };
+
+      if (!payload.stream) {
+        const res = await fetch("/v1/chat/completions", {
+          method: "POST",
+          headers: headers({ "X-Session-Id": sessionId || "" }),
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (data?.data?.type === "weather" && data?.rendered_text) {
+          const card = document.createElement("div");
+          card.className = "card";
+          const title = document.createElement("div");
+          title.className = "card-title";
+          const scope = data.data.scope === "tomorrow" ? "i morgen" : data.data.scope === "multi" ? "5 dage" : "i dag";
+          title.textContent = `${data.data.location} — ${scope}`;
+          const body = document.createElement("div");
+          body.textContent = data.rendered_text;
+          card.appendChild(title);
+          card.appendChild(body);
+          chat.appendChild(card);
+        }
+        const content = data.choices?.[0]?.message?.content || "";
+        addMessage("assistant", content);
+        return;
+      }
+
+      const res = await fetch("/v1/chat/completions", {
+        method: "POST",
+        headers: headers({ "X-Session-Id": sessionId || "" }),
+        body: JSON.stringify(payload),
+      });
+
+      const assistantMsg = addMessage("assistant", "");
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith("data:")) continue;
+          const data = line.replace("data:", "").trim();
+          if (data === "[DONE]") {
+            chatStatus.textContent = "";
+            return;
+          }
+          try {
+            const chunk = JSON.parse(data);
+            const delta = chunk.choices?.[0]?.delta?.content || "";
+            if (delta) {
+              assistantMsg.textContent += delta;
+              chat.scrollTop = chat.scrollHeight;
+            }
+          } catch (err) {
+            chatStatus.textContent = "Streaming-fejl";
+          }
+        }
+      }
+    }
+
+    document.getElementById("registerBtn").addEventListener("click", register);
+    document.getElementById("loginBtn").addEventListener("click", login);
+    document.getElementById("createSessionBtn").addEventListener("click", createSession);
+    document.getElementById("sendBtn").addEventListener("click", sendMessage);
+
+    if (userToken) {
+      authStatus.textContent = "Logget ind (token gemt).";
+      loadSessions();
+    }
+  </script>
+</body>
+</html>

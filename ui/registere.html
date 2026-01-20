@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="da">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Jarvis Registrering</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="stylesheet" href="/static/app.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <h1 id="brandTopRegister">Jarvis</h1>
+      <span class="pill">Registrering</span>
+    </div>
+  </header>
+  <main>
+    <section style="max-width: 420px; margin: 24px auto;">
+      <h2>Opret konto</h2>
+      <label>Email</label>
+      <input id="email" placeholder="email@domæne.dk" required />
+      <label>Navn</label>
+      <input id="fullName" placeholder="Fulde navn" required />
+      <label>Efternavn</label>
+      <input id="lastName" placeholder="Efternavn" />
+      <label>Telefon</label>
+      <input id="phone" placeholder="telefon" />
+      <label>Note</label>
+      <input id="note" placeholder="note" />
+      <label>Brugernavn</label>
+      <input id="username" placeholder="bs" required />
+      <label>Password</label>
+      <input id="password" type="password" placeholder="••••••" required />
+      <label>Captcha</label>
+      <div class="row">
+        <input id="captchaQuestion" disabled />
+        <input id="captchaAnswer" placeholder="svar" />
+      </div>
+      <div class="row" style="margin-top: 10px;">
+        <button id="registerBtn">Registrer</button>
+        <a href="/login" class="secondary" style="padding: 8px 12px;">Til login</a>
+      </div>
+      <div class="small" id="authStatus">Udfyld felterne ovenfor.</div>
+      <div class="small" id="maintenanceNotice" style="margin-top: 6px;"></div>
+    </section>
+  </main>
+
+  <script src="/static/auth.js?v=9"></script>
+  <script>
+    let captchaToken = null;
+    async function loadCaptcha() {
+      const res = await fetch("/auth/captcha");
+      if (!res.ok) return;
+      const data = await res.json();
+      captchaToken = data.token;
+      document.getElementById("captchaQuestion").value = data.question;
+    }
+
+    async function register() {
+      const username = document.getElementById("username").value;
+      const password = document.getElementById("password").value;
+      const email = document.getElementById("email").value;
+      const fullName = document.getElementById("fullName").value;
+      const lastName = document.getElementById("lastName").value;
+      const phone = document.getElementById("phone").value;
+      const note = document.getElementById("note").value;
+      const captchaAnswer = document.getElementById("captchaAnswer").value;
+      const res = await fetch("/auth/register", {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({
+          username,
+          password,
+          email,
+          full_name: fullName,
+          last_name: lastName,
+          phone,
+          note,
+          captcha_token: captchaToken,
+          captcha_answer: captchaAnswer
+        })
+      });
+      const data = await res.json();
+      document.getElementById("authStatus").textContent = res.ok ? `Registreret: ${data.username}` : data.detail;
+      if (!res.ok) {
+        loadCaptcha();
+      }
+    }
+
+    async function applySettings() {
+      const res = await fetch("/settings/public");
+      if (!res.ok) return;
+      const data = await res.json();
+      const registerBtn = document.getElementById("registerBtn");
+      if (!data.register_enabled) {
+        registerBtn.disabled = true;
+        registerBtn.textContent = "Registrering slået fra";
+      }
+      const maintenanceNotice = document.getElementById("maintenanceNotice");
+      if (data.maintenance_enabled) {
+        if (maintenanceNotice) {
+          maintenanceNotice.textContent = data.maintenance_message || "Jarvis er i vedligeholdelse.";
+        }
+        registerBtn.disabled = true;
+      } else if (maintenanceNotice) {
+        maintenanceNotice.textContent = "";
+      }
+      if (!data.captcha_enabled) {
+        document.getElementById("captchaQuestion").value = "Captcha slået fra";
+        document.getElementById("captchaAnswer").disabled = true;
+      } else {
+        document.getElementById("captchaAnswer").disabled = false;
+      }
+    }
+
+    async function loadBrand() {
+      const res = await fetch("/settings/brand");
+      if (!res.ok) return;
+      const data = await res.json();
+      const el = document.getElementById("brandTopRegister");
+      if (el) el.textContent = (data.top_label || "Jarvis").trim() || "Jarvis";
+    }
+
+    document.getElementById("registerBtn").addEventListener("click", register);
+    loadCaptcha();
+    applySettings();
+    loadBrand();
+  </script>
+</body>
+</html>

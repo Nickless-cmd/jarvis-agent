@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="da">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Jarvis App</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="stylesheet" href="/static/app.css?v=59" />
+  </head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <h1 id="brandTop">Jarvis</h1>
+      <span id="onlinePill" class="pill offline">Offline</span>
+      <span id="statusBadge" class="status hidden">Klar</span>
+    </div>
+    <div id="topBanner" class="top-banner" aria-live="polite">
+      <div id="bannerTrack" class="banner-track"></div>
+    </div>
+    <div class="top-actions">
+      <div class="search-wrap">
+        <input id="globalSearch" placeholder="Søg i docs, tickets, chats..." />
+        <select id="langSelect" class="lang-select" aria-label="Sprog">
+          <option value="da">🇩🇰 DK</option>
+          <option value="en">🇬🇧 EN</option>
+        </select>
+        <select id="themeSelect" class="theme-select" aria-label="Tema">
+          <option value="dark">🌙 Mørk</option>
+          <option value="light">☀ Lys</option>
+          <option value="system">💻 System</option>
+        </select>
+        <select id="responseModeSelect" class="response-mode-select" aria-label="Svar mode">
+          <option value="normal">📝 Normal</option>
+          <option value="short">💬 Kort</option>
+          <option value="deep">🔍 Dybt</option>
+        </select>
+        <div id="globalSearchResults" class="search-results"></div>
+      </div>
+      <select id="modelSelect" class="hidden"></select>
+    </div>
+    <div id="eventsList" class="events-list" aria-live="polite"></div>
+  </header>
+
+  <main class="shell">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="rail-logo">
+          <span class="logo-short" id="brandShort">J</span>
+          <span class="logo-long" id="brandCore">Jarvis</span>
+          <span id="jarvisDot" class="jarvis-dot" title="Jarvis status"></span>
+        </div>
+        <div class="rail-row">
+          <button id="collapseBtn" class="rail-btn" title="Skjul sidebar" aria-label="Skjul sidebar">≡</button>
+          <button id="newChatBtn" class="rail-btn" title="Ny chat" aria-label="Ny chat">＋</button>
+          <button id="searchBtn" class="rail-btn" title="Søg" aria-label="Søg">🔍</button>
+          <button id="uploadSidebarBtn" class="rail-btn" title="Upload" aria-label="Upload">⤴</button>
+        </div>
+      </div>
+      <input id="sessionSearch" placeholder="Søg chats..." />
+      <button id="newChatInline" class="secondary">Start ny chat</button>
+      <div id="quotaBar" class="quota-bar">
+        <div class="quota-label">
+          <span>Kvota</span>
+          <span id="quotaText">0/0 MB</span>
+        </div>
+        <div class="quota-track">
+          <div id="quotaFill" class="quota-fill"></div>
+        </div>
+      </div>
+      <div class="sidebar-panel">
+        <div class="session-group-title">Ny note</div>
+        <div class="note-create">
+          <button id="noteToggleBtn" class="secondary">Ny note</button>
+          <div id="noteCreateWrap" class="note-create-wrap hidden">
+          <input id="noteTitleInput" placeholder="Titel (valgfri)" />
+          <textarea id="noteContentInput" rows="2" placeholder="Skriv en kort note..."></textarea>
+          <div class="note-row">
+            <input id="noteDueInput" type="datetime-local" />
+            <label class="note-check">
+              <input id="noteRemindToggle" type="checkbox" />
+              Mind mig om
+            </label>
+          </div>
+          <button id="noteCreateBtn" class="secondary">Gem note</button>
+          </div>
+        </div>
+      </div>
+      <div class="sidebar-panel" id="filesPanel">
+        <div class="session-group-title">Filer</div>
+        <div class="note-create">
+          <button id="filesToggleBtn" class="secondary">Vis filer</button>
+          <div id="filesListWrap" class="note-create-wrap hidden">
+            <div id="filesList" class="mini-list"></div>
+          </div>
+        </div>
+      </div>
+      <div id="expiryNotice" class="small"></div>
+      <div class="sidebar-panel" id="notesPanel">
+        <div class="session-group-title">Noter</div>
+        <div id="notesList" class="mini-list"></div>
+      </div>
+      <button id="quotaRequestBtn" class="secondary quota-btn">Anmod om mere plads</button>
+      <div class="session-scroll">
+        <div id="sessionList" class="session-list"></div>
+        <div class="small" id="sessionStatus"></div>
+      </div>
+      <div class="sidebar-footer">
+        <button id="ticketsBtn" class="rail-btn rail-wide" title="Tickets" aria-label="Tickets">
+          <span class="rail-icon">🧾</span>
+          <span class="rail-label">Tickets</span>
+        </button>
+        <button id="docsBtn" class="rail-btn rail-wide" title="Dokumentation" aria-label="Dokumentation">
+          <span class="rail-icon">📘</span>
+          <span class="rail-label">Dokumentation</span>
+        </button>
+        <button id="accountBtn" class="rail-btn rail-wide" title="Min konto" aria-label="Min konto">
+          <span class="rail-icon">👤</span>
+          <span class="rail-label">Min konto</span>
+        </button>
+        <button id="adminBtn" class="rail-btn rail-wide" title="Admin" aria-label="Admin">
+          <span class="rail-icon">⚙</span>
+          <span class="rail-label">Admin settings</span>
+        </button>
+        <button id="logoutBtn" class="rail-btn rail-wide" title="Log ud" aria-label="Log ud">
+          <span class="rail-icon">⏻</span>
+          <span class="rail-label">Log ud</span>
+        </button>
+      </div>
+    </aside>
+
+    <section class="chat-pane">
+      <div id="chat" class="chat-feed"></div>
+      <div id="greetingBanner" class="greeting-banner"></div>
+      <div class="status-row">
+        <div class="status-left">
+          <div id="streamChip" class="chip-toggle">
+            <span id="streamDot" class="tool-dot"></span>
+            <span>Streaming</span>
+          </div>
+          <div id="personaChip" class="chip-toggle">
+            <span>Personlighed</span>
+          </div>
+          <input type="checkbox" id="streamToggle" checked class="hidden" />
+          <div id="chatStatusInline" class="status-line">JARVIS er klar.</div>
+        </div>
+        <div class="status-right">
+          <div id="toolsSummary" class="tools-summary"></div>
+          <div id="quotaNotice" class="quota-chip"></div>
+        </div>
+      </div>
+      <div id="sessionPromptRow" class="session-prompt-row hidden">
+        <span class="session-prompt-label">Session-personlighed</span>
+        <input id="sessionPromptInput" placeholder="Skriv personlighed for denne chat..." />
+        <button id="sessionPromptSave" class="secondary">Gem</button>
+        <button id="sessionPromptClear" class="secondary">Nulstil</button>
+      </div>
+      <div class="composer">
+        <textarea id="prompt" rows="2" placeholder="Skriv til Jarvis..."></textarea>
+        <button id="uploadBtn" class="secondary icon-btn" title="Upload fil" aria-label="Upload fil">⬆</button>
+        <button id="imageUploadBtn" class="secondary icon-btn" title="Upload billede" aria-label="Upload billede">🖼</button>
+        <button id="micBtn" class="secondary icon-btn" title="Tale til Jarvis" aria-label="Tale til Jarvis">🎤</button>
+        <button id="sendBtn">Send</button>
+      </div>
+      <div id="suggestions" class="suggestions hidden"></div>
+      <input id="uploadInput" type="file" class="hidden" />
+      <input id="imageUploadInput" type="file" accept="image/*" class="hidden" />
+      <div class="small" id="chatStatus"></div>
+      <div class="composer-row">
+        <div class="tools-inputs">
+          <input type="checkbox" id="toolNews" checked />
+          <input type="checkbox" id="toolWeather" checked />
+          <input type="checkbox" id="toolSearch" checked />
+          <input type="checkbox" id="toolCurrency" checked />
+          <input type="checkbox" id="toolImage" checked />
+          <input type="checkbox" id="toolSystem" checked class="admin-only" />
+          <input type="checkbox" id="toolPing" checked class="admin-only" />
+          <input type="checkbox" id="toolProcess" checked class="admin-only" />
+        </div>
+      </div>
+    </section>
+
+    <aside class="rightbar">
+      <div class="right-panel no-border">
+        <div class="rightbar-meta">
+          <div id="updatesClock" class="right-panel-clock"></div>
+          <div id="rightbarCity" class="right-panel-city"></div>
+        </div>
+      </div>
+      <div class="right-panel">
+        <div class="right-panel-sep"></div>
+        <div class="right-panel-title">Seneste UI‑opdateringer</div>
+        <div id="updatesPanel" class="right-panel-body"></div>
+      </div>
+      <div class="right-panel">
+        <div class="right-panel-title">Nye kommandoer</div>
+        <div id="commandsPanel" class="right-panel-body"></div>
+      </div>
+      <div class="right-panel admin-only" id="rightTicketsPanel">
+        <div class="right-panel-title" id="rightTicketsTitle">Tickets</div>
+        <div id="rightTicketsBody" class="right-panel-body"></div>
+      </div>
+      <div class="right-panel" id="rightNotesPanel">
+        <div class="right-panel-title">Noter</div>
+        <div id="rightNotesBody" class="right-panel-body"></div>
+      </div>
+      <div class="right-panel admin-only" id="statusPanelCard">
+        <div class="right-panel-title">Status / Logs</div>
+        <div id="statusPanel" class="right-panel-body"></div>
+      </div>
+    </aside>
+  </main>
+  <footer class="app-footer">
+    <span id="footerText">Jarvis v.1 @ 2026</span>
+    <span class="footer-links">
+      <a id="footerSupport" href="#">Support</a>
+      <a id="footerContact" href="#">Kontakt</a>
+      <a id="footerLicense" href="#">Open‑source licens</a>
+    </span>
+  </footer>
+  <div id="cookieBanner" class="cookie-banner" style="display:none;">
+    <div class="cookie-card">
+      <div class="cookie-text">
+        <strong>Cookies</strong><br />
+        Vi bruger cookies til login og sikker session. I 24 timer gemmer vi din valgte indstilling.
+        <br />
+        <br />
+        <strong>Minimum</strong>: kun login/session.
+        <br />
+        <strong>Fuld</strong>: sprog, tidszone og (valgfrit) by til vejret.
+      </div>
+      <div class="cookie-actions">
+        <button id="cookieMinimal" class="secondary">Minimum</button>
+        <button id="cookieAccept">Fuld</button>
+      </div>
+    </div>
+  </div>
+  <script src="/static/auth.js?v=9"></script>
+  <script src="/static/api.js?v=6"></script>
+  <script src="/static/app.js?v=45"></script>
+</body>
+</html>

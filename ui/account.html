@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="da">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Min konto</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="stylesheet" href="/static/app.css?v=23" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <h1>Min konto</h1>
+        <span class="pill">Jarvis</span>
+      </div>
+      <div class="top-actions">
+        <button id="backBtn" class="secondary">Til chat</button>
+      </div>
+    </header>
+    <main class="shell">
+      <aside class="sidebar">
+        <div class="sidebar-header">
+          <div class="rail-logo">
+            <span class="logo-short">J</span>
+            <span class="logo-long">Jarvis</span>
+          </div>
+          <div class="rail-row">
+            <button id="collapseBtn" class="rail-btn" title="Skjul sidebar" aria-label="Skjul sidebar">≡</button>
+          </div>
+        </div>
+        <div class="session-list">
+          <div class="session-group-title">Konto</div>
+          <div class="session-item active">
+            <div class="session-name">Min profil</div>
+          </div>
+        </div>
+        <div class="sidebar-footer">
+          <a id="backBtn" class="rail-btn rail-wide" href="/app" title="Til chat" aria-label="Til chat">
+            <span class="rail-icon">↩</span>
+            <span class="rail-label">Til Jarvis</span>
+          </a>
+          <button id="logoutBtn" class="rail-btn rail-wide" title="Log ud" aria-label="Log ud">
+            <span class="rail-icon">⏻</span>
+            <span class="rail-label">Log ud</span>
+          </button>
+        </div>
+      </aside>
+
+      <section class="chat-pane">
+        <div class="admin-grid">
+          <section class="card">
+            <h2>Profil</h2>
+            <label>Brugernavn</label>
+            <input id="accountUsername" disabled />
+            <label>Email</label>
+            <input id="accountEmail" />
+            <label>Navn</label>
+            <input id="accountName" />
+            <label>Efternavn</label>
+            <input id="accountLastName" />
+            <label>By</label>
+            <input id="accountCity" />
+            <label>Telefon</label>
+            <input id="accountPhone" />
+            <label>Note</label>
+            <input id="accountNote" />
+            <button id="saveProfileBtn" class="secondary" style="margin-top: 8px;">Gem profil</button>
+            <div class="small" id="profileStatus"></div>
+          </section>
+
+          <section class="card">
+            <h2>Skift password</h2>
+            <label>Nuværende password</label>
+            <input id="currentPassword" type="password" />
+            <label>Nyt password</label>
+            <input id="newPassword" type="password" />
+            <button id="savePasswordBtn" class="secondary" style="margin-top: 8px;">Opdater password</button>
+            <div class="small" id="passwordStatus"></div>
+          </section>
+
+          <section class="card">
+            <h2>Kvota</h2>
+            <div class="quota-bar" style="margin-top: 0;">
+              <div class="quota-label">
+                <span>Forbrug</span>
+                <span id="accountQuotaText">0/0 MB</span>
+              </div>
+              <div class="quota-track">
+                <div id="accountQuotaFill" class="quota-fill"></div>
+              </div>
+            </div>
+            <div class="small" id="accountQuotaMeta"></div>
+            <div class="small" id="accountQuotaCredits"></div>
+          </section>
+        </div>
+      </section>
+    </main>
+    <footer class="app-footer">
+      <span id="footerText">Jarvis v.1 @ 2026</span>
+      <span class="footer-links">
+        <a id="footerSupport" href="#">Support</a>
+        <a id="footerContact" href="#">Kontakt</a>
+        <a id="footerLicense" href="#">Open‑source licens</a>
+      </span>
+    </footer>
+    <script src="/static/auth.js?v=9"></script>
+    <script src="/static/api.js"></script>
+    <script>
+      requireAuth();
+      const profileStatus = document.getElementById("profileStatus");
+      const passwordStatus = document.getElementById("passwordStatus");
+      const footerText = document.getElementById("footerText");
+      const footerSupport = document.getElementById("footerSupport");
+      const footerContact = document.getElementById("footerContact");
+      const footerLicense = document.getElementById("footerLicense");
+      const accountQuotaText = document.getElementById("accountQuotaText");
+      const accountQuotaFill = document.getElementById("accountQuotaFill");
+      const accountQuotaMeta = document.getElementById("accountQuotaMeta");
+      const accountQuotaCredits = document.getElementById("accountQuotaCredits");
+
+      async function loadProfile() {
+        const res = await apiFetch("/account/profile", { method: "GET" });
+        if (!res) return;
+        const data = await res.json();
+        document.getElementById("accountUsername").value = data.username || "";
+        document.getElementById("accountEmail").value = data.email || "";
+        document.getElementById("accountName").value = data.full_name || "";
+        document.getElementById("accountLastName").value = data.last_name || "";
+        document.getElementById("accountCity").value = data.city || "";
+        document.getElementById("accountPhone").value = data.phone || "";
+        document.getElementById("accountNote").value = data.note || "";
+        if (data.city) {
+          localStorage.setItem("jarvisCity", data.city);
+        }
+      }
+
+      async function saveProfile() {
+        const payload = {
+          email: document.getElementById("accountEmail").value.trim(),
+          full_name: document.getElementById("accountName").value.trim(),
+          last_name: document.getElementById("accountLastName").value.trim(),
+          city: document.getElementById("accountCity").value.trim(),
+          phone: document.getElementById("accountPhone").value.trim(),
+          note: document.getElementById("accountNote").value.trim(),
+        };
+        const res = await apiFetch("/account/profile", { method: "PATCH", body: JSON.stringify(payload) });
+        if (!res) return;
+        profileStatus.textContent = res.ok ? "Profil gemt." : "Kunne ikke gemme.";
+        if (res.ok) {
+          const city = payload.city || "";
+          localStorage.setItem("jarvisCity", city);
+          if (getCookieConsent() === "accepted" && city) {
+            setCookie("jarvis_city", city);
+          }
+        }
+      }
+
+      async function savePassword() {
+        const payload = {
+          current_password: document.getElementById("currentPassword").value,
+          new_password: document.getElementById("newPassword").value,
+        };
+        const res = await apiFetch("/account/profile", { method: "PATCH", body: JSON.stringify(payload) });
+        if (!res) return;
+        const data = await res.json();
+        passwordStatus.textContent = res.ok ? "Password opdateret." : data.detail || "Kunne ikke opdatere.";
+      }
+
+      async function loadQuota() {
+        if (!accountQuotaText || !accountQuotaFill) return;
+        const res = await apiFetch("/account/quota", { method: "GET" });
+        if (!res) return;
+        const data = await res.json();
+        const total = Number(data.total_mb || 0);
+        const used = Number(data.used_mb || 0);
+        if (total === 0) {
+          accountQuotaText.textContent = "Ubegraenset";
+          accountQuotaFill.style.width = "100%";
+        } else {
+          const pct = total > 0 ? Math.min(100, Math.max(0, (used / total) * 100)) : 0;
+          accountQuotaText.textContent = `${used} / ${total} MB`;
+          accountQuotaFill.style.width = `${pct}%`;
+        }
+        if (accountQuotaMeta) {
+          if (data.reset_at) {
+            const dt = new Date(data.reset_at);
+            accountQuotaMeta.textContent = isNaN(dt.getTime())
+              ? `Nulstilles: ${data.reset_at}`
+              : `Nulstilles: ${dt.toLocaleString("da-DK")}`;
+          } else {
+            accountQuotaMeta.textContent = "";
+          }
+        }
+        if (accountQuotaCredits) {
+          const credits = Number(data.credits_mb || 0);
+          accountQuotaCredits.textContent = `Credits: ${credits} MB`;
+        }
+      }
+
+      async function loadFooter() {
+        const res = await apiFetch("/settings/footer", { method: "GET" });
+        if (!res) return;
+        const data = await res.json();
+        if (footerText) footerText.textContent = data.text || "Jarvis v.1 @ 2026";
+        if (footerSupport) footerSupport.href = data.support_url || "#";
+        if (footerContact) footerContact.href = data.contact_url || "#";
+        if (footerLicense) {
+          footerLicense.textContent = data.license_text || "Open‑source licens";
+          footerLicense.href = data.license_url || "#";
+        }
+      }
+
+      document.getElementById("saveProfileBtn").addEventListener("click", saveProfile);
+      document.getElementById("savePasswordBtn").addEventListener("click", savePassword);
+      const collapseBtn = document.getElementById("collapseBtn");
+      if (collapseBtn) {
+        const saved = localStorage.getItem("jarvisSidebar");
+        if (saved === "collapsed") {
+          document.body.classList.add("sidebar-collapsed");
+        }
+        collapseBtn.addEventListener("click", () => {
+          document.body.classList.toggle("sidebar-collapsed");
+          localStorage.setItem(
+            "jarvisSidebar",
+            document.body.classList.contains("sidebar-collapsed") ? "collapsed" : "open"
+          );
+        });
+      }
+      document.getElementById("logoutBtn").addEventListener("click", () => {
+        clearToken();
+        window.location.href = "/login";
+      });
+      loadProfile();
+      loadQuota();
+      loadFooter();
+    </script>
+  </body>
+</html>

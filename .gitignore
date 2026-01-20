@@ -17,3 +17,6 @@ backups/*.tar.gz
 
 __pycache__/
 *.pyc
+
+.env
+.env.*

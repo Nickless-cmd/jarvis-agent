@@ -8,3 +8,7 @@ ui/static/
 comfyui/
 data/
 comfyui/
+
+data/
+src/data/
+tts_cache/

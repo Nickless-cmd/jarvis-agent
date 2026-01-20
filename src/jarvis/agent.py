@@ -1134,7 +1134,6 @@ def extract_location(prompt: str) -> str | None:
     return " ".join(loc_tokens)
 
 
-
 def run_agent(
     user_id: str,
     prompt: str,
@@ -1143,8 +1142,7 @@ def run_agent(
     ui_city: str | None = None,
     ui_lang: str | None = None,
 ):
-    from jarvis.agent_core import orchestrator
-    return orchestrator.handle_turn(
+    return _run_agent_impl(
         user_id=user_id,
         prompt=prompt,
         session_id=session_id,
@@ -1152,16 +1150,14 @@ def run_agent(
         ui_city=ui_city,
         ui_lang=ui_lang,
     )
-        
-        
 def _run_agent_impl(
-        user_id: str,
-        prompt: str,
-        session_id: str | None = None,
-        allowed_tools: list[str] | None = None,
-        ui_city: str | None = None,
-        ui_lang: str | None = None,
-    ):
+    user_id: str,
+    prompt: str,
+    session_id: str | None = None,
+    allowed_tools: list[str] | None = None,
+    ui_city: str | None = None,
+    ui_lang: str | None = None,
+):
     mem = search_memory(prompt, user_id=user_id)
     session_hist = get_recent_messages(session_id, limit=8) if session_id else []
     _debug(f"🧭 run_agent: user={user_id} session={session_id} prompt={prompt!r}")
@@ -1245,7 +1241,7 @@ def _run_agent_impl(
     )
     if file_response:
         return file_response
-    
+
     if session_id and _resume_context_intent(prompt):
         cv_state_active = _load_state(get_cv_state(session_id))
         reply = _resume_context_reply(cv_state_active, None, pending_note, pending_reminder, pending_weather)
@@ -1253,38 +1249,38 @@ def _run_agent_impl(
             reply = _prepend_reminders(reply, reminders_due, user_id_int)
         add_message(session_id, "assistant", reply)
         return {"text": reply, "meta": {"tool": None, "tool_used": False}}
-    
+
     # Handle admin intents
     from jarvis.agent_skills.admin_skill import handle_admin
     admin_response = handle_admin(user_id, prompt, session_id, allowed_tools, ui_city, ui_lang, user_id_int=user_id_int)
     if admin_response:
         return admin_response
-    
+
     # Handle CV intents
     from jarvis.agent_skills.cv_skill import handle_cv
     cv_response = handle_cv(user_id, prompt, session_id, allowed_tools, ui_city, ui_lang, user_id_int, reminders_due, profile)
     if cv_response:
         return cv_response
-    
+
     mode = get_mode(session_id) if session_id else "balanced"
     # Handle history and summary intents
     from jarvis.agent_skills.history_skill import handle_history
     history_response = handle_history(user_id, prompt, session_id, allowed_tools, ui_city, ui_lang, reminders_due, user_id_int)
     if history_response:
         return history_response
-    
+
     # Handle process/system/ping intents
     from jarvis.agent_skills.process_skill import handle_process
     process_response = handle_process(user_id, prompt, session_id, allowed_tools, ui_city, ui_lang, reminders_due=reminders_due, user_id_int=user_id_int, display_name=display_name)
     if process_response:
         return process_response
-    
+
     # Handle story intents
     from jarvis.agent_skills.story_skill import handle_story
     story_response = handle_story(user_id, prompt, session_id, allowed_tools, ui_city, ui_lang, user_id_int, reminders_due, profile)
     if story_response:
         return story_response
-    
+
     cv_state_active = _load_state(get_cv_state(session_id)) if session_id else None
     forced_tool = None
     resume_prompt = None
@@ -1348,7 +1344,7 @@ def _run_agent_impl(
                 if candidate and (not allowed_tools or candidate in allowed_tools):
                     forced_tool = candidate
                     resume_prompt = "Skal jeg tage tråden op igen og fortsætte påmindelsen, hvis De ønsker det?"
-    
+
     if session_id and _deny_intent(prompt):
         pass  # CV deny handled in cv_skill
     if session_id and _affirm_intent(prompt):
@@ -1521,7 +1517,7 @@ def _run_agent_impl(
         return {"text": reply}
     if not session_id and prompt.strip().lower().startswith("/mode "):
         return {"text": "Mode kræver en session."}
-    
+
     if allowed_tools is not None:
         requested_tool = choose_tool(prompt, allowed_tools=None)
         if requested_tool and requested_tool not in allowed_tools:
@@ -1533,7 +1529,7 @@ def _run_agent_impl(
             if session_id:
                 add_message(session_id, "assistant", reply)
             return {"text": reply, "meta": {"tool": requested_tool, "tool_used": False}}
-    
+
     if session_id:
         pending_process = _load_state(get_process_state(session_id))
         pending_pid = pending_process.get("pid") if isinstance(pending_process, dict) else None
@@ -1546,7 +1542,7 @@ def _run_agent_impl(
             add_memory("assistant", reply, user_id=user_id)
             add_message(session_id, "assistant", reply)
             return {"text": reply, "data": tool_result, "meta": {"tool": "process", "tool_used": True}}
-    
+
     tool = None
     cv_intent = _cv_intent(prompt)
     wants_weather_news = _wants_weather_and_news(prompt)
@@ -1566,7 +1562,7 @@ def _run_agent_impl(
     tool_used = bool(tool)
     tool_result = None
     _debug(f"🧭 run_agent: tool={tool}")
-    
+
     tool_summary = None
     if tool == "weather_news":
         weather_city = None
@@ -1631,7 +1627,7 @@ def _run_agent_impl(
                         "scope": scope,
                     }
                     set_last_tool(session_id, json.dumps(last_payload, ensure_ascii=False))
-    
+
         query = _extract_news_query(prompt)
         category = "technology" if _is_tech_query(query) else None
         news_result = tools.news_combined(query, category=category)
@@ -1675,7 +1671,7 @@ def _run_agent_impl(
                     "count": len(items),
                 }
                 set_last_tool(session_id, json.dumps(last_payload, ensure_ascii=False))
-    
+
         reply_parts = []
         if weather_reply:
             reply_parts.append(weather_reply)
@@ -1707,7 +1703,7 @@ def _run_agent_impl(
             "data": combined_data,
             "meta": {"tool": "weather+news", "tool_used": True},
         }
-    
+
     if tool == "weather":
         base_prompt = pending_prompt or prompt
         city = pending_city or extract_location(base_prompt)
@@ -1787,7 +1783,7 @@ def _run_agent_impl(
             tool_result = tools.find_process(prompt)
         else:
             tool_result = tools.list_processes(10)
-    
+
     failure = _tool_failed(tool, tool_result)
     if failure:
         reason, detail = failure
@@ -1815,11 +1811,11 @@ def _run_agent_impl(
         if session_id:
             add_message(session_id, "assistant", reply)
         return {"text": reply}
-    
+
     if tool == "currency" and session_id:
         last_payload = {"tool": "currency", "source": "exchangerate.host"}
         set_last_tool(session_id, json.dumps(last_payload, ensure_ascii=False))
-    
+
     if tool == "news":
         query = tool_result.get("query", "") if isinstance(tool_result, dict) else ""
         items = tool_result.get("items", []) if isinstance(tool_result, dict) else []
@@ -1890,7 +1886,7 @@ def _run_agent_impl(
             "data": tool_result,
             "meta": {"status": status, "count": len(items), "tool": "news", "tool_used": True},
         }
-    
+
     if tool == "search":
         if not isinstance(tool_result, dict) or tool_result.get("error"):
             reply = "Jeg kan ikke hente søgeresultater lige nu. Prøv igen senere."
@@ -1982,7 +1978,7 @@ def _run_agent_impl(
         if session_id:
             add_message(session_id, "assistant", reply)
         return {"text": reply, "data": tool_result, "meta": {"tool": "search", "tool_used": True, "intent": "cv" if cv_intent else "search"}}
-    
+
     if tool == "time":
         now_iso = tool_result if isinstance(tool_result, str) else None
         try:
@@ -2016,19 +2012,19 @@ def _run_agent_impl(
         if session_id:
             add_message(session_id, "assistant", reply)
         return {"text": reply, "meta": {"tool": "time", "tool_used": True}}
-    
+
     system_response = handle_process(user_id, prompt, session_id, allowed_tools, ui_city, ui_lang, tool="system", tool_result=tool_result, reminders_due=reminders_due, user_id_int=user_id_int, display_name=display_name, resume_prompt=resume_prompt)
     if system_response:
         return system_response
-    
+
     ping_response = handle_process(user_id, prompt, session_id, allowed_tools, ui_city, ui_lang, tool="ping", tool_result=tool_result, reminders_due=reminders_due, user_id_int=user_id_int, display_name=display_name, resume_prompt=resume_prompt)
     if ping_response:
         return ping_response
-    
+
     process_response = handle_process(user_id, prompt, session_id, allowed_tools, ui_city, ui_lang, tool="process", tool_result=tool_result, reminders_due=reminders_due, user_id_int=user_id_int, display_name=display_name, resume_prompt=resume_prompt)
     if process_response:
         return process_response
-    
+
     if tool == "weather":
         if not tool_summary:
             reply = "Jeg kan ikke hente data lige nu. Prøv igen om lidt."
@@ -2101,7 +2097,7 @@ def _run_agent_impl(
             },
             "meta": {"tool": "weather", "tool_used": True},
         }
-    
+
     mode_hint = ""
     if mode == "fakta":
         mode_hint = "Mode fakta: max 4 linjer, ingen humor, punktform."
@@ -2109,7 +2105,7 @@ def _run_agent_impl(
         mode_hint = "Mode snak: max 6 linjer, en kort tør joke til sidst."
     else:
         mode_hint = "Mode balanced: kort og præcist."
-    
+
     sys_prompt = _get_system_prompt()
     if session_id:
         override = get_custom_prompt(session_id)
@@ -2124,7 +2120,7 @@ def _run_agent_impl(
     if tool_result is not None:
         payload = tool_summary if tool_summary else tool_result
         messages.append({"role": "assistant", "content": f"Tool result: {payload}"})
-    
+
     res = call_ollama(messages)
     if res.get("error"):
         reply = "Beklager — modellen svarede ikke i tide. Prøv igen, eller brug et kortere spørgsmål."
@@ -2145,21 +2141,19 @@ def _run_agent_impl(
         reply = "Beklager — jeg fik et tomt svar fra modellen. Prøv igen."
     if resume_prompt:
         reply = f"{reply}\n\n{resume_prompt}"
-    
+
     if reminders_due and _should_attach_reminders(prompt):
         reply = _prepend_reminders(reply, reminders_due, user_id_int)
-        add_memory("assistant", reply, user_id=user_id)
-        if session_id:
-            add_message(session_id, "assistant", reply)
-            conversation_state.update_summary(reply)
-            set_conversation_state(session_id, conversation_state.to_json())
-            
-            if os.getenv("TTS", "true").lower() == "true":
-                audio_file = tts.speak(reply)
-                if audio_file:
-                    return {"text": reply, "audio": audio_file, "meta": {"tool": tool or None, "tool_used": tool_used}}
-                return {"text": reply, "meta": {"tool": tool or None, "tool_used": tool_used}}
-            
+    add_memory("assistant", reply, user_id=user_id)
+    if session_id:
+        add_message(session_id, "assistant", reply)
+        conversation_state.update_summary(reply)
+        set_conversation_state(session_id, conversation_state.to_json())
+
+    if os.getenv("TTS", "true").lower() == "true":
+        audio_file = tts.speak(reply)
+        if audio_file:
+            return {"text": reply, "audio": audio_file, "meta": {"tool": tool or None, "tool_used": tool_used}}
         return {"text": reply, "meta": {"tool": tool or None, "tool_used": tool_used}}
-    
+
     return {"text": reply, "meta": {"tool": tool or None, "tool_used": tool_used}}

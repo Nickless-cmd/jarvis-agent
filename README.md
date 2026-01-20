@@ -27,4 +27,4 @@ Se `docs/README.md` for funktioner, kommandoer og UI‑ruter.
 Hvis du vil bruge en anden DB‑placering:
 ```
 JARVIS_DB_PATH=/tmp/jarvis.db
-```
+```# jarvis-agent

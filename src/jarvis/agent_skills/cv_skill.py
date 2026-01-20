@@ -3,6 +3,153 @@ CV skill handler - thin wrapper for CV-related intents.
 """
 
 import json
+import re
+from datetime import datetime
+
+CV_QUESTIONS = [
+    ("job_title", "Hvilken stilling søger du, og i hvilken branche?"),
+    ("availability", "Hvilken arbejdstid søger du (fuldtid/deltid), og er der hensyn vi skal tage?"),
+    ("experience", "Hvilke relevante erfaringer har du (arbejde/ansvarsområder)?"),
+    ("education", "Hvilken uddannelse eller kurser har du?"),
+    ("skills", "Hvilke kompetencer og certificeringer vil du fremhæve?"),
+    ("other", "Noget andet, der er vigtigt at få med (sprog, kørekort, IT)?"),
+]
+
+CV_STRUCTURE_TEMPLATE = (
+    "CV‑struktur (eksempel):\n"
+    "1) Kontaktoplysninger\n"
+    "2) Kort profil (3–5 linjer)\n"
+    "3) Nøglekompetencer (6–10 bullets)\n"
+    "4) Erfaring (nyeste først, 3–5 linjer per job)\n"
+    "5) Uddannelse og kurser\n"
+    "6) Sprog og certifikater\n"
+    "7) Projekter eller resultater (valgfrit)\n"
+    "8) Referencer (valgfrit)\n"
+    "\n"
+    "Kort eksempel på profil:\n"
+    "Service‑orienteret og driftssikker profil med fokus på kvalitet, ansvar og samarbejde.\n"
+    "Erfaren i teknisk support og systemadministration med stærke kommunikationsevner.\n"
+    "Dedikeret til at levere høj kvalitet og løse komplekse problemer effektivt."
+)
+
+JARVIS_CV = (
+    "JARVIS‑CV eksempel:\n"
+    "• Stilling: Teknisk Support Specialist\n"
+    "• Erfaring: 5+ år i IT-support, fejlfinding og brugersupport\n"
+    "• Uddannelse: Datamatiker, IT-supporter certificeringer\n"
+    "• Kompetencer: Python, Linux, netværk, fejlfinding, brugersupport\n"
+    "• Andre: Dansk (modersmål), Engelsk (flydende), Kørekort\n"
+    "\n"
+    "Dette er et eksempel — dit CV bliver skræddersyet til dig."
+)
+
+
+def _strip_cv_cancel_phrases(prompt: str) -> str:
+    phrases = [
+        "annuller cv",
+        "stop cv",
+        "drop cv",
+        "glem cv",
+        "glem vores snak om cv",
+        "lad os glemme mit cv",
+        "pause cv",
+        "vi skal ikke lave et cv",
+    ]
+    cleaned = prompt.replace("…", " ")
+    for phrase in phrases:
+        cleaned = re.sub(rf"\\b{re.escape(phrase)}\\b", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"[\\s,.;:!?…]+", " ", cleaned).strip()
+    return cleaned
+
+
+def _cancel_with_followup(prompt: str) -> tuple[bool, str]:
+    # Local import to avoid circular
+    from jarvis.agent import _has_followup_request
+    stripped = _strip_cv_cancel_phrases(prompt)
+    if not stripped:
+        return _has_followup_request(prompt), ""
+    tokens = [t for t in re.split(r"\s+", stripped.lower()) if t]
+    trivial = {"nej", "no", "ok", "okay", "tak", "ellers", "ingen"}
+    if tokens and all(t in trivial for t in tokens):
+        return False, stripped
+    return _has_followup_request(stripped) or _has_followup_request(prompt), stripped
+
+
+def _init_cv_state(prompt: str) -> dict:
+    # Local import
+    from jarvis.agent import _detect_format, _save_text_intent, _save_permanent_intent
+    fmt = _detect_format(prompt) or ""
+    return {
+        "step": 0,
+        "answers": {},
+        "done": False,
+        "format": fmt if fmt else None,
+        "auto_finalize": _save_text_intent(prompt),
+        "persist": _save_permanent_intent(prompt),
+    }
+
+
+def _cv_prompt_from_state(state: dict) -> str:
+    answers = state.get("answers", {})
+    lines = []
+    for key, label in CV_QUESTIONS:
+        value = answers.get(key)
+        if value:
+            lines.append(f"{label} {value}")
+    return "\n".join(lines)
+
+
+def _extract_cv_query(prompt: str) -> str:
+    # Local import
+    from jarvis.agent import _extract_search_query
+    cleaned = re.sub(r"\b(cv|resume|ansøgning|jobansøgning|ansøg)\b", "", prompt, flags=re.I)
+    cleaned = _extract_search_query(cleaned)
+    if not cleaned:
+        return "cv skabelon dansk"
+    return f"cv {cleaned}".strip()
+
+
+def _write_cv_file(user_id: str, text: str, fmt: str, temp: bool = False) -> str | None:
+    # Local import
+    from jarvis.agent import write_file
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+    prefix = "tmp_cv_" if temp else "cv_"
+    if fmt == "txt":
+        filename = f"{prefix}{timestamp}.txt"
+        write_file(user_id, filename, text)
+        return filename
+    if fmt == "docx":
+        try:
+            from docx import Document
+        except Exception:
+            return None
+        doc = Document()
+        for line in text.splitlines():
+            doc.add_paragraph(line)
+        filename = f"{prefix}{timestamp}.docx"
+        full = write_file(user_id, filename, "")
+        doc.save(str(full))
+        return filename
+    if fmt == "pdf":
+        try:
+            from reportlab.lib.pagesizes import A4
+            from reportlab.pdfgen import canvas
+        except Exception:
+            return None
+        filename = f"{prefix}{timestamp}.pdf"
+        full = write_file(user_id, filename, "")
+        c = canvas.Canvas(str(full), pagesize=A4)
+        width, height = A4
+        y = height - 40
+        for line in text.splitlines():
+            c.drawString(40, y, line[:120])
+            y -= 14
+            if y < 40:
+                c.showPage()
+                y = height - 40
+        c.save()
+        return filename
+    return None
 
 
 def handle_cv(
@@ -22,12 +169,11 @@ def handle_cv(
     """
     # Local imports to avoid circular dependencies
     from jarvis.agent import (
-        _cv_intent, _cv_cancel_intent, _cancel_with_followup, _cv_own_intent, _cv_example_intent,
+        _cv_intent, _cv_cancel_intent, _cv_own_intent, _cv_example_intent,
         _cv_help_intent, _show_cv_intent, _continue_cv_intent, _save_permanent_intent, _save_later_intent,
-        _finalize_intent, _detect_format, _write_cv_file, _make_download_link, _download_notice, _wrap_download_link,
+        _finalize_intent, _detect_format, _make_download_link, _download_notice, _wrap_download_link,
         _should_attach_reminders, _prepend_reminders, _affirm_intent, _deny_intent, _load_state, get_cv_state,
-        set_cv_state, add_message, _init_cv_state, _update_state, _next_question, CV_QUESTIONS, _cv_prompt_from_state,
-        _extract_cv_query, call_ollama, _summarize_text, tools, JARVIS_CV, CV_STRUCTURE_TEMPLATE
+        set_cv_state, add_message, _update_state, _next_question, call_ollama, _summarize_text, tools
     )
 
     skip_cv_intent = False

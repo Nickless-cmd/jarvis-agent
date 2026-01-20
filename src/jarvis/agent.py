@@ -1122,22 +1122,6 @@ def _format_dt(value: str) -> str:
         return dt.strftime("%d.%m.%Y %H:%M")
     except Exception:
         return value
-    try:
-        dt = datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(ZoneInfo("Europe/Copenhagen"))
-        return dt.strftime("%d.%m.%Y %H:%M")
-    except Exception:
-        return value
-
-
-    match = re.search(r"\b(?:kl\.?\s*)?(\d{1,2})[:.](\d{2})\b", prompt.lower())
-    if not match:
-        return None
-    hh = int(match.group(1))
-    mm = int(match.group(2))
-    if hh > 23 or mm > 59:
-        return None
-    return time(hh, mm)
-
 
 
     if tool_result is None:

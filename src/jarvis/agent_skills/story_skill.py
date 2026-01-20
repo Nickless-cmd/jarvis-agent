@@ -97,7 +97,7 @@ def handle_story(
     """
     # Local imports to avoid circular dependencies
     from jarvis.agent import (
-        _story_intent, _load_state, get_story_state,
+        _load_state, get_story_state,
         _detect_format, _save_text_intent, _save_permanent_intent,
         set_story_state, add_message, _update_state, _next_question, call_ollama, _summarize_text,
         tools, _make_download_link, _download_notice, _wrap_download_link,
@@ -296,3 +296,17 @@ def handle_story(
             return {"text": reply, "meta": {"tool": None, "tool_used": False}}
 
     return None  # No story intent handled
+
+
+def _story_intent(prompt: str) -> bool:
+    return bool(re.search(r"\b(historie|fortælling|stil|essay|novelle)\b", prompt.lower()))
+
+
+def _continue_story_intent(prompt: str) -> bool:
+    p = prompt.lower()
+    return any(k in p for k in ["fortsæt historie", "fortsæt historien", "fortsæt stil", "fortsæt teksten"])
+
+
+def _show_story_intent(prompt: str) -> bool:
+    p = prompt.lower()
+    return any(k in p for k in ["vis historie", "vis stil", "vis teksten", "vis historien"])

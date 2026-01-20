@@ -1,17 +1,8 @@
 ## DATE
-tir 20 jan 22:04:30 CET 2026
-
-## GIT STATUS
-On branch main
-Your branch is up to date with 'origin/main'.
-
-Untracked files:
-  (use "git add <file>..." to include in what will be committed)
-	codex_context.txt
-
-nothing added to commit but untracked files present (use "git add" to track)
+tir 20 jan 22:19:23 CET 2026
 
 ## RECENT COMMITS
+03fee78 Extract Story helpers into story_skill
 63452cd Delegate Story flow to story_skill (routing only)
 1a3e0fd Extract CV helpers into cv_skill
 3ebe59a Delegate CV flow to cv_skill (routing only)
@@ -39,7 +30,7 @@ bc757be Stop tracking comfyui (ignore)
 210c1cd Initial commit (with gitignore)
 31cae64 Snapshot before next refactor
 
-## TREE (src/jarvis only)
+## TREE (src/jarvis)
 src/jarvis/agent_core/conversation_state.py
 src/jarvis/agent_policy/__init__.py
 src/jarvis/agent_policy/language.py
@@ -80,18 +71,8 @@ src/jarvis/watchers/__init__.py
 src/jarvis/watchers/repo_watcher.py
 src/jarvis/watchers/test_watcher.py
 
-## AGENT SKILLS
-src/jarvis/agent_skills/admin_skill.py
-src/jarvis/agent_skills/code_skill.py
-src/jarvis/agent_skills/cv_skill.py
-src/jarvis/agent_skills/files_skill.py
-src/jarvis/agent_skills/history_skill.py
-src/jarvis/agent_skills/notes_skill.py
-src/jarvis/agent_skills/process_skill.py
-src/jarvis/agent_skills/story_skill.py
-
 ## LINE COUNTS
-  2207 src/jarvis/agent.py
+  2159 src/jarvis/agent.py
    196 src/jarvis/agent_skills/admin_skill.py
    140 src/jarvis/agent_skills/code_skill.py
    389 src/jarvis/agent_skills/cv_skill.py
@@ -99,5 +80,5 @@ src/jarvis/agent_skills/story_skill.py
    179 src/jarvis/agent_skills/history_skill.py
    355 src/jarvis/agent_skills/notes_skill.py
    353 src/jarvis/agent_skills/process_skill.py
-   241 src/jarvis/agent_skills/story_skill.py
-  4726 totalt
+   297 src/jarvis/agent_skills/story_skill.py
+  4734 totalt

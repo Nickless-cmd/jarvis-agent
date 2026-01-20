@@ -588,10 +588,6 @@ def _cv_intent(prompt: str) -> bool:
     return bool(re.search(r"\b(cv|resume|ansøgning|jobansøgning)\b", prompt.lower()))
 
 
-def _story_intent(prompt: str) -> bool:
-    return bool(re.search(r"\b(historie|fortælling|stil|essay|novelle)\b", prompt.lower()))
-
-
 def _story_needs_questions(prompt: str) -> bool:
     return bool(re.search(r"\b(stil|essay|stilopgave|opgave)\b", prompt.lower()))
 
@@ -938,16 +934,6 @@ def _cv_cancel_intent(prompt: str) -> bool:
     )
 
 
-def _continue_story_intent(prompt: str) -> bool:
-    p = prompt.lower()
-    return any(k in p for k in ["fortsæt historie", "fortsæt historien", "fortsæt stil", "fortsæt teksten"])
-
-
-def _show_story_intent(prompt: str) -> bool:
-    p = prompt.lower()
-    return any(k in p for k in ["vis historie", "vis stil", "vis teksten", "vis historien"])
-
-
 def _resume_context_intent(prompt: str) -> bool:
     p = prompt.lower()
     return any(
@@ -978,8 +964,6 @@ def _has_followup_request(prompt: str) -> bool:
     if _read_news_index(prompt) is not None:
         return True
     if choose_tool(prompt, allowed_tools=None):
-        return True
-    if _story_intent(prompt):
         return True
     return False
 

@@ -112,6 +112,7 @@ from jarvis.agent_policy.vision_guard import (
 )
 from jarvis.agent_policy.freshness import inject_time_context, is_time_sensitive
 from jarvis.agent_format.ux_copy import ux_error, ux_notice
+from jarvis.agent_core.conversation_state import ConversationState, should_show_resume_hint
 
 import jarvis.agent as agent
 print("JARVIS agent loaded from:", agent.__file__)

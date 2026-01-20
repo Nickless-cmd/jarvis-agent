@@ -5,6 +5,8 @@ Agent orchestrator - coordinates agent execution.
 from dataclasses import dataclass
 from typing import Dict, Any, Optional
 
+from jarvis.agent_core.state_service import AgentStateService
+
 @dataclass
 class TurnResult:
     reply_text: str
@@ -29,27 +31,44 @@ def coerce_to_turn_result(result: Dict[str, Any]) -> TurnResult:
         message_already_added=False,
     )
 
-def build_response(turn_result: TurnResult, session_id: str | None, reminders_due: list, user_id_int: int | None, prompt: str, user_id: str, memory_context: str = "") -> Dict[str, Any]:
-    """Apply final packaging: reminders, persistence, and return response dict."""
-    import random
+def build_response(
+    turn_result: TurnResult,
+    session_id: str | None,
+    reminders_due: list,
+    user_id_int: int | None,
+    prompt: str,
+    user_id: str,
+    memory_used: bool = False,
+    resume_hint: str | None = None,
+    ui_lang: str | None = None,
+) -> Dict[str, Any]:
+    """Apply final packaging: reminders, optional resume hint/transparency, persistence."""
     from jarvis.agent import _should_attach_reminders, _prepend_reminders, add_message
     from jarvis.agent_core.memory_manager import should_write_memory
+
     reply_text = turn_result.reply_text
+
+    if resume_hint:
+        reply_text = f"{resume_hint}\n{reply_text}"
+
     if not turn_result.reminders_already_prepended and reminders_due and _should_attach_reminders(prompt):
         reply_text = _prepend_reminders(reply_text, reminders_due, user_id_int)
     if session_id and not turn_result.message_already_added:
         add_message(session_id, "assistant", reply_text)
-    
-    # Add subtle memory note occasionally
-    if memory_context and random.random() < 0.3:
-        reply_text += "\n\nJeg husker noget relevant fra vores tidligere samtaler."
-    
+
+    # Memory transparency
+    if memory_used:
+        if ui_lang and ui_lang.lower().startswith("en"):
+            reply_text += "\n(I used something you told me earlier.)"
+        else:
+            reply_text += "\n(Jeg brugte noget, du har fortalt mig før.)"
+
     # Memory writing
     memory_items = should_write_memory(prompt, reply_text)
     for item in memory_items:
         from jarvis.memory import add_memory
         add_memory("assistant", f"[{item.category}] {item.content}", user_id)
-    
+
     return {
         "text": reply_text,
         "meta": turn_result.meta,
@@ -81,6 +100,7 @@ def handle_turn(
     from jarvis.agent import get_conversation_state, set_conversation_state
 
     mem = search_memory(prompt, user_id=user_id)
+    memory_used_flag = bool(mem)
     session_hist = get_recent_messages(session_id, limit=8) if session_id else []
     _debug(f"🧭 run_agent: user={user_id} session={session_id} prompt={prompt!r}")
     if session_id:
@@ -94,14 +114,14 @@ def handle_turn(
                     "meta": {"tool_used": False},
                 }
                 turn_result = coerce_to_turn_result(result)
-                return build_response(turn_result, session_id, [], None, prompt, user_id, "")
+                return build_response(turn_result, session_id, [], None, prompt, user_id, memory_used=False, resume_hint=None, ui_lang=ui_lang)
             if not custom:
                 result = {
                     "text": "Skriv den ønskede personlighed efter kommandoen, fx: /personlighed Kort, varm og praktisk.",
                     "meta": {"tool_used": False},
                 }
                 turn_result = coerce_to_turn_result(result)
-                return build_response(turn_result, session_id, [], None, prompt, user_id, "")
+                return build_response(turn_result, session_id, [], None, prompt, user_id, memory_used=False, resume_hint=None, ui_lang=ui_lang)
             from jarvis.agent import set_custom_prompt
             set_custom_prompt(session_id, custom)
             result = {
@@ -109,7 +129,7 @@ def handle_turn(
                 "meta": {"tool_used": False},
             }
             turn_result = coerce_to_turn_result(result)
-            return build_response(turn_result, session_id, [], None, prompt, user_id, "")
+            return build_response(turn_result, session_id, [], None, prompt, user_id, memory_used=False, resume_hint=None, ui_lang=ui_lang)
     profile = get_user_profile(user_id)
     display_name = _first_name(profile, user_id)
     user_id_int = (profile or {}).get("id")
@@ -132,6 +152,7 @@ def handle_turn(
 
     preloaded = {
         "mem": mem,
+        "memory_used": memory_used_flag,
         "session_hist": session_hist,
         "profile": profile,
         "display_name": display_name,
@@ -158,13 +179,14 @@ def handle_turn(
             "meta": {"tool_used": False},
         }
         turn_result = coerce_to_turn_result(result)
-        return build_response(turn_result, session_id, preloaded["reminders_due"], preloaded["user_id_int"], prompt)
+        return build_response(turn_result, session_id, preloaded["reminders_due"], preloaded["user_id_int"], prompt, user_id, memory_used=preloaded["memory_used"], resume_hint=preloaded.get("resume_hint"), ui_lang=ui_lang)
     
     from jarvis.agent_core.memory_manager import should_retrieve_memory
     if should_retrieve_memory(prompt, ui_lang):
         memory_context = retrieve_context(user_id, prompt)
         if memory_context:
             preloaded["mem"].append(f"assistant: {memory_context}")
+            preloaded["memory_used"] = True
 
     # Pending resolution
     pending_city = None
@@ -195,6 +217,34 @@ def handle_turn(
     preloaded["pending_city"] = pending_city
     preloaded["pending_scope"] = pending_scope
     preloaded["pending_prompt"] = pending_prompt
+
+    # Resume hint (only once after inactivity)
+    resume_hint_text = None
+    if session_id:
+        from datetime import datetime, timezone
+        now_dt = datetime.now(timezone.utc)
+        from jarvis.agent_core.conversation_state import should_show_resume_hint
+        from jarvis.agent import _load_state, get_cv_state, get_story_state, _resume_context_reply
+
+        cv_state_hint = _load_state(get_cv_state(session_id))
+        story_state_hint = _load_state(get_story_state(session_id))
+        if should_show_resume_hint(session_hist, now_dt, threshold_minutes=45, already_shown=conversation_state.resume_hint_shown):
+            if cv_state_hint and not cv_state_hint.get("done"):
+                resume_hint_text = "We were working on your CV. Want to continue?" if ui_lang and ui_lang.lower().startswith("en") else "Vi var i gang med at arbejde på dit CV. Vil du fortsætte?"
+            elif story_state_hint and not story_state_hint.get("done"):
+                resume_hint_text = "We were working on your story. Want to continue?" if ui_lang and ui_lang.lower().startswith("en") else "Vi var i gang med din historie. Vil du fortsætte?"
+            elif preloaded["pending_note"]:
+                resume_hint_text = "We were editing a note. Want to continue?" if ui_lang and ui_lang.lower().startswith("en") else "Vi var i gang med en note. Vil du fortsætte?"
+            elif preloaded["pending_reminder"]:
+                resume_hint_text = "We were setting a reminder. Want to continue?" if ui_lang and ui_lang.lower().startswith("en") else "Vi var i gang med en påmindelse. Vil du fortsætte?"
+            elif preloaded["pending_weather"]:
+                resume_hint_text = "We were fetching the weather. Want to continue?" if ui_lang and ui_lang.lower().startswith("en") else "Vi var i gang med vejret. Vil du fortsætte?"
+            else:
+                resume_hint_text = "We were mid-conversation. Want to continue?" if ui_lang and ui_lang.lower().startswith("en") else "Vi var i gang med en samtale. Vil du fortsætte?"
+            conversation_state.resume_hint_shown = True
+            set_conversation_state(session_id, conversation_state.to_json())
+
+    preloaded["resume_hint"] = resume_hint_text
 
     # Dispatch
     from jarvis.agent_skills.files_skill import handle_files
@@ -228,7 +278,7 @@ def handle_turn(
                 reply = _prepend_reminders(reply, preloaded["reminders_due"], preloaded["user_id_int"])
             add_message(session_id, "assistant", reply)
             turn_result = TurnResult(reply_text=reply, meta={"tool": None, "tool_used": False}, reminders_already_prepended=True, message_already_added=True)
-            return build_response(turn_result, session_id, preloaded["reminders_due"], preloaded["user_id_int"], prompt, user_id, memory_context)
+            return build_response(turn_result, session_id, preloaded["reminders_due"], preloaded["user_id_int"], prompt, user_id, memory_used=preloaded["memory_used"], resume_hint=preloaded.get("resume_hint"), ui_lang=ui_lang)
 
     from jarvis.agent_skills.admin_skill import handle_admin
     admin_response = handle_admin(user_id, prompt, session_id, allowed_tools, ui_city, ui_lang, user_id_int=preloaded["user_id_int"])
@@ -253,6 +303,24 @@ def handle_turn(
     if process_response:
         return process_response
 
+    # Code skill (code RAG)
+    try:
+        from jarvis.agent_skills.code_skill import handle_code_question
+        code_state = AgentStateService(user_id, session_id) if session_id else None
+        code_response = handle_code_question(
+            prompt=prompt,
+            state=code_state,
+            user_id=user_id,
+            session_id=session_id,
+            ui_lang=ui_lang,
+            allowed_tools=allowed_tools,
+            user_id_int=preloaded["user_id_int"],
+        )
+        if code_response:
+            return code_response
+    except Exception:
+        pass
+
     from jarvis.agent_skills.story_skill import handle_story
     story_response = handle_story(user_id, prompt, session_id, allowed_tools, ui_city, ui_lang, preloaded["user_id_int"], preloaded["reminders_due"], preloaded["profile"])
     if story_response:
@@ -269,4 +337,4 @@ def handle_turn(
         ui_lang=ui_lang,
         preloaded=preloaded,
     )
-    return build_response(turn_result, session_id, preloaded["reminders_due"], preloaded["user_id_int"], prompt, user_id, memory_context)
+    return build_response(turn_result, session_id, preloaded["reminders_due"], preloaded["user_id_int"], prompt, user_id, memory_used=preloaded["memory_used"], resume_hint=preloaded.get("resume_hint"), ui_lang=ui_lang)

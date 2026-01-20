@@ -17,6 +17,7 @@ class ConversationState:
     pending_questions: List[str] = field(default_factory=list)
     last_summary: str = ""
     response_mode: str = "normal"  # short | normal | deep
+    resume_hint_shown: bool = False
 
     def to_json(self) -> str:
         payload = {
@@ -25,6 +26,7 @@ class ConversationState:
             "pending_questions": self.pending_questions[:MAX_ITEMS],
             "last_summary": (self.last_summary or "")[:MAX_SUMMARY],
             "response_mode": self.response_mode or "normal",
+            "resume_hint_shown": bool(self.resume_hint_shown),
         }
         return json.dumps(payload, ensure_ascii=False)
 
@@ -42,6 +44,7 @@ class ConversationState:
             pending_questions=list(data.get("pending_questions", []))[:MAX_ITEMS],
             last_summary=(data.get("last_summary", "") or "")[:MAX_SUMMARY],
             response_mode=data.get("response_mode", "normal") or "normal",
+            resume_hint_shown=bool(data.get("resume_hint_shown", False)),
         )
 
     def set_goal(self, goal: str) -> None:
@@ -99,3 +102,32 @@ class ConversationState:
         if mode in {"short", "normal", "deep"}:
             self.response_mode = mode
 
+
+def should_show_resume_hint(session_hist: list[dict], now_dt, threshold_minutes: int = 45, already_shown: bool = False) -> bool:
+    """
+    Decide if a resume hint should be shown based on last assistant message age.
+    """
+    if already_shown:
+        return False
+    if not session_hist:
+        return False
+    last_assistant = None
+    for msg in reversed(session_hist):
+        if msg.get("role") == "assistant":
+            last_assistant = msg
+            break
+    if not last_assistant:
+        return False
+    ts = last_assistant.get("created_at")
+    if not ts:
+        return False
+    try:
+        from datetime import datetime, timezone, timedelta
+
+        dt = datetime.fromisoformat(ts)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        delta = now_dt - dt
+        return delta >= timedelta(minutes=threshold_minutes)
+    except Exception:
+        return False

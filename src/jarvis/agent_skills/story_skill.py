@@ -24,6 +24,62 @@ def _story_prompt_from_state(state: dict) -> str:
     return "\n".join(lines)
 
 
+def _extract_story_topic(prompt: str) -> str | None:
+    match = re.search(r"\b(?:historie|fortælling|stil|essay|novelle)\s+om\s+(.+)", prompt, flags=re.I)
+    if match:
+        return match.group(1).strip(" .,!?:;\"'()[]{}")
+    return None
+
+
+def _story_needs_questions(prompt: str) -> bool:
+    return bool(re.search(r"\b(stil|essay|stilopgave|opgave)\b", prompt.lower()))
+
+
+def _write_text_file(user_id: str, text: str, fmt: str, prefix: str, temp: bool = False) -> str | None:
+    from datetime import datetime
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+    base = f"{'tmp_' if temp else ''}{prefix}_{timestamp}"
+    if fmt == "txt":
+        from jarvis.agent import write_file
+        filename = f"{base}.txt"
+        write_file(user_id, filename, text)
+        return filename
+    if fmt == "docx":
+        try:
+            from docx import Document
+        except Exception:
+            return None
+        from jarvis.agent import write_file
+        doc = Document()
+        for line in text.splitlines():
+            doc.add_paragraph(line)
+        filename = f"{base}.docx"
+        full = write_file(user_id, filename, "")
+        doc.save(str(full))
+        return filename
+    if fmt == "pdf":
+        try:
+            from reportlab.lib.pagesizes import A4
+            from reportlab.pdfgen import canvas
+        except Exception:
+            return None
+        from jarvis.agent import write_file
+        filename = f"{base}.pdf"
+        full = write_file(user_id, filename, "")
+        c = canvas.Canvas(str(full), pagesize=A4)
+        width, height = A4
+        y = height - 40
+        for line in text.splitlines():
+            c.drawString(40, y, line[:120])
+            y -= 14
+            if y < 40:
+                c.showPage()
+                y = height - 40
+        c.save()
+        return filename
+    return None
+
+
 def handle_story(
     user_id: str,
     prompt: str,
@@ -41,11 +97,11 @@ def handle_story(
     """
     # Local imports to avoid circular dependencies
     from jarvis.agent import (
-        _story_intent, _load_state, get_story_state, _extract_story_topic,
-        _story_needs_questions, _detect_format, _save_text_intent, _save_permanent_intent,
+        _story_intent, _load_state, get_story_state,
+        _detect_format, _save_text_intent, _save_permanent_intent,
         set_story_state, add_message, _update_state, _next_question, call_ollama, _summarize_text,
-        tools, _write_text_file, _make_download_link, _download_notice, _wrap_download_link,
-        _save_permanent_intent, _save_later_intent, _finalize_intent, _should_attach_reminders, _prepend_reminders
+        tools, _make_download_link, _download_notice, _wrap_download_link,
+        _save_later_intent, _finalize_intent, _should_attach_reminders, _prepend_reminders
     )
 
     # Cancel story intent

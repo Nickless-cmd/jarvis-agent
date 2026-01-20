@@ -494,47 +494,6 @@ def _update_state(state: dict, answer: str, questions: list[tuple[str, str]]) ->
     return state
 
 
-def _write_text_file(user_id: str, text: str, fmt: str, prefix: str, temp: bool = False) -> str | None:
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-    base = f"{'tmp_' if temp else ''}{prefix}_{timestamp}"
-    if fmt == "txt":
-        filename = f"{base}.txt"
-        write_file(user_id, filename, text)
-        return filename
-    if fmt == "docx":
-        try:
-            from docx import Document
-        except Exception:
-            return None
-        doc = Document()
-        for line in text.splitlines():
-            doc.add_paragraph(line)
-        filename = f"{base}.docx"
-        full = write_file(user_id, filename, "")
-        doc.save(str(full))
-        return filename
-    if fmt == "pdf":
-        try:
-            from reportlab.lib.pagesizes import A4
-            from reportlab.pdfgen import canvas
-        except Exception:
-            return None
-        filename = f"{base}.pdf"
-        full = write_file(user_id, filename, "")
-        c = canvas.Canvas(str(full), pagesize=A4)
-        width, height = A4
-        y = height - 40
-        for line in text.splitlines():
-            c.drawString(40, y, line[:120])
-            y -= 14
-            if y < 40:
-                c.showPage()
-                y = height - 40
-        c.save()
-        return filename
-    return None
-
-
 def _get_setting_value(key: str, default: str = "") -> str:
     try:
         with get_conn() as conn:
@@ -631,13 +590,6 @@ def _cv_intent(prompt: str) -> bool:
 
 def _story_intent(prompt: str) -> bool:
     return bool(re.search(r"\b(historie|fortælling|stil|essay|novelle)\b", prompt.lower()))
-
-
-def _extract_story_topic(prompt: str) -> str | None:
-    match = re.search(r"\b(?:historie|fortælling|stil|essay|novelle)\s+om\s+(.+)", prompt, flags=re.I)
-    if match:
-        return match.group(1).strip(" .,!?:;\"'()[]{}")
-    return None
 
 
 def _story_needs_questions(prompt: str) -> bool:

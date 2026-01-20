@@ -1,0 +1,103 @@
+## DATE
+tir 20 jan 22:04:30 CET 2026
+
+## GIT STATUS
+On branch main
+Your branch is up to date with 'origin/main'.
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+	codex_context.txt
+
+nothing added to commit but untracked files present (use "git add" to track)
+
+## RECENT COMMITS
+63452cd Delegate Story flow to story_skill (routing only)
+1a3e0fd Extract CV helpers into cv_skill
+3ebe59a Delegate CV flow to cv_skill (routing only)
+c718475 Add .env.example with documented configuration
+b8cd829 Remove .env from repo and ignore environment secrets
+f4195d9 Delegate CV flow to cv_skill (routing only)
+4438cc9 first commit to github.
+8daca96 Extract admin logic into admin_skill
+e30bac7 Extract process/system/ping into process_skill
+018592d Extract notes/reminders helpers into notes_skill
+902a603 Delegate notes/reminders to notes_skill (routing only)
+ea73af8 Extract history/summary into history_skill
+d080793 Stop tracking __pycache__
+b28d285 Ignore pycache artifacts
+b8cce21 Wire files_skill into agent routing
+8347dda Extract history/summary into history_skill
+8c70160 Extract notes/reminders into notes_skill
+fb8a9a7 Make tests import jarvis from src via conftest
+efda437 Fix test imports (add src to sys.path) and ignore backup archives
+ff6a6b3 Stop tracking local runtime data/caches
+bc757be Stop tracking comfyui (ignore)
+04d8ee3 Recreate skill wrapper modules (no logic moved)
+51ce563 Stop tracking local data (db/logs/memory)
+82b925a Stop tracking comfyui (ignore)
+210c1cd Initial commit (with gitignore)
+31cae64 Snapshot before next refactor
+
+## TREE (src/jarvis only)
+src/jarvis/agent_core/conversation_state.py
+src/jarvis/agent_policy/__init__.py
+src/jarvis/agent_policy/language.py
+src/jarvis/agent_policy/vision_guard.py
+src/jarvis/agent.py
+src/jarvis/agent_skills/admin_skill.py
+src/jarvis/agent_skills/code_skill.py
+src/jarvis/agent_skills/cv_skill.py
+src/jarvis/agent_skills/files_skill.py
+src/jarvis/agent_skills/history_skill.py
+src/jarvis/agent_skills/notes_skill.py
+src/jarvis/agent_skills/process_skill.py
+src/jarvis/agent_skills/story_skill.py
+src/jarvis/auth.py
+src/jarvis/code_rag/index.py
+src/jarvis/code_rag/__init__.py
+src/jarvis/code_rag/search.py
+src/jarvis/db_migrations.py
+src/jarvis/db.py
+src/jarvis/files.py
+src/jarvis/index_excludes.py
+src/jarvis/__init__.py
+src/jarvis/memory.py
+src/jarvis/notes.py
+src/jarvis/notifications/__init__.py
+src/jarvis/notifications/store.py
+src/jarvis/personality.py
+src/jarvis/server.py
+src/jarvis/session.py
+src/jarvis/session_store.py
+src/jarvis/stt.py
+src/jarvis/tickets.py
+src/jarvis/tools.py
+src/jarvis/triage/__init__.py
+src/jarvis/triage/pytest_triage.py
+src/jarvis/tts.py
+src/jarvis/watchers/__init__.py
+src/jarvis/watchers/repo_watcher.py
+src/jarvis/watchers/test_watcher.py
+
+## AGENT SKILLS
+src/jarvis/agent_skills/admin_skill.py
+src/jarvis/agent_skills/code_skill.py
+src/jarvis/agent_skills/cv_skill.py
+src/jarvis/agent_skills/files_skill.py
+src/jarvis/agent_skills/history_skill.py
+src/jarvis/agent_skills/notes_skill.py
+src/jarvis/agent_skills/process_skill.py
+src/jarvis/agent_skills/story_skill.py
+
+## LINE COUNTS
+  2207 src/jarvis/agent.py
+   196 src/jarvis/agent_skills/admin_skill.py
+   140 src/jarvis/agent_skills/code_skill.py
+   389 src/jarvis/agent_skills/cv_skill.py
+   666 src/jarvis/agent_skills/files_skill.py
+   179 src/jarvis/agent_skills/history_skill.py
+   355 src/jarvis/agent_skills/notes_skill.py
+   353 src/jarvis/agent_skills/process_skill.py
+   241 src/jarvis/agent_skills/story_skill.py
+  4726 totalt

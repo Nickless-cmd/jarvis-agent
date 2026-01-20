@@ -48,6 +48,27 @@
 - Vis påmindelser: `vis påmindelser`
 - CV: `hjælp mig med et CV`, `gem docx`, `gem permanent`
 - Historie: `skriv en historie om ...`, `vis tekst`
+
+## Langtids-hukommelse
+Jarvis husker automatisk høj-signals bruger-facts og kontekst på tværs af sessioner. Hukommelsen er privat per bruger og redigerer automatisk følsomme data.
+
+### Automatisk hukommelse
+- **Præferencer**: "Jeg kan godt lide kaffe" → huskes som præference
+- **Projekt-kontekst**: Arbejds-relaterede samtaler → huskes som projekt-info
+- **Identitet (let)**: Grundlæggende info som navn → huskes som identity-lite
+- **TODOs**: Påmindelser og opgaver → huskes som todo
+
+### Manuel kontrol
+- `husk dette: <tekst>` → gem tekst i hukommelse
+- `glem det` → slet specifik hukommelse (interaktiv)
+- `vis hvad du husker om mig` → se gemt hukommelse
+- `ryd hukommelse` → slet al hukommelse for brugeren
+
+### Regler
+- Kun høj-signals indhold gemmes (min. 50 tegn svar)
+- Følsomme data (API-nøgler, passwords, emails) redigeres automatisk
+- Hukommelse søges når relevant (personlige spørgsmål, kontekst-afhængige)
+- Maks 4-8 relevante minder pr. samtale
 - Stil: `skriv en stil om ...`, `vis tekst`
 - Tickets: `opret ticket ...`
 

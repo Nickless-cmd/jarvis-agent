@@ -29,14 +29,22 @@ def coerce_to_turn_result(result: Dict[str, Any]) -> TurnResult:
         message_already_added=False,
     )
 
-def build_response(turn_result: TurnResult, session_id: str | None, reminders_due: list, user_id_int: int | None, prompt: str) -> Dict[str, Any]:
+def build_response(turn_result: TurnResult, session_id: str | None, reminders_due: list, user_id_int: int | None, prompt: str, user_id: str) -> Dict[str, Any]:
     """Apply final packaging: reminders, persistence, and return response dict."""
     from jarvis.agent import _should_attach_reminders, _prepend_reminders, add_message
+    from jarvis.agent_core.memory_manager import should_write_memory
     reply_text = turn_result.reply_text
     if not turn_result.reminders_already_prepended and reminders_due and _should_attach_reminders(prompt):
         reply_text = _prepend_reminders(reply_text, reminders_due, user_id_int)
     if session_id and not turn_result.message_already_added:
         add_message(session_id, "assistant", reply_text)
+    
+    # Memory writing
+    memory_items = should_write_memory(prompt, reply_text)
+    for item in memory_items:
+        from jarvis.memory import add_memory
+        add_memory("assistant", f"[{item.category}] {item.content}", user_id)
+    
     return {
         "text": reply_text,
         "meta": turn_result.meta,
@@ -81,14 +89,14 @@ def handle_turn(
                     "meta": {"tool_used": False},
                 }
                 turn_result = coerce_to_turn_result(result)
-                return build_response(turn_result, session_id, [], None, prompt)
+                return build_response(turn_result, session_id, [], None, prompt, user_id)
             if not custom:
                 result = {
                     "text": "Skriv den ønskede personlighed efter kommandoen, fx: /personlighed Kort, varm og praktisk.",
                     "meta": {"tool_used": False},
                 }
                 turn_result = coerce_to_turn_result(result)
-                return build_response(turn_result, session_id, [], None, prompt)
+                return build_response(turn_result, session_id, [], None, prompt, user_id)
             from jarvis.agent import set_custom_prompt
             set_custom_prompt(session_id, custom)
             result = {
@@ -96,7 +104,7 @@ def handle_turn(
                 "meta": {"tool_used": False},
             }
             turn_result = coerce_to_turn_result(result)
-            return build_response(turn_result, session_id, [], None, prompt)
+            return build_response(turn_result, session_id, [], None, prompt, user_id)
     profile = get_user_profile(user_id)
     display_name = _first_name(profile, user_id)
     user_id_int = (profile or {}).get("id")
@@ -134,6 +142,24 @@ def handle_turn(
         "conversation_state": conversation_state,
         "mode_request": mode_request,
     }
+
+    # Memory retrieval
+    from jarvis.agent_core.memory_manager import retrieve_context, handle_memory_commands
+    memory_context = ""
+    memory_command_response = handle_memory_commands(prompt, user_id)
+    if memory_command_response:
+        result = {
+            "text": memory_command_response,
+            "meta": {"tool_used": False},
+        }
+        turn_result = coerce_to_turn_result(result)
+        return build_response(turn_result, session_id, preloaded["reminders_due"], preloaded["user_id_int"], prompt)
+    
+    from jarvis.agent_core.memory_manager import should_retrieve_memory
+    if should_retrieve_memory(prompt, ui_lang):
+        memory_context = retrieve_context(user_id, prompt)
+        if memory_context:
+            preloaded["mem"].append(f"assistant: {memory_context}")
 
     # Pending resolution
     pending_city = None
@@ -197,7 +223,7 @@ def handle_turn(
                 reply = _prepend_reminders(reply, preloaded["reminders_due"], preloaded["user_id_int"])
             add_message(session_id, "assistant", reply)
             turn_result = TurnResult(reply_text=reply, meta={"tool": None, "tool_used": False}, reminders_already_prepended=True, message_already_added=True)
-            return build_response(turn_result, session_id, preloaded["reminders_due"], preloaded["user_id_int"], prompt)
+            return build_response(turn_result, session_id, preloaded["reminders_due"], preloaded["user_id_int"], prompt, user_id)
 
     from jarvis.agent_skills.admin_skill import handle_admin
     admin_response = handle_admin(user_id, prompt, session_id, allowed_tools, ui_city, ui_lang, user_id_int=preloaded["user_id_int"])
@@ -238,4 +264,4 @@ def handle_turn(
         ui_lang=ui_lang,
         preloaded=preloaded,
     )
-    return build_response(turn_result, session_id, preloaded["reminders_due"], preloaded["user_id_int"], prompt)
+    return build_response(turn_result, session_id, preloaded["reminders_due"], preloaded["user_id_int"], prompt, user_id)

@@ -20,7 +20,7 @@ def handle_turn(
         get_pending_weather, get_pending_note, get_pending_reminder,
         get_pending_file, get_pending_image_preview, _detect_response_mode
     )
-    from jarvis.conversation_state import ConversationState
+    from jarvis.agent_core.conversation_state import ConversationState
     from jarvis.agent import get_conversation_state, set_conversation_state
 
     mem = search_memory(prompt, user_id=user_id)
@@ -85,8 +85,100 @@ def handle_turn(
         "mode_request": mode_request,
     }
 
-    from jarvis.agent import _run_agent_impl
-    return _run_agent_impl(
+    # Pending resolution
+    pending_city = None
+    pending_scope = None
+    pending_prompt = None
+    if isinstance(preloaded["pending_weather"], dict) and preloaded["pending_weather"].get("awaiting_city"):
+        from jarvis.agent import extract_location, _simple_city
+        pending_city = extract_location(prompt) or _simple_city(prompt)
+        if pending_city:
+            pending_scope = preloaded["pending_weather"].get("scope") or "today"
+            pending_prompt = preloaded["pending_weather"].get("prompt") or prompt
+            from jarvis.agent import clear_pending_weather
+            clear_pending_weather(session_id)
+            preloaded["pending_weather"] = {}
+    if isinstance(preloaded["pending_note"], dict) and preloaded["pending_note"].get("awaiting_note"):
+        from jarvis.agent import _is_note_related
+        if _is_note_related(prompt):
+            from jarvis.agent import clear_pending_note
+            clear_pending_note(session_id)
+            preloaded["pending_note"] = {}
+    if isinstance(preloaded["pending_reminder"], dict) and preloaded["pending_reminder"].get("awaiting_reminder"):
+        from jarvis.agent import _is_reminder_related
+        if _is_reminder_related(prompt):
+            from jarvis.agent import clear_pending_reminder
+            clear_pending_reminder(session_id)
+            preloaded["pending_reminder"] = {}
+
+    preloaded["pending_city"] = pending_city
+    preloaded["pending_scope"] = pending_scope
+    preloaded["pending_prompt"] = pending_prompt
+
+    # Dispatch
+    from jarvis.agent_skills.files_skill import handle_files
+    from jarvis.agent import _should_attach_reminders, _prepend_reminders, _affirm_intent, _deny_intent, _wants_previous_prompt
+    file_response = handle_files(
+        prompt=prompt,
+        session_id=session_id,
+        user_id=user_id,
+        user_id_int=preloaded["user_id_int"],
+        user_key=preloaded["user_key"],
+        display_name=preloaded["display_name"],
+        allowed_tools=allowed_tools,
+        pending_file=preloaded["pending_file"],
+        pending_image_preview=preloaded["pending_image_preview"],
+        reminders_due=preloaded["reminders_due"],
+        should_attach_reminders=_should_attach_reminders,
+        prepend_reminders=_prepend_reminders,
+        affirm_intent=_affirm_intent,
+        deny_intent=_deny_intent,
+        wants_previous_prompt=_wants_previous_prompt,
+    )
+    if file_response:
+        return file_response
+
+    if session_id:
+        from jarvis.agent import _resume_context_intent, _load_state, get_cv_state, _resume_context_reply, add_message
+        if _resume_context_intent(prompt):
+            cv_state_active = _load_state(get_cv_state(session_id))
+            reply = _resume_context_reply(cv_state_active, None, preloaded["pending_note"], preloaded["pending_reminder"], preloaded["pending_weather"])
+            if preloaded["reminders_due"] and _should_attach_reminders(prompt):
+                reply = _prepend_reminders(reply, preloaded["reminders_due"], preloaded["user_id_int"])
+            add_message(session_id, "assistant", reply)
+            return {"text": reply, "meta": {"tool": None, "tool_used": False}}
+
+    from jarvis.agent_skills.admin_skill import handle_admin
+    admin_response = handle_admin(user_id, prompt, session_id, allowed_tools, ui_city, ui_lang, user_id_int=preloaded["user_id_int"])
+    if admin_response:
+        return admin_response
+
+    from jarvis.agent_skills.cv_skill import handle_cv
+    cv_response = handle_cv(user_id, prompt, session_id, allowed_tools, ui_city, ui_lang, preloaded["user_id_int"], preloaded["reminders_due"], preloaded["profile"])
+    if cv_response:
+        return cv_response
+
+    from jarvis.agent import get_mode
+    mode = get_mode(session_id) if session_id else "balanced"
+    preloaded["mode"] = mode
+    from jarvis.agent_skills.history_skill import handle_history
+    history_response = handle_history(user_id, prompt, session_id, allowed_tools, ui_city, ui_lang, preloaded["reminders_due"], preloaded["user_id_int"])
+    if history_response:
+        return history_response
+
+    from jarvis.agent_skills.process_skill import handle_process
+    process_response = handle_process(user_id, prompt, session_id, allowed_tools, ui_city, ui_lang, reminders_due=preloaded["reminders_due"], user_id_int=preloaded["user_id_int"], display_name=preloaded["display_name"])
+    if process_response:
+        return process_response
+
+    from jarvis.agent_skills.story_skill import handle_story
+    story_response = handle_story(user_id, prompt, session_id, allowed_tools, ui_city, ui_lang, preloaded["user_id_int"], preloaded["reminders_due"], preloaded["profile"])
+    if story_response:
+        return story_response
+
+    # Fallback
+    from jarvis.agent import _run_agent_core_fallback
+    return _run_agent_core_fallback(
         user_id=user_id,
         prompt=prompt,
         session_id=session_id,

@@ -139,6 +139,8 @@ from jarvis.agent_skills.notes_skill import (
     handle_notes,
 )
 
+from jarvis.agent_skills.process_skill import handle_process
+
 def _debug(msg: str) -> None:
     if os.getenv("JARVIS_DEBUG") == "1":
         print(msg)
@@ -1142,7 +1144,8 @@ def run_agent(
     ui_city: str | None = None,
     ui_lang: str | None = None,
 ):
-    return _run_agent_impl(
+    from jarvis.agent_core import orchestrator
+    return orchestrator.handle_turn(
         user_id=user_id,
         prompt=prompt,
         session_id=session_id,
@@ -1150,7 +1153,7 @@ def run_agent(
         ui_city=ui_city,
         ui_lang=ui_lang,
     )
-def _run_agent_impl(
+def _run_agent_core_fallback(
     user_id: str,
     prompt: str,
     session_id: str | None = None,
@@ -1175,6 +1178,10 @@ def _run_agent_impl(
         pending_image_preview = preloaded["pending_image_preview"]
         conversation_state = preloaded["conversation_state"]
         mode_request = preloaded["mode_request"]
+        pending_city = preloaded["pending_city"]
+        pending_scope = preloaded["pending_scope"]
+        pending_prompt = preloaded["pending_prompt"]
+        mode = preloaded["mode"]
     else:
         mem = search_memory(prompt, user_id=user_id)
         session_hist = get_recent_messages(session_id, limit=8) if session_id else []
@@ -1219,86 +1226,7 @@ def _run_agent_impl(
             conversation_state.set_response_mode(mode_request)
             if session_id:
                 set_conversation_state(session_id, conversation_state.to_json())
-    pending_city = None
-    pending_scope = None
-    pending_prompt = None
-    if isinstance(pending_weather, dict) and pending_weather.get("awaiting_city"):
-        pending_city = extract_location(prompt) or _simple_city(prompt)
-        if pending_city:
-            pending_scope = pending_weather.get("scope") or "today"
-            pending_prompt = pending_weather.get("prompt") or prompt
-            clear_pending_weather(session_id)
-    if isinstance(pending_note, dict) and pending_note.get("awaiting_note"):
-        if not _is_note_related(prompt):
-            pending_note = pending_note
-        else:
-            clear_pending_note(session_id)
-            pending_note = {}
-    if isinstance(pending_reminder, dict) and pending_reminder.get("awaiting_reminder"):
-        if not _is_reminder_related(prompt):
-            pending_reminder = pending_reminder
-        else:
-            clear_pending_reminder(session_id)
-            pending_reminder = {}
-    file_response = handle_files(
-        prompt=prompt,
-        session_id=session_id,
-        user_id=user_id,
-        user_id_int=user_id_int,
-        user_key=user_key,
-        display_name=display_name,
-        allowed_tools=allowed_tools,
-        pending_file=pending_file,
-        pending_image_preview=pending_image_preview,
-        reminders_due=reminders_due,
-        should_attach_reminders=_should_attach_reminders,
-        prepend_reminders=_prepend_reminders,
-        affirm_intent=_affirm_intent,
-        deny_intent=_deny_intent,
-        wants_previous_prompt=_wants_previous_prompt,
-    )
-    if file_response:
-        return file_response
-
-    if session_id and _resume_context_intent(prompt):
-        cv_state_active = _load_state(get_cv_state(session_id))
-        reply = _resume_context_reply(cv_state_active, None, pending_note, pending_reminder, pending_weather)
-        if reminders_due and _should_attach_reminders(prompt):
-            reply = _prepend_reminders(reply, reminders_due, user_id_int)
-        add_message(session_id, "assistant", reply)
-        return {"text": reply, "meta": {"tool": None, "tool_used": False}}
-
-    # Handle admin intents
-    from jarvis.agent_skills.admin_skill import handle_admin
-    admin_response = handle_admin(user_id, prompt, session_id, allowed_tools, ui_city, ui_lang, user_id_int=user_id_int)
-    if admin_response:
-        return admin_response
-
-    # Handle CV intents
-    from jarvis.agent_skills.cv_skill import handle_cv
-    cv_response = handle_cv(user_id, prompt, session_id, allowed_tools, ui_city, ui_lang, user_id_int, reminders_due, profile)
-    if cv_response:
-        return cv_response
-
-    mode = get_mode(session_id) if session_id else "balanced"
-    # Handle history and summary intents
-    from jarvis.agent_skills.history_skill import handle_history
-    history_response = handle_history(user_id, prompt, session_id, allowed_tools, ui_city, ui_lang, reminders_due, user_id_int)
-    if history_response:
-        return history_response
-
-    # Handle process/system/ping intents
-    from jarvis.agent_skills.process_skill import handle_process
-    process_response = handle_process(user_id, prompt, session_id, allowed_tools, ui_city, ui_lang, reminders_due=reminders_due, user_id_int=user_id_int, display_name=display_name)
-    if process_response:
-        return process_response
-
-    # Handle story intents
-    from jarvis.agent_skills.story_skill import handle_story
-    story_response = handle_story(user_id, prompt, session_id, allowed_tools, ui_city, ui_lang, user_id_int, reminders_due, profile)
-    if story_response:
-        return story_response
-
+        mode = get_mode(session_id) if session_id else "balanced"
     cv_state_active = _load_state(get_cv_state(session_id)) if session_id else None
     forced_tool = None
     resume_prompt = None

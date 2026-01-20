@@ -873,21 +873,6 @@ def _format_datetime(value: str | None) -> str:
         return "ukendt tidspunkt"
 
 
-def _history_intent(prompt: str) -> bool:
-    p = prompt.lower()
-    return any(
-        phrase in p
-        for phrase in [
-            "hvad sagde jeg",
-            "hvad snakkede vi om",
-            "hvad talte vi om",
-            "hvad snakkede vi",
-            "hvad sagde du",
-            "hvad spurgte jeg",
-        ]
-    )
-
-
 def _is_time_query(prompt: str) -> bool:
     p = prompt.lower()
     return bool(re.search(r"\b(klok(?:ken)?|tid|tidspunkt|dato|time|date)\b", p))
@@ -1020,24 +1005,7 @@ def _is_deep_search(prompt: str) -> bool:
     )
 
 
-def _summary_intent(prompt: str) -> bool:
-    p = prompt.lower().strip()
-    if p.startswith("/summary") or p.startswith("/opsummer"):
-        return True
-    return any(
-        k in p
-        for k in [
-            "opsummer chat",
-            "opsummer samtalen",
-            "opsummer vores samtale",
-            "kort resume",
-            "resume af chatten",
-            "opsummering",
-        ]
-    )
 
-
-def _summary_detail(prompt: str) -> str:
     p = prompt.lower()
     if any(k in p for k in ["dybdegående", "lang", "mere detaljeret", "uddyb"]):
         return "long"
@@ -1262,22 +1230,7 @@ def _format_dt(value: str) -> str:
     except Exception:
         return value
 
-def _time_window(prompt: str) -> tuple[time | None, time | None]:
-    p = prompt.lower()
-    if "formiddag" in p:
-        return time(6, 0), time(12, 0)
-    if "eftermiddag" in p:
-        return time(12, 0), time(17, 0)
-    if "aften" in p:
-        return time(17, 0), time(22, 0)
-    if "morgen" in p:
-        return time(6, 0), time(10, 0)
-    if "i dag" in p:
-        return time(0, 0), time(23, 59)
-    return None, None
 
-
-def _extract_time_point(prompt: str) -> time | None:
     match = re.search(r"\b(?:kl\.?\s*)?(\d{1,2})[:.](\d{2})\b", prompt.lower())
     if not match:
         return None
@@ -1288,47 +1241,7 @@ def _extract_time_point(prompt: str) -> time | None:
     return time(hh, mm)
 
 
-def _history_reply(session_id: str, prompt: str) -> str | None:
-    messages = get_all_messages(session_id)
-    if not messages:
-        return "Jeg har ingen historik i denne session."
-    zone = ZoneInfo("Europe/Copenhagen")
-    start, end = _time_window(prompt)
-    point = _extract_time_point(prompt)
-    filtered = []
-    for m in messages:
-        created = m.get("created_at")
-        if not created:
-            continue
-        try:
-            dt = datetime.fromisoformat(created.replace("Z", "+00:00")).astimezone(zone)
-        except Exception:
-            continue
-        if point:
-            filtered.append((dt, m))
-            continue
-        if start and end:
-            if start <= dt.time() <= end:
-                filtered.append((dt, m))
-        else:
-            filtered.append((dt, m))
-    if not filtered:
-        return "Jeg kunne ikke finde noget i det tidsrum."
-    if point:
-        filtered.sort(key=lambda x: abs((datetime.combine(x[0].date(), point, tzinfo=zone) - x[0]).total_seconds()))
-        nearest = filtered[0][1]
-        who = "du" if nearest.get("role") == "user" else "jeg"
-        return f"Klods på tidspunktet sagde {who}: {nearest.get('content','')}"
-    user_msgs = [m for _, m in filtered if m.get("role") == "user"]
-    if not user_msgs:
-        return "Jeg kan ikke finde hvad du sagde i det tidsrum."
-    lines = []
-    for m in user_msgs[-5:]:
-        lines.append(f"• {m.get('content','')}")
-    return "Det du sagde:\n" + "\n".join(lines)
 
-
-def _tool_error_info(tool_result) -> tuple[str | None, str | None]:
     if tool_result is None:
         return "ukendt fejl", None
     if isinstance(tool_result, dict):
@@ -2052,10 +1965,11 @@ def run_agent(
             return {"text": reply, "meta": {"tool_used": False}}
 
     mode = get_mode(session_id) if session_id else "balanced"
-    if session_id and _history_intent(prompt):
-        reply = _history_reply(session_id, prompt)
-        add_message(session_id, "assistant", reply)
-        return {"text": reply, "meta": {"tool": None, "tool_used": False}}
+    # Handle history and summary intents
+    from jarvis.agent_skills.history_skill import handle_history
+    history_response = handle_history(user_id, prompt, session_id, allowed_tools, ui_city, ui_lang, reminders_due, user_id_int)
+    if history_response:
+        return history_response
 
     cv_state_active = _load_state(get_cv_state(session_id)) if session_id else None
     story_state_active = _load_state(get_story_state(session_id)) if session_id else None
@@ -2370,44 +2284,8 @@ def run_agent(
                 reply = "Jeg kan ikke analysere ticketen lige nu."
             add_message(session_id, "assistant", reply)
             return {"text": reply, "meta": {"tool": None, "tool_used": False}}
-    if _summary_intent(prompt):
-        if not session_id:
-            reply = "Opsummering kræver en aktiv chat."
-            return {"text": reply, "meta": {"tool": None, "tool_used": False}}
-        detail = _summary_detail(prompt)
-        messages = get_all_messages(session_id)
-        if not messages:
-            reply = "Der er ingen beskeder at opsummere endnu."
-            return {"text": reply, "meta": {"tool": None, "tool_used": False}}
-        max_chars = 12000 if detail == "long" else 8000
-        parts = []
-        total = 0
-        for m in reversed(messages):
-            line = f"{'Bruger' if m['role']=='user' else 'Jarvis'}: {m['content']}"
-            if total + len(line) > max_chars:
-                break
-            parts.append(line)
-            total += len(line)
-        transcript = "\n".join(reversed(parts))
-        bullets = "8 punkter" if detail == "long" else "5 punkter"
-        system = (
-            "Du opsummerer samtaler på dansk. Vær kort og præcis. "
-            f"Returnér {bullets} i punktform. Ingen gæt."
-        )
-        summary_messages = [
-            {"role": "system", "content": system},
-            {"role": "assistant", "content": transcript},
-            {"role": "user", "content": "Giv en opsummering."},
-        ]
-        res = call_ollama(summary_messages)
-        reply = res.get("choices", [{}])[0].get("message", {}).get("content", "")
-        reply = _dedupe_repeated_words(reply).strip()
-        if not reply:
-            reply = "Jeg kan ikke opsummere samtalen lige nu."
-        if reminders_due and _should_attach_reminders(prompt):
-            reply = _prepend_reminders(reply, reminders_due, user_id_int)
-        add_message(session_id, "assistant", reply)
-        return {"text": reply, "meta": {"tool": None, "tool_used": False}}
+    # Handle history and summary intents (already handled above)
+    # if _summary_intent(prompt):
     if session_id and _list_notes_intent(prompt):
         since_dt = _note_list_since_intent(prompt)
         if since_dt and user_id_int:

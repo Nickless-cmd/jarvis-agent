@@ -68,8 +68,7 @@ Jarvis husker automatisk høj-signals bruger-facts og kontekst på tværs af ses
 - Kun høj-signals indhold gemmes (min. 50 tegn svar)
 - Følsomme data (API-nøgler, passwords, emails) redigeres automatisk
 - Hukommelse søges når relevant (personlige spørgsmål, kontekst-afhængige)
-- Maks 4-8 relevante minder pr. samtale
-- Stil: `skriv en stil om ...`, `vis tekst`
+- Maks 4-8 relevante minder pr. samtale- Af og til tilføjes en subtil note i svaret når hukommelse bruges ("Jeg husker noget relevant...")- Stil: `skriv en stil om ...`, `vis tekst`
 - Tickets: `opret ticket ...`
 
 ## 🖼️ **Billedanalyse med Hallucination-beskyttelse**

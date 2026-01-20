@@ -100,7 +100,7 @@ from jarvis.agent_skills.files_skill import (
 from jarvis.db import get_conn
 from jarvis import tools, tts
 from jarvis.agent_policy.language import _should_translate_vision_response
-from jarvis.agent_core.conversation_state import ConversationState
+from jarvis.agent_core.orchestrator import TurnResult, coerce_to_turn_result
 from jarvis.agent_policy.vision_guard import (
     _describe_image_ollama,
     _looks_like_guess,
@@ -1297,12 +1297,12 @@ def _run_agent_core_fallback(
         # CV affirm handled in cv_skill
         if pending_note:
             reply = "Naturligvis. Hvad skal jeg gemme som note?"
-            add_message(session_id, "assistant", reply)
-            return {"text": reply, "meta": {"tool": None, "tool_used": False}}
+            add_memory("assistant", reply, user_id=user_id)
+            return TurnResult(reply_text=reply, meta={"tool": None, "tool_used": False})
         if pending_reminder:
             reply = "Naturligvis. Hvornår skal jeg minde dig om det?"
-            add_message(session_id, "assistant", reply)
-            return {"text": reply, "meta": {"tool": None, "tool_used": False}}
+            add_memory("assistant", reply, user_id=user_id)
+            return TurnResult(reply_text=reply, meta={"tool": None, "tool_used": False})
     if session_id and _ticket_confirm_intent(prompt):
         pending = _load_state(get_ticket_state(session_id))
         if pending and user_id_int:
@@ -1317,22 +1317,20 @@ def _run_agent_core_fallback(
                 reply = f"Ticket oprettet (#{ticket['id']}) — prioritet: {ticket['priority']}."
             else:
                 reply = "Jeg kunne ikke oprette ticketen lige nu."
-            add_message(session_id, "assistant", reply)
-            return {"text": reply, "meta": {"tool": None, "tool_used": False}}
+            add_memory("assistant", reply, user_id=user_id)
+            return TurnResult(reply_text=reply, meta={"tool": None, "tool_used": False})
     if session_id and _ticket_intent(prompt) and user_id_int:
         ticket = _safe_create_ticket(user_id_int, "Bruger‑ticket", prompt, "vigtig")
         reply = f"Ticket oprettet (#{ticket['id']})." if ticket else "Jeg kunne ikke oprette ticketen lige nu."
-        add_message(session_id, "assistant", reply)
-        return {"text": reply, "meta": {"tool": None, "tool_used": False}}
+        add_memory("assistant", reply, user_id=user_id)
+        return TurnResult(reply_text=reply, meta={"tool": None, "tool_used": False})
     if _name_intent(prompt):
         if profile and profile.get("full_name"):
             reply = f"Du hedder {_first_name(profile, user_id)}."
         else:
             reply = "Jeg har ikke dit navn endnu. Du kan tilføje det i Min konto."
-        if reminders_due and _should_attach_reminders(prompt):
-            reply = _prepend_reminders(reply, reminders_due, user_id_int)
-        add_message(session_id, "assistant", reply)
-        return {"text": reply, "meta": {"tool": None, "tool_used": False}}
+        add_memory("assistant", reply, user_id=user_id)
+        return TurnResult(reply_text=reply, meta={"tool": None, "tool_used": False})
     if session_id and _tool_source_intent(prompt):
         last = _load_state(get_last_tool(session_id))
         if not last:
@@ -1344,10 +1342,8 @@ def _run_agent_core_fallback(
             reply = _format_tool_source(last)
             if last.get("error"):
                 reply += " Sidste værktøjskald fejlede."
-        if reminders_due and _should_attach_reminders(prompt):
-            reply = _prepend_reminders(reply, reminders_due, user_id_int)
-        add_message(session_id, "assistant", reply)
-        return {"text": reply, "meta": {"tool": last.get("tool") if last else None, "tool_used": False}}
+        add_memory("assistant", reply, user_id=user_id)
+        return TurnResult(reply_text=reply, meta={"tool": last.get("tool") if last else None, "tool_used": False})
     if session_id and _tool_error_intent(prompt):
         last = _load_state(get_last_tool(session_id))
         if not last or not last.get("error"):
@@ -1355,16 +1351,12 @@ def _run_agent_core_fallback(
         else:
             detail = last.get("detail") or "ukendt fejl"
             reply = f"Sidste fejl: {detail}"
-        if reminders_due and _should_attach_reminders(prompt):
-            reply = _prepend_reminders(reply, reminders_due, user_id_int)
-        add_message(session_id, "assistant", reply)
-        return {"text": reply, "meta": {"tool": last.get("tool") if last else None, "tool_used": False}}
+        add_memory("assistant", reply, user_id=user_id)
+        return TurnResult(reply_text=reply, meta={"tool": last.get("tool") if last else None, "tool_used": False})
     if session_id and _resume_context_intent(prompt):
         reply = _resume_context_reply(cv_state_active, None, pending_note, pending_reminder, pending_weather)
-        if reminders_due and _should_attach_reminders(prompt):
-            reply = _prepend_reminders(reply, reminders_due, user_id_int)
-        add_message(session_id, "assistant", reply)
-        return {"text": reply, "meta": {"tool": None, "tool_used": False}}
+        add_memory("assistant", reply, user_id=user_id)
+        return TurnResult(reply_text=reply, meta={"tool": None, "tool_used": False})
     # Handle history and summary intents (already handled above)
     # if _summary_intent(prompt):
     # Notes and reminders
@@ -1380,17 +1372,15 @@ def _run_agent_core_fallback(
         prepend_reminders=_prepend_reminders,
     )
     if result:
-        return result
+        return coerce_to_turn_result(result)
     if _farewell_intent(prompt):
         name = _first_name(profile, "")
         if name:
             reply = f"Tak for i dag, {name}. Det bliver mig en fornøjelse at hjælpe igen i morgen."
         else:
             reply = "Tak for i dag. Det bliver mig en fornøjelse at hjælpe igen i morgen."
-        if reminders_due and _should_attach_reminders(prompt):
-            reply = _prepend_reminders(reply, reminders_due, user_id_int)
-        add_message(session_id, "assistant", reply)
-        return {"text": reply, "meta": {"tool": None, "tool_used": False}}
+        add_memory("assistant", reply, user_id=user_id)
+        return TurnResult(reply_text=reply, meta={"tool": None, "tool_used": False})
     idx = _read_news_index(prompt)
     if idx is not None and not session_id:
         reply = "Læs-kommando kræver en aktiv session."
@@ -1413,25 +1403,25 @@ def _run_agent_core_fallback(
             except Exception:
                 _debug("📰 read-request: last results JSON parse failed")
                 reply = "Jeg kunne ikke læse den seneste liste."
-                add_message(session_id, "assistant", reply)
-                return {"text": reply}
+                add_memory("assistant", reply, user_id=user_id)
+                return TurnResult(reply_text=reply, meta={"tool": None, "tool_used": False})
             items = payload.get("items", [])
             if idx < 1 or idx > len(items):
                 reply = f"Nummer {idx} findes ikke i listen."
-                add_message(session_id, "assistant", reply)
-                return {"text": reply}
+                add_memory("assistant", reply, user_id=user_id)
+                return TurnResult(reply_text=reply, meta={"tool": None, "tool_used": False})
             url = items[idx - 1].get("url")
             cached_summary = items[idx - 1].get("summary")
             if source == "search" and cached_summary:
                 reply = cached_summary
-                add_message(session_id, "assistant", reply)
-                return {"text": reply}
+                add_memory("assistant", reply, user_id=user_id)
+                return TurnResult(reply_text=reply, meta={"tool": None, "tool_used": False})
             article = tools.read_article(url)
             if article.get("error") or not article.get("text"):
                 _debug(f"📰 read-request: article fetch failed: {article.get('error')}")
                 reply = "Jeg kan ikke hente artiklen lige nu."
-                add_message(session_id, "assistant", reply)
-                return {"text": reply}
+                add_memory("assistant", reply, user_id=user_id)
+                return TurnResult(reply_text=reply, meta={"tool": None, "tool_used": False})
             rule = "Opsummér kun ud fra teksten. Hvis tekst mangler, sig det."
             article_messages = [
                 {"role": "system", "content": f"{SYSTEM_PROMPT}\n{rule}"},
@@ -1443,15 +1433,12 @@ def _run_agent_core_fallback(
             reply = _dedupe_repeated_words(reply)
             if not reply.strip():
                 reply = "Jeg kan ikke opsummere artiklen lige nu."
-            add_message(session_id, "assistant", reply)
-            return {
-                "text": reply,
-                "data": {
-                    "type": "article",
-                    "url": article.get("url"),
-                    "title": article.get("title") or "Artikel",
-                },
-            }
+            add_memory("assistant", reply, user_id=user_id)
+            return TurnResult(reply_text=reply, meta={"tool": None, "tool_used": False}, data={
+                "type": "article",
+                "url": article.get("url"),
+                "title": article.get("title") or "Artikel",
+            })
     if session_id and prompt.strip().lower().startswith("/mode "):
         requested = prompt.strip().split(None, 1)[1].strip().lower()
         if requested in {"fakta", "snak", "balanced"}:
@@ -1459,22 +1446,18 @@ def _run_agent_core_fallback(
             reply = f"Mode sat til {requested}."
         else:
             reply = "Ukendt mode. Brug /mode fakta, /mode snak eller /mode balanced."
-        add_message(session_id, "assistant", reply)
-        return {"text": reply}
+        add_memory("assistant", reply, user_id=user_id)
+        return TurnResult(reply_text=reply, meta={"tool": None, "tool_used": False})
     if not session_id and prompt.strip().lower().startswith("/mode "):
-        return {"text": "Mode kræver en session."}
+        return TurnResult(reply_text="Mode kræver en session.", meta={"tool": None, "tool_used": False})
 
     if allowed_tools is not None:
         requested_tool = choose_tool(prompt, allowed_tools=None)
         if requested_tool and requested_tool not in allowed_tools:
             label = _tool_label(requested_tool)
             reply = f"Værktøjet {label} er slået fra. Slå det til i Værktøjer og prøv igen."
-            if reminders_due and _should_attach_reminders(prompt):
-                reply = _prepend_reminders(reply, reminders_due, user_id_int)
             add_memory("assistant", reply, user_id=user_id)
-            if session_id:
-                add_message(session_id, "assistant", reply)
-            return {"text": reply, "meta": {"tool": requested_tool, "tool_used": False}}
+            return TurnResult(reply_text=reply, meta={"tool": requested_tool, "tool_used": False})
 
     if session_id:
         pending_process = _load_state(get_process_state(session_id))
@@ -1483,11 +1466,8 @@ def _run_agent_core_fallback(
             tool_result = tools.kill_process(int(pending_pid))
             set_process_state(session_id, "")
             reply = "Proces afsluttet." if tool_result.get("ok") else "Jeg kunne ikke afslutte processen."
-            if reminders_due and _should_attach_reminders(prompt):
-                reply = _prepend_reminders(reply, reminders_due, user_id_int)
             add_memory("assistant", reply, user_id=user_id)
-            add_message(session_id, "assistant", reply)
-            return {"text": reply, "data": tool_result, "meta": {"tool": "process", "tool_used": True}}
+            return TurnResult(reply_text=reply, meta={"tool": "process", "tool_used": True}, data=tool_result)
 
     tool = None
     cv_intent = _cv_intent(prompt)
@@ -1670,9 +1650,7 @@ def _run_agent_core_fallback(
                 )
             reply = "Jeg mangler en by eller et postnummer. Hvis du ønsker det, kan jeg bruge din profilby."
             add_memory("assistant", reply, user_id=user_id)
-            if session_id:
-                add_message(session_id, "assistant", reply)
-            return {"text": reply, "meta": {"tool": "weather", "tool_used": False}}
+            return TurnResult(reply_text=reply, meta={"tool": "weather", "tool_used": False})
         now = tools.weather_now(city)
         forecast = tools.weather_forecast(city)
         tool_result = {
@@ -1716,15 +1694,12 @@ def _run_agent_core_fallback(
             elif not session_id:
                 reply = "Proces-afslutning kræver en aktiv session."
                 add_memory("assistant", reply, user_id=user_id)
-                return {"text": reply, "meta": {"tool": "process", "tool_used": False}}
+                return TurnResult(reply_text=reply, meta={"tool": "process", "tool_used": False})
             else:
                 set_process_state(session_id, json.dumps({"pid": pid}))
                 reply = f"Jeg kan afslutte proces {pid}. Skriv 'bekræft' for at fortsætte."
-                if reminders_due and _should_attach_reminders(prompt):
-                    reply = _prepend_reminders(reply, reminders_due, user_id_int)
                 add_memory("assistant", reply, user_id=user_id)
-                add_message(session_id, "assistant", reply)
-                return {"text": reply, "meta": {"tool": "process", "tool_used": False}}
+                return TurnResult(reply_text=reply, meta={"tool": "process", "tool_used": False})
         elif action == "find":
             tool_result = tools.find_process(prompt)
         else:
@@ -1751,12 +1726,8 @@ def _run_agent_core_fallback(
                 reply += f"\nJeg har oprettet en ticket til dev‑teamet (#{ticket['id']})."
             else:
                 reply += "\nJeg kunne ikke oprette en ticket lige nu."
-        if reminders_due and _should_attach_reminders(prompt):
-            reply = _prepend_reminders(reply, reminders_due, user_id_int)
         add_memory("assistant", reply, user_id=user_id)
-        if session_id:
-            add_message(session_id, "assistant", reply)
-        return {"text": reply}
+        return TurnResult(reply_text=reply, meta={"tool": tool, "tool_used": False})
 
     if tool == "currency" and session_id:
         last_payload = {"tool": "currency", "source": "exchangerate.host"}
@@ -1794,16 +1765,8 @@ def _run_agent_core_fallback(
             reply = "Jeg kan ikke hente nyheder lige nu. Prøv igen senere."
             if resume_prompt:
                 reply += f"\n\n{resume_prompt}"
-            if reminders_due and _should_attach_reminders(prompt):
-                reply = _prepend_reminders(reply, reminders_due, user_id_int)
             add_memory("assistant", reply, user_id=user_id)
-            if session_id:
-                add_message(session_id, "assistant", reply)
-            return {
-                "text": reply,
-                "data": tool_result,
-                "meta": {"status": "empty", "tool": "news", "tool_used": True},
-            }
+            return TurnResult(reply_text=reply, meta={"status": "empty", "tool": "news", "tool_used": True}, data=tool_result)
         intro = "Seneste nyheder" if not query else f"Seneste nyheder om {query}"
         if len(items) < 3:
             intro = f"{intro} (jeg fandt kun {len(items)} relevante lige nu)"
@@ -1812,26 +1775,9 @@ def _run_agent_core_fallback(
         reply += "\n\nVil du have mig til at læse en af dem? Skriv: læs nr 2."
         if resume_prompt:
             reply += f"\n\n{resume_prompt}"
-        if reminders_due and _should_attach_reminders(prompt):
-            reply = _prepend_reminders(reply, reminders_due, user_id_int)
         add_memory("assistant", reply, user_id=user_id)
-        if session_id:
-            add_message(session_id, "assistant", reply)
-        if session_id:
-            set_last_news(session_id, json.dumps(tool_result, ensure_ascii=False))
-            last_payload = {
-                "tool": "news",
-                "source": _collect_sources(items),
-                "sources": _collect_sources(items),
-                "count": len(items),
-            }
-            set_last_tool(session_id, json.dumps(last_payload, ensure_ascii=False))
         status = "partial" if len(items) < 3 else "ok"
-        return {
-            "text": reply,
-            "data": tool_result,
-            "meta": {"status": status, "count": len(items), "tool": "news", "tool_used": True},
-        }
+        return TurnResult(reply_text=reply, meta={"status": status, "count": len(items), "tool": "news", "tool_used": True}, data=tool_result)
 
     if tool == "search":
         if not isinstance(tool_result, dict) or tool_result.get("error"):
@@ -1839,20 +1785,14 @@ def _run_agent_core_fallback(
             if resume_prompt:
                 reply += f"\n\n{resume_prompt}"
             add_memory("assistant", reply, user_id=user_id)
-            if session_id:
-                add_message(session_id, "assistant", reply)
-            return {"text": reply, "meta": {"tool": "search", "tool_used": True}}
+            return TurnResult(reply_text=reply, meta={"tool": "search", "tool_used": True})
         items = tool_result.get("items", [])
         if not items:
             reply = "Jeg fandt ingen resultater."
             if resume_prompt:
                 reply += f"\n\n{resume_prompt}"
-            if reminders_due and _should_attach_reminders(prompt):
-                reply = _prepend_reminders(reply, reminders_due, user_id_int)
             add_memory("assistant", reply, user_id=user_id)
-            if session_id:
-                add_message(session_id, "assistant", reply)
-            return {"text": reply, "data": tool_result, "meta": {"tool": "search", "tool_used": True}}
+            return TurnResult(reply_text=reply, meta={"tool": "search", "tool_used": True}, data=tool_result)
         max_items = 5
         items = items[:max_items]
         deep = _is_deep_search(prompt)
@@ -1910,20 +1850,8 @@ def _run_agent_core_fallback(
         if resume_prompt:
             reply += f"\n\n{resume_prompt}"
         tool_result = {"type": "search", "query": tool_result.get("query", ""), "items": items}
-        if reminders_due and _should_attach_reminders(prompt):
-            reply = _prepend_reminders(reply, reminders_due, user_id_int)
-        if session_id:
-            set_last_search(session_id, json.dumps(tool_result, ensure_ascii=False))
-            last_payload = {
-                "tool": "search",
-                "source": _collect_sources(items),
-                "count": len(items),
-            }
-            set_last_tool(session_id, json.dumps(last_payload, ensure_ascii=False))
         add_memory("assistant", reply, user_id=user_id)
-        if session_id:
-            add_message(session_id, "assistant", reply)
-        return {"text": reply, "data": tool_result, "meta": {"tool": "search", "tool_used": True, "intent": "cv" if cv_intent else "search"}}
+        return TurnResult(reply_text=reply, meta={"tool": "search", "tool_used": True, "intent": "cv" if cv_intent else "search"}, data=tool_result)
 
     if tool == "time":
         now_iso = tool_result if isinstance(tool_result, str) else None
@@ -1949,27 +1877,20 @@ def _run_agent_core_fallback(
             reply = "I can't fetch the time right now." if lang.startswith("en") else "Jeg kan ikke hente tiden lige nu."
         if resume_prompt:
             reply += f"\n\n{resume_prompt}"
-        if session_id:
-            last_payload = {"tool": "time", "source": "system_time"}
-            set_last_tool(session_id, json.dumps(last_payload, ensure_ascii=False))
-        if reminders_due and _should_attach_reminders(prompt):
-            reply = _prepend_reminders(reply, reminders_due, user_id_int)
         add_memory("assistant", reply, user_id=user_id)
-        if session_id:
-            add_message(session_id, "assistant", reply)
-        return {"text": reply, "meta": {"tool": "time", "tool_used": True}}
+        return TurnResult(reply_text=reply, meta={"tool": "time", "tool_used": True})
 
     system_response = handle_process(user_id, prompt, session_id, allowed_tools, ui_city, ui_lang, tool="system", tool_result=tool_result, reminders_due=reminders_due, user_id_int=user_id_int, display_name=display_name, resume_prompt=resume_prompt)
     if system_response:
-        return system_response
+        return coerce_to_turn_result(system_response)
 
     ping_response = handle_process(user_id, prompt, session_id, allowed_tools, ui_city, ui_lang, tool="ping", tool_result=tool_result, reminders_due=reminders_due, user_id_int=user_id_int, display_name=display_name, resume_prompt=resume_prompt)
     if ping_response:
-        return ping_response
+        return coerce_to_turn_result(ping_response)
 
     process_response = handle_process(user_id, prompt, session_id, allowed_tools, ui_city, ui_lang, tool="process", tool_result=tool_result, reminders_due=reminders_due, user_id_int=user_id_int, display_name=display_name, resume_prompt=resume_prompt)
     if process_response:
-        return process_response
+        return coerce_to_turn_result(process_response)
 
     if tool == "weather":
         if not tool_summary:
@@ -2018,31 +1939,20 @@ def _run_agent_core_fallback(
         if os.getenv("TTS", "true").lower() == "true":
             audio_file = tts.speak(reply)
             if audio_file:
-                return {
-                    "text": reply,
-                    "rendered_text": rendered_text,
-                    "data": {
-                        "type": "weather",
-                        "location": name,
-                        "now": now,
-                        "forecast": forecast,
-                        "scope": scope,
-                    },
-                    "meta": {"tool": "weather", "tool_used": True},
-                    "audio": audio_file,
-                }
-        return {
-            "text": reply,
-            "rendered_text": rendered_text,
-            "data": {
-                "type": "weather",
-                "location": name,
-                "now": now,
-                "forecast": forecast,
-                "scope": scope,
-            },
-            "meta": {"tool": "weather", "tool_used": True},
-        }
+                return TurnResult(reply_text=reply, meta={"tool": "weather", "tool_used": True}, data={
+                    "type": "weather",
+                    "location": name,
+                    "now": now,
+                    "forecast": forecast,
+                    "scope": scope,
+                }, rendered_text=rendered_text, audio=audio_file)
+        return TurnResult(reply_text=reply, meta={"tool": "weather", "tool_used": True}, data={
+            "type": "weather",
+            "location": name,
+            "now": now,
+            "forecast": forecast,
+            "scope": scope,
+        }, rendered_text=rendered_text)
 
     mode_hint = ""
     if mode == "fakta":
@@ -2088,18 +1998,12 @@ def _run_agent_core_fallback(
     if resume_prompt:
         reply = f"{reply}\n\n{resume_prompt}"
 
-    if reminders_due and _should_attach_reminders(prompt):
-        reply = _prepend_reminders(reply, reminders_due, user_id_int)
     add_memory("assistant", reply, user_id=user_id)
-    if session_id:
-        add_message(session_id, "assistant", reply)
-        conversation_state.update_summary(reply)
-        set_conversation_state(session_id, conversation_state.to_json())
 
     if os.getenv("TTS", "true").lower() == "true":
         audio_file = tts.speak(reply)
         if audio_file:
-            return {"text": reply, "audio": audio_file, "meta": {"tool": tool or None, "tool_used": tool_used}}
-        return {"text": reply, "meta": {"tool": tool or None, "tool_used": tool_used}}
+            return TurnResult(reply_text=reply, meta={"tool": tool or None, "tool_used": tool_used}, audio=audio_file)
+        return TurnResult(reply_text=reply, meta={"tool": tool or None, "tool_used": tool_used})
 
-    return {"text": reply, "meta": {"tool": tool or None, "tool_used": tool_used}}
+    return TurnResult(reply_text=reply, meta={"tool": tool or None, "tool_used": tool_used})

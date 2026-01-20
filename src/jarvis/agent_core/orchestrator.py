@@ -2,6 +2,50 @@
 Agent orchestrator - coordinates agent execution.
 """
 
+from dataclasses import dataclass
+from typing import Dict, Any, Optional
+
+@dataclass
+class TurnResult:
+    reply_text: str
+    meta: Dict[str, Any]
+    data: Optional[Dict[str, Any]] = None
+    audio: Optional[str] = None
+    rendered_text: Optional[str] = None
+    download_info: Optional[Dict[str, Any]] = None
+    reminders_already_prepended: bool = False
+    message_already_added: bool = False
+
+def coerce_to_turn_result(result: Dict[str, Any]) -> TurnResult:
+    """Convert a legacy result dict to TurnResult."""
+    return TurnResult(
+        reply_text=result.get("text", ""),
+        meta=result.get("meta", {}),
+        data=result.get("data"),
+        audio=result.get("audio"),
+        rendered_text=result.get("rendered_text"),
+        download_info=result.get("download_info"),
+        reminders_already_prepended=False,
+        message_already_added=False,
+    )
+
+def build_response(turn_result: TurnResult, session_id: str | None, reminders_due: list, user_id_int: int | None, prompt: str) -> Dict[str, Any]:
+    """Apply final packaging: reminders, persistence, and return response dict."""
+    from jarvis.agent import _should_attach_reminders, _prepend_reminders, add_message
+    reply_text = turn_result.reply_text
+    if not turn_result.reminders_already_prepended and reminders_due and _should_attach_reminders(prompt):
+        reply_text = _prepend_reminders(reply_text, reminders_due, user_id_int)
+    if session_id and not turn_result.message_already_added:
+        add_message(session_id, "assistant", reply_text)
+    return {
+        "text": reply_text,
+        "meta": turn_result.meta,
+        "data": turn_result.data,
+        "audio": turn_result.audio,
+        "rendered_text": turn_result.rendered_text,
+        "download_info": turn_result.download_info,
+    }
+
 def handle_turn(
     user_id: str,
     prompt: str,
@@ -32,21 +76,27 @@ def handle_turn(
             if custom.lower() in {"nulstil", "reset", "standard", "default"}:
                 from jarvis.agent import set_custom_prompt
                 set_custom_prompt(session_id, None)
-                return {
+                result = {
                     "text": "Session‑personlighed nulstillet. Jeg bruger standarden igen.",
                     "meta": {"tool_used": False},
                 }
+                turn_result = coerce_to_turn_result(result)
+                return build_response(turn_result, session_id, [], None, prompt)
             if not custom:
-                return {
+                result = {
                     "text": "Skriv den ønskede personlighed efter kommandoen, fx: /personlighed Kort, varm og praktisk.",
                     "meta": {"tool_used": False},
                 }
+                turn_result = coerce_to_turn_result(result)
+                return build_response(turn_result, session_id, [], None, prompt)
             from jarvis.agent import set_custom_prompt
             set_custom_prompt(session_id, custom)
-            return {
+            result = {
                 "text": "Session‑personlighed opdateret.",
                 "meta": {"tool_used": False},
             }
+            turn_result = coerce_to_turn_result(result)
+            return build_response(turn_result, session_id, [], None, prompt)
     profile = get_user_profile(user_id)
     display_name = _first_name(profile, user_id)
     user_id_int = (profile or {}).get("id")
@@ -146,7 +196,8 @@ def handle_turn(
             if preloaded["reminders_due"] and _should_attach_reminders(prompt):
                 reply = _prepend_reminders(reply, preloaded["reminders_due"], preloaded["user_id_int"])
             add_message(session_id, "assistant", reply)
-            return {"text": reply, "meta": {"tool": None, "tool_used": False}}
+            turn_result = TurnResult(reply_text=reply, meta={"tool": None, "tool_used": False}, reminders_already_prepended=True, message_already_added=True)
+            return build_response(turn_result, session_id, preloaded["reminders_due"], preloaded["user_id_int"], prompt)
 
     from jarvis.agent_skills.admin_skill import handle_admin
     admin_response = handle_admin(user_id, prompt, session_id, allowed_tools, ui_city, ui_lang, user_id_int=preloaded["user_id_int"])
@@ -178,7 +229,7 @@ def handle_turn(
 
     # Fallback
     from jarvis.agent import _run_agent_core_fallback
-    return _run_agent_core_fallback(
+    turn_result = _run_agent_core_fallback(
         user_id=user_id,
         prompt=prompt,
         session_id=session_id,
@@ -187,3 +238,4 @@ def handle_turn(
         ui_lang=ui_lang,
         preloaded=preloaded,
     )
+    return build_response(turn_result, session_id, preloaded["reminders_due"], preloaded["user_id_int"], prompt)

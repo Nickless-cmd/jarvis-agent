@@ -110,6 +110,7 @@ from jarvis.agent_policy.vision_guard import (
     _validate_vision_format,
     _violates_vision_policy,
 )
+from jarvis.agent_policy.freshness import inject_time_context, is_time_sensitive
 
 import jarvis.agent as agent
 print("JARVIS agent loaded from:", agent.__file__)
@@ -1472,6 +1473,21 @@ def _run_agent_core_fallback(
     tool = None
     cv_intent = _cv_intent(prompt)
     wants_weather_news = _wants_weather_and_news(prompt)
+    
+    # Freshness: Force tools for time-sensitive queries
+    if is_time_sensitive(prompt):
+        if _is_time_query(prompt) and (not allowed_tools or "time" in allowed_tools):
+            tool = "time"
+        elif re.search(r"\b(vejr|vejret|vejrudsig\w*|temperatur|regn|vind)\b", prompt.lower()) and (not allowed_tools or "weather" in allowed_tools):
+            tool = "weather"
+        elif any(k in prompt.lower() for k in ["nyhed", "nyheder", "seneste nyt", "seneste nyheder", "breaking", "headline"]) and (not allowed_tools or "news" in allowed_tools):
+            tool = "news"
+        elif any(k in prompt.lower() for k in ["søg", "find", "google", "web"]) and (not allowed_tools or "search" in allowed_tools):
+            tool = "search"
+        # If no specific tool matched but query is time-sensitive, default to search
+        if not tool and (not allowed_tools or "search" in allowed_tools):
+            tool = "search"
+    
     if forced_tool:
         tool = forced_tool
     elif pending_city:
@@ -1968,7 +1984,8 @@ def _run_agent_core_fallback(
         if override:
             sys_prompt = override
     name_hint = f"Brugerens navn er {display_name}."
-    messages = [{"role": "system", "content": f"{sys_prompt}\n{name_hint}\n{mode_hint}"}]
+    time_context = inject_time_context(ui_lang)
+    messages = [{"role": "system", "content": f"{sys_prompt}\n{name_hint}\n{mode_hint}\n{time_context}"}]
     if mem:
         messages.append({"role": "assistant", "content": "\n".join(mem)})
     messages.extend(_format_history(session_hist))

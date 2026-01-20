@@ -1755,26 +1755,12 @@ def run_agent(
         add_message(session_id, "assistant", reply)
         return {"text": reply, "meta": {"tool": None, "tool_used": False}}
     if session_id:
-        if _cv_cancel_intent(prompt):
-            set_cv_state(session_id, json.dumps({}))
-            if _cv_own_intent(prompt):
-                reply = JARVIS_CV + "\nVil du have, at vi fortsætter og laver dit CV?"
-            elif _cv_example_intent(prompt):
-                reply = CV_STRUCTURE_TEMPLATE + "\nVil du have, at vi fortsætter og laver dit CV?"
-            else:
-                reply = "Forstået. Jeg lægger CV‑arbejdet på is. Hvad vil du i stedet?"
-            add_message(session_id, "assistant", reply)
-            return {"text": reply, "meta": {"tool": None, "tool_used": False}}
         if prompt.lower().strip().startswith("annuller historie"):
             set_story_state(session_id, json.dumps({}))
             reply = "Historie-flow annulleret."
             add_message(session_id, "assistant", reply)
             return {"text": reply, "meta": {"tool": None, "tool_used": False}}
         # CV state handling moved to cv_skill
-        if _show_cv_intent(prompt):
-            reply = "Jeg har ingen CV-kladde endnu. Start med at skrive, at du vil lave et CV."
-            add_message(session_id, "assistant", reply)
-            return {"text": reply, "meta": {"tool": None, "tool_used": False}}
         story_state = _load_state(get_story_state(session_id))
         if story_state:
             if story_state.get("draft") and not story_state.get("finalized"):

@@ -116,14 +116,6 @@ print("JARVIS agent loaded from:", agent.__file__)
 
 STT_ENABLED = os.getenv("STT", "false").lower() == "true"
 
-STORY_QUESTIONS = [
-    ("topic", "Hvad skal historien/stilen handle om?"),
-    ("genre", "Hvilken genre eller type ønsker du? (fx realistisk, humor, sci‑fi, essay)"),
-    ("length", "Hvor lang skal den være? (kort/mellem/lang)"),
-    ("tone", "Hvilken tone skal den have? (fx varm, neutral, dramatisk)"),
-    ("audience", "Hvem er målgruppen?"),
-]
-
 if STT_ENABLED:
     from jarvis import stt
 
@@ -500,16 +492,6 @@ def _update_state(state: dict, answer: str, questions: list[tuple[str, str]]) ->
         state.setdefault("answers", {})[key] = answer.strip()
     state["step"] = idx + 1
     return state
-
-
-def _story_prompt_from_state(state: dict) -> str:
-    answers = state.get("answers", {})
-    lines = []
-    for key, label in STORY_QUESTIONS:
-        value = answers.get(key)
-        if value:
-            lines.append(f"{label} {value}")
-    return "\n".join(lines)
 
 
 def _write_text_file(user_id: str, text: str, fmt: str, prefix: str, temp: bool = False) -> str | None:
@@ -1064,13 +1046,6 @@ def _resume_context_reply(
         if cv_state.get("draft") and not cv_state.get("finalized"):
             return "Vi har en CV‑kladde klar. Vil du se den eller vælge format (pdf/docx/txt)?"
         return "Vi var i gang med dit CV. Vil du fortsætte?"
-    if story_state and not story_state.get("done"):
-        next_q = _next_question(story_state, STORY_QUESTIONS)
-        if next_q:
-            return f"Vi var i gang med din historie/stil. Næste spørgsmål: {next_q}"
-        if story_state.get("draft") and not story_state.get("finalized"):
-            return "Vi har en tekst‑kladde klar. Vil du se den eller vælge format (pdf/docx/txt)?"
-        return "Vi var i gang med din historie/stil. Vil du fortsætte?"
     if pending_note and pending_note.get("awaiting_note"):
         return "Jeg mangler indholdet til noten. Skriv, hvad jeg skal gemme."
     if pending_reminder and pending_reminder.get("awaiting_reminder"):
@@ -1317,17 +1292,7 @@ def run_agent(
 
     if session_id and _resume_context_intent(prompt):
         cv_state_active = _load_state(get_cv_state(session_id))
-        story_state_active = _load_state(get_story_state(session_id))
-        reply = _resume_context_reply(cv_state_active, story_state_active, pending_note, pending_reminder, pending_weather)
-        if reminders_due and _should_attach_reminders(prompt):
-            reply = _prepend_reminders(reply, reminders_due, user_id_int)
-        add_message(session_id, "assistant", reply)
-        return {"text": reply, "meta": {"tool": None, "tool_used": False}}
-
-    if session_id and _resume_context_intent(prompt):
-        cv_state_active = _load_state(get_cv_state(session_id))
-        story_state_active = _load_state(get_story_state(session_id))
-        reply = _resume_context_reply(cv_state_active, story_state_active, pending_note, pending_reminder, pending_weather)
+        reply = _resume_context_reply(cv_state_active, None, pending_note, pending_reminder, pending_weather)
         if reminders_due and _should_attach_reminders(prompt):
             reply = _prepend_reminders(reply, reminders_due, user_id_int)
         add_message(session_id, "assistant", reply)
@@ -1358,11 +1323,16 @@ def run_agent(
     if process_response:
         return process_response
 
+    # Handle story intents
+    from jarvis.agent_skills.story_skill import handle_story
+    story_response = handle_story(user_id, prompt, session_id, allowed_tools, ui_city, ui_lang, user_id_int, reminders_due, profile)
+    if story_response:
+        return story_response
+
     cv_state_active = _load_state(get_cv_state(session_id)) if session_id else None
-    story_state_active = _load_state(get_story_state(session_id)) if session_id else None
     forced_tool = None
     resume_prompt = None
-    if cv_state_active or story_state_active or pending_note or pending_reminder:
+    if cv_state_active or pending_note or pending_reminder:
         cv_related = any(
             fn(prompt)
             for fn in [
@@ -1372,17 +1342,6 @@ def run_agent(
                 _cv_help_intent,
                 _continue_cv_intent,
                 _show_cv_intent,
-                _save_permanent_intent,
-                _save_later_intent,
-                _finalize_intent,
-            ]
-        )
-        story_related = any(
-            fn(prompt)
-            for fn in [
-                _story_intent,
-                _continue_story_intent,
-                _show_story_intent,
                 _save_permanent_intent,
                 _save_later_intent,
                 _finalize_intent,
@@ -1403,21 +1362,6 @@ def run_agent(
                 if candidate and (not allowed_tools or candidate in allowed_tools):
                     forced_tool = candidate
                     resume_prompt = "Skal jeg tage tråden op igen og fortsætte CV‑arbejdet, hvis De ønsker det?"
-        if story_state_active and not story_related:
-            if _wants_weather_and_news(prompt):
-                forced_tool = "weather_news"
-                resume_prompt = "Skal jeg tage tråden op igen og fortsætte historien, hvis De ønsker det?"
-            else:
-                candidate = None
-                if _is_time_query(prompt):
-                    candidate = "time"
-                else:
-                    candidate = choose_tool(prompt, allowed_tools=allowed_tools)
-                    if not candidate and re.search(r"\b(vejr|vejret|vejrudsig\w*|temperatur|regn|vind)\b", prompt.lower()):
-                        candidate = "weather"
-                if candidate and (not allowed_tools or candidate in allowed_tools):
-                    forced_tool = candidate
-                    resume_prompt = "Skal jeg tage tråden op igen og fortsætte historien, hvis De ønsker det?"
         if pending_note and not _is_note_related(prompt):
             if _wants_weather_and_news(prompt):
                 forced_tool = "weather_news"
@@ -1453,11 +1397,6 @@ def run_agent(
         pass  # CV deny handled in cv_skill
     if session_id and _affirm_intent(prompt):
         # CV affirm handled in cv_skill
-        if story_state_active and not story_state_active.get("done"):
-            next_q = _next_question(story_state_active, STORY_QUESTIONS)
-            reply = f"Naturligvis. {next_q}" if next_q else "Naturligvis. Hvad vil du justere?"
-            add_message(session_id, "assistant", reply)
-            return {"text": reply, "meta": {"tool": None, "tool_used": False}}
         if pending_note:
             reply = "Naturligvis. Hvad skal jeg gemme som note?"
             add_message(session_id, "assistant", reply)
@@ -1523,7 +1462,7 @@ def run_agent(
         add_message(session_id, "assistant", reply)
         return {"text": reply, "meta": {"tool": last.get("tool") if last else None, "tool_used": False}}
     if session_id and _resume_context_intent(prompt):
-        reply = _resume_context_reply(cv_state_active, story_state_active, pending_note, pending_reminder, pending_weather)
+        reply = _resume_context_reply(cv_state_active, None, pending_note, pending_reminder, pending_weather)
         if reminders_due and _should_attach_reminders(prompt):
             reply = _prepend_reminders(reply, reminders_due, user_id_int)
         add_message(session_id, "assistant", reply)
@@ -1544,169 +1483,6 @@ def run_agent(
     )
     if result:
         return result
-    if session_id and _story_intent(prompt) and not _load_state(get_story_state(session_id)):
-        topic = _extract_story_topic(prompt)
-        wants_style = _story_needs_questions(prompt)
-        fmt = _detect_format(prompt) or ""
-        story_state = {
-            "step": 0,
-            "answers": {},
-            "done": False,
-            "needs_research": wants_style,
-            "format": fmt if fmt else None,
-            "auto_finalize": _save_text_intent(prompt),
-            "persist": _save_permanent_intent(prompt),
-        }
-        if topic:
-            story_state["answers"]["topic"] = topic
-            story_state["step"] = 1
-        set_story_state(session_id, json.dumps(story_state))
-        if not wants_style and topic:
-            story_prompt = _story_prompt_from_state(story_state)
-            system = (
-                "Du skriver en kort dansk historie. Brug kun info i prompten. "
-                "Skriv flydende og sammenhængende."
-            )
-            story_messages = [
-                {"role": "system", "content": system},
-                {"role": "assistant", "content": story_prompt},
-                {"role": "user", "content": "Skriv historien."},
-            ]
-            res = call_ollama(story_messages)
-            story_text = res.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
-            if not story_text:
-                story_text = "Jeg kunne ikke skrive historien lige nu."
-            story_state["draft"] = story_text
-            story_state["done"] = True
-            set_story_state(session_id, json.dumps(story_state))
-            if story_state.get("auto_finalize") and story_state.get("format"):
-                fmt = story_state.get("format") or "txt"
-                temp = not story_state.get("persist")
-                filename = _write_text_file(user_id, story_text, fmt, "tekst", temp=temp)
-                if filename:
-                    url = _make_download_link(user_id_int, session_id, filename, temp)
-                    reply = f"{story_text}\n\nHer er din tekst: {_wrap_download_link(url)}\n{_download_notice()}"
-                    if temp:
-                        reply += "\nFilen slettes automatisk efter download, medmindre du beder mig gemme den."
-                    data = {"type": "file", "title": "Tekst", "label": "Download tekst", "url": url}
-                    add_message(session_id, "assistant", reply)
-                    return {"text": reply, "data": data, "meta": {"tool": None, "tool_used": False}}
-            reply = story_text + "\n\nVil du have den gemt som pdf, docx eller txt?"
-            add_message(session_id, "assistant", reply)
-            return {"text": reply, "meta": {"tool": None, "tool_used": False}}
-        first_q = _next_question(story_state, STORY_QUESTIONS)
-        reply = "Jeg kan skrive en historie eller en stil. Jeg stiller et par spørgsmål."
-        if first_q:
-            reply += f"\n{first_q}"
-        add_message(session_id, "assistant", reply)
-        return {"text": reply, "meta": {"tool": None, "tool_used": False}}
-    if session_id:
-        if prompt.lower().strip().startswith("annuller historie"):
-            set_story_state(session_id, json.dumps({}))
-            reply = "Historie-flow annulleret."
-            add_message(session_id, "assistant", reply)
-            return {"text": reply, "meta": {"tool": None, "tool_used": False}}
-        # CV state handling moved to cv_skill
-        story_state = _load_state(get_story_state(session_id))
-        if story_state:
-            if story_state.get("draft") and not story_state.get("finalized"):
-                if _save_permanent_intent(prompt):
-                    story_state["persist"] = True
-                    set_story_state(session_id, json.dumps(story_state))
-                    reply = "Forstået. Jeg gemmer teksten permanent, når du beder om download."
-                    add_message(session_id, "assistant", reply)
-                    return {"text": reply, "meta": {"tool": None, "tool_used": False}}
-                if _save_later_intent(prompt):
-                    reply = "Fint. Jeg gemmer kladden til senere. Skriv 'vis tekst' for at få den igen."
-                    add_message(session_id, "assistant", reply)
-                    return {"text": reply, "meta": {"tool": None, "tool_used": False}}
-                fmt = _detect_format(prompt)
-                if fmt:
-                    story_state["format"] = fmt
-                    set_story_state(session_id, json.dumps(story_state))
-                    reply = f"Format sat til {fmt.upper()}. Skriv 'gem' når du vil have download-link."
-                    add_message(session_id, "assistant", reply)
-                    return {"text": reply, "meta": {"tool": None, "tool_used": False}}
-                if _finalize_intent(prompt):
-                    fmt = story_state.get("format") or "txt"
-                    temp = not story_state.get("persist")
-                    filename = _write_text_file(user_id, story_state.get("draft", ""), fmt, "tekst", temp=temp)
-                    if not filename:
-                        reply = "Jeg kan ikke gemme i det format. Vælg pdf, docx eller txt."
-                        add_message(session_id, "assistant", reply)
-                        return {"text": reply, "meta": {"tool": None, "tool_used": False}}
-                    url = _make_download_link(user_id_int, session_id, filename, temp)
-                    story_state["finalized"] = True
-                    story_state["file"] = filename
-                    set_story_state(session_id, json.dumps(story_state))
-                    reply = f"Her er din tekst: {_wrap_download_link(url)}\n{_download_notice()}"
-                    if temp:
-                        reply += "\nFilen slettes automatisk efter download, medmindre du beder mig gemme den."
-                    data = {"type": "file", "title": "Tekst", "label": "Download tekst", "url": url}
-                    add_message(session_id, "assistant", reply)
-                    return {"text": reply, "data": data, "meta": {"tool": None, "tool_used": False}}
-                if prompt.lower().strip().startswith("vis tekst"):
-                    reply = story_state.get("draft", "")
-                    reply += "\n\nVil du have den gemt som pdf, docx eller txt?"
-                    add_message(session_id, "assistant", reply)
-                    return {"text": reply, "meta": {"tool": None, "tool_used": False}}
-            if story_state.get("step", 0) >= 0 and not story_state.get("done"):
-                story_state = _update_state(story_state, prompt, STORY_QUESTIONS)
-                next_q = _next_question(story_state, STORY_QUESTIONS)
-                if next_q:
-                    set_story_state(session_id, json.dumps(story_state))
-                    reply = next_q
-                    add_message(session_id, "assistant", reply)
-                    return {"text": reply, "meta": {"tool": None, "tool_used": False}}
-                story_state["done"] = True
-                set_story_state(session_id, json.dumps(story_state))
-                story_prompt = _story_prompt_from_state(story_state)
-                research = ""
-                if story_state.get("needs_research"):
-                    topic = story_state.get("answers", {}).get("topic")
-                    if topic:
-                        search_result = tools.search_combined(topic, max_items=5)
-                        facts = []
-                        for item in (search_result or {}).get("items", [])[:3]:
-                            url = item.get("url")
-                            if url:
-                                article = tools.read_article(url)
-                                summary = _summarize_text((article or {}).get("text") or "", sentences=1)
-                                if summary:
-                                    facts.append(summary)
-                        if facts:
-                            research = "Fakta (fra søgning): " + " ".join(facts)
-                system = (
-                    "Du skriver en dansk historie eller stil. Brug kun info i prompten. "
-                    "Hvis der er fakta, brug kun dem. Skriv flydende og sammenhængende."
-                )
-                story_messages = [
-                    {"role": "system", "content": system},
-                    {"role": "assistant", "content": f"{story_prompt}\n{research}".strip()},
-                    {"role": "user", "content": "Skriv teksten."},
-                ]
-                res = call_ollama(story_messages)
-                story_text = res.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
-                if not story_text:
-                    story_text = "Jeg kunne ikke skrive teksten lige nu."
-                story_state["draft"] = story_text
-                story_state["finalized"] = False
-                set_story_state(session_id, json.dumps(story_state))
-                if story_state.get("auto_finalize") and story_state.get("format"):
-                    fmt = story_state.get("format") or "txt"
-                    temp = not story_state.get("persist")
-                    filename = _write_text_file(user_id, story_text, fmt, "tekst", temp=temp)
-                    if filename:
-                        url = _make_download_link(user_id_int, session_id, filename, temp)
-                        reply = f"{story_text}\n\nHer er din tekst: {_wrap_download_link(url)}\n{_download_notice()}"
-                        if temp:
-                            reply += "\nFilen slettes automatisk efter download, medmindre du beder mig gemme den."
-                        data = {"type": "file", "title": "Tekst", "label": "Download tekst", "url": url}
-                        add_message(session_id, "assistant", reply)
-                        return {"text": reply, "data": data, "meta": {"tool": None, "tool_used": False}}
-                reply = story_text + "\n\nVil du have den gemt som pdf, docx eller txt?"
-                add_message(session_id, "assistant", reply)
-                return {"text": reply, "meta": {"tool": None, "tool_used": False}}
     if _farewell_intent(prompt):
         name = _first_name(profile, "")
         if name:

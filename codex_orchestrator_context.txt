@@ -1,0 +1,316 @@
+## RECENT COMMITS
+b6ee570 Extract Story helpers into story_skill
+03fee78 Extract Story helpers into story_skill
+63452cd Delegate Story flow to story_skill (routing only)
+1a3e0fd Extract CV helpers into cv_skill
+3ebe59a Delegate CV flow to cv_skill (routing only)
+c718475 Add .env.example with documented configuration
+b8cd829 Remove .env from repo and ignore environment secrets
+f4195d9 Delegate CV flow to cv_skill (routing only)
+4438cc9 first commit to github.
+8daca96 Extract admin logic into admin_skill
+e30bac7 Extract process/system/ping into process_skill
+018592d Extract notes/reminders helpers into notes_skill
+902a603 Delegate notes/reminders to notes_skill (routing only)
+ea73af8 Extract history/summary into history_skill
+d080793 Stop tracking __pycache__
+b28d285 Ignore pycache artifacts
+b8cce21 Wire files_skill into agent routing
+8347dda Extract history/summary into history_skill
+8c70160 Extract notes/reminders into notes_skill
+fb8a9a7 Make tests import jarvis from src via conftest
+efda437 Fix test imports (add src to sys.path) and ignore backup archives
+ff6a6b3 Stop tracking local runtime data/caches
+bc757be Stop tracking comfyui (ignore)
+04d8ee3 Recreate skill wrapper modules (no logic moved)
+51ce563 Stop tracking local data (db/logs/memory)
+82b925a Stop tracking comfyui (ignore)
+210c1cd Initial commit (with gitignore)
+31cae64 Snapshot before next refactor
+
+## AGENT HEADERS
+0001: import base64
+0002: from urllib.parse import urlencode
+0003: import json
+0004: import os
+0005: import re
+0006: import sqlite3
+0007: import requests
+0008: from datetime import datetime, time, timezone, timedelta
+0009: from zoneinfo import ZoneInfo
+0010: 
+0011: from jarvis.memory import search_memory, add_memory
+0012: from jarvis.session_store import (
+0013:     add_message,
+0014:     get_recent_messages,
+0015:     get_last_city,
+0016:     set_last_city,
+0017:     get_mode,
+0018:     set_mode,
+0019:     get_custom_prompt,
+0020:     set_custom_prompt,
+0021:     set_last_news,
+0022:     get_last_news,
+0023:     set_last_search,
+0024:     get_last_search,
+0025:     set_last_tool,
+0026:     get_last_tool,
+0027:     set_pending_weather,
+0028:     get_pending_weather,
+0029:     clear_pending_weather,
+0030:     set_cv_state,
+0031:     get_cv_state,
+0032:     set_story_state,
+0033:     get_story_state,
+0034:     set_reminder_state,
+0035:     get_reminder_state,
+0036:     set_ticket_state,
+0037:     get_ticket_state,
+0038:     set_process_state,
+0039:     get_process_state,
+0040:     get_all_messages,
+0041:     set_pending_note,
+0042:     get_pending_note,
+0043:     clear_pending_note,
+0044:     set_pending_reminder,
+0045:     get_pending_reminder,
+0046:     clear_pending_reminder,
+0047:     set_pending_file,
+0048:     get_pending_file,
+0049:     clear_pending_file,
+0050:     set_pending_image_preview,
+0051:     get_pending_image_preview,
+0052:     clear_pending_image_preview,
+0053:     set_last_image_prompt,
+0054:     get_last_image_prompt,
+0055:     set_conversation_state,
+0056:     get_conversation_state,
+0057: )
+0058: from jarvis.notes import (
+0059:     add_note,
+0060:     list_notes,
+0061:     delete_note,
+0062:     keep_note,
+0063:     get_note,
+0064:     list_notes_since,
+0065:     update_note_due,
+0066:     set_note_remind,
+0067:     update_note_content,
+0068:     add_reminder,
+0069:     list_reminders,
+0070:     get_due_reminders,
+0071:     mark_reminded,
+0072: )
+0073: from jarvis.tickets import create_ticket, get_ticket_admin, add_ticket_message
+0074: from jarvis.personality import SYSTEM_PROMPT
+0075: from jarvis.db import get_conn
+0076: from jarvis.auth import get_user_profile, register_user
+0077: from jarvis.files import (
+0078:     write_file,
+0079:     list_uploads,
+0080:     delete_upload,
+0081:     keep_upload,
+0082:     read_upload_text,
+0083:     create_download_token,
+0084:     save_generated_text,
+0085:     save_upload,
+0086:     UPLOAD_DIR_NAME,
+0087:     find_upload_by_name,
+0088:     delete_uploads_by_name,
+0089:     delete_uploads_by_ext,
+0090:     list_download_tokens,
+0091:     delete_download_token,
+0092:     delete_all_download_tokens,
+0093: )
+0094: from jarvis.agent_skills.files_skill import (
+0095:     _download_notice,
+0096:     _make_download_link,
+0097:     _wrap_download_link,
+0098:     handle_files,
+0099: )
+0100: from jarvis.db import get_conn
+0101: from jarvis import tools, tts
+0102: from jarvis.agent_policy.language import _should_translate_vision_response
+0103: from jarvis.agent_core.conversation_state import ConversationState
+0104: from jarvis.agent_policy.vision_guard import (
+0105:     _describe_image_ollama,
+0106:     _looks_like_guess,
+0107:     _looks_like_hallucination,
+0108:     _looks_like_refusal,
+0109:     _translate_to_danish_if_needed,
+0110:     _validate_vision_format,
+0111:     _violates_vision_policy,
+0112: )
+0113: 
+0114: import jarvis.agent as agent
+0115: print("JARVIS agent loaded from:", agent.__file__)
+0116: 
+0117: STT_ENABLED = os.getenv("STT", "false").lower() == "true"
+0118: 
+0119: if STT_ENABLED:
+0120:     from jarvis import stt
+0121: 
+0122: from jarvis.agent_skills.notes_skill import (
+0123:     _analyze_note_intent,
+0124:     _delete_note_intent,
+0125:     _format_note_brief,
+0126:     _is_note_related,
+0127:     _is_reminder_related,
+0128:     _keep_note_intent,
+0129:     _list_notes_intent,
+0130:     _list_reminders_intent,
+0131:     _note_describe_intent,
+0132:     _note_edit_intent,
+0133:     _note_intent,
+0134:     _note_list_since_intent,
+0135:     _note_remind_enable_intent,
+0136:     _note_remind_stop_intent,
+0137:     _note_update_due_intent,
+0138:     _remind_intent,
+0139:     handle_notes,
+0140: )
+0141: 
+0142: def _debug(msg: str) -> None:
+0143:     if os.getenv("JARVIS_DEBUG") == "1":
+0144:         print(msg)
+0145: 
+0146: 
+0147: def should_use_wiki(prompt: str) -> bool:
+0148:     """Heuristic to decide if prompt is encyclopedic/factual for wiki search."""
+0149:     p = prompt.lower().strip()
+0150:     # False for code questions
+0151:     if any(k in p for k in ["code", "function", "class", "method", "bug", "error", "traceback", "test", "pytest", "git", "commit"]):
+0152:         return False
+0153:     # False for tool commands
+0154:     if any(k in p for k in ["search", "find", "google", "web", "time", "date", "clock", "news", "weather", "ping", "system", "process", "kill", "list"]):
+0155:         return False
+0156:     # False for freshness/news queries
+0157:     if any(k in p for k in ["hvad er klokken", "what time", "what is the time", "nyheder", "news", "seneste", "latest", "vejr", "weather", "forecast"]):
+0158:         return False
+0159:     # True for encyclopedic/factual
+0160:     if any(k in p for k in ["what is", "who is", "how does", "explain", "hvad er", "hvem er", "hvordan virker", "forklar"]):
+0161:         return True
+0162:     # Default to False
+0163:     return False
+0164: 
+0165: 
+0166: def _parse_kv_fields(text: str) -> dict:
+0167:     fields = {}
+0168:     for raw in re.split(r"[\\n;]+", text):
+0169:         line = raw.strip()
+0170:         if not line:
+0171:             continue
+0172:         if ":" in line:
+0173:             key, value = line.split(":", 1)
+0174:         elif "=" in line:
+0175:             key, value = line.split("=", 1)
+0176:         else:
+0177:             continue
+0178:         key = key.strip().lower()
+0179:         value = value.strip()
+0180:         fields[key] = value
+0181:     return fields
+0182: 
+0183: def analyze_intent(prompt: str) -> dict:
+0184:     p = prompt.lower()
+0185:     scores = {
+0186:         "weather": 0,
+0187:         "news": 0,
+0188:         "search": 0,
+0189:         "currency": 0,
+0190:         "time": 0,
+0191:         "system": 0,
+0192:         "ping": 0,
+0193:         "process": 0,
+0194:     }
+0195:     keywords = {
+0196:         "weather": ["vejr", "temperatur", "regn", "vind", "prognose", "forecast"],
+0197:         "news": ["nyhed", "nyheder", "breaking", "headline", "rss", "seneste nyt", "seneste nyheder"],
+0198:         "search": ["søg", "find", "google", "duckduckgo", "web"],
+0199:         "currency": ["valuta", "kurs", "omregn", "exchange", "dkk", "eur", "usd"],
+0200:         "time": ["tid", "dato", "klok", "time", "date"],
+0201:         "system": ["cpu", "ram", "memory", "hukommelse", "disk", "lagring", "system", "ressourcer", "ip", "netværk"],
+0202:         "ping": ["ping", "latency", "latenstid"],
+0203:         "process": ["proces", "process", "top", "kørende", "tasks", "pid"],
+0204:     }
+0205:     for tool, words in keywords.items():
+0206:         for w in words:
+0207:             if w in p:
+0208:                 scores[tool] += 1
+0209:     if "vejret" in p:
+0210:         scores["weather"] += 1
+0211:     if "nyheder" in p:
+0212:         scores["news"] += 1
+0213:     return scores
+0214: 
+0215: 
+0216: def choose_tool(prompt: str, allowed_tools: list[str] | None = None) -> str | None:
+0217:     p = prompt.lower()
+0218:     if any(k in p for k in ["proces", "process", "top", "kørende"]):
+0219:         return "process" if not allowed_tools or "process" in allowed_tools else None
+0220:     if "ping" in p:
+0221:         return "ping" if not allowed_tools or "ping" in allowed_tools else None
+0222:     if any(k in p for k in ["cpu", "ram", "hukommelse", "memory", "disk", "lagring", "ip", "netværk", "ressourcer"]):
+0223:         return "system" if not allowed_tools or "system" in allowed_tools else None
+0224:     if any(
+0225:         phrase in p
+0226:         for phrase in [
+0227:             "seneste nyt",
+0228:             "seneste nyheder",
+0229:             "latest",
+0230:             "breaking",
+0231:             "hvad sker der",
+0232:             "nyt indenfor",
+0233:             "teknologi",
+0234:             "tech",
+0235:             "ai",
+0236:             "kunstig intelligens",
+0237:         ]
+0238:     ):
+0239:         return "news" if not allowed_tools or "news" in allowed_tools else None
+0240:     if re.search(r"\b(vejr|vejret|vejrudsig\w*|temperatur|regn|vind|i dag|i morgen)\b", p):
+0241:         return "weather" if not allowed_tools or "weather" in allowed_tools else None
+0242:     scores = analyze_intent(prompt)
+0243:     best_tool = max(scores, key=scores.get)
+0244:     if scores[best_tool] >= 1:
+0245:         if allowed_tools and best_tool not in allowed_tools:
+0246:             return None
+0247:         return best_tool
+0248:     return None
+0249: 
+0250: 
+0251: def _tool_label(tool: str) -> str:
+0252:     labels = {
+0253:         "news": "Nyheder",
+0254:         "weather": "Vejr",
+0255:         "search": "Web",
+0256:         "currency": "Valuta",
+0257:         "time": "Tid",
+0258:         "system": "System",
+0259:         "ping": "Ping",
+0260:         "process": "Processer",
+
+## RUN_AGENT SIGNATURE + LOCATION
+1137:def run_agent(
+
+## SKILL DELEGATIONS IN agent.py
+1209:    file_response = handle_files(
+1239:    admin_response = handle_admin(user_id, prompt, session_id, allowed_tools, ui_city, ui_lang, user_id_int=user_id_int)
+1245:    cv_response = handle_cv(user_id, prompt, session_id, allowed_tools, ui_city, ui_lang, user_id_int, reminders_due, profile)
+1252:    history_response = handle_history(user_id, prompt, session_id, allowed_tools, ui_city, ui_lang, reminders_due, user_id_int)
+1258:    process_response = handle_process(user_id, prompt, session_id, allowed_tools, ui_city, ui_lang, reminders_due=reminders_due, user_id_int=user_id_int, display_name=display_name)
+1264:    story_response = handle_story(user_id, prompt, session_id, allowed_tools, ui_city, ui_lang, user_id_int, reminders_due, profile)
+1409:    result = handle_notes(
+2000:    system_response = handle_process(user_id, prompt, session_id, allowed_tools, ui_city, ui_lang, tool="system", tool_result=tool_result, reminders_due=reminders_due, user_id_int=user_id_int, display_name=display_name, resume_prompt=resume_prompt)
+2004:    ping_response = handle_process(user_id, prompt, session_id, allowed_tools, ui_city, ui_lang, tool="ping", tool_result=tool_result, reminders_due=reminders_due, user_id_int=user_id_int, display_name=display_name, resume_prompt=resume_prompt)
+2008:    process_response = handle_process(user_id, prompt, session_id, allowed_tools, ui_city, ui_lang, tool="process", tool_result=tool_result, reminders_due=reminders_due, user_id_int=user_id_int, display_name=display_name, resume_prompt=resume_prompt)
+
+## SKILLS
+src/jarvis/agent_skills/admin_skill.py
+src/jarvis/agent_skills/code_skill.py
+src/jarvis/agent_skills/cv_skill.py
+src/jarvis/agent_skills/files_skill.py
+src/jarvis/agent_skills/history_skill.py
+src/jarvis/agent_skills/notes_skill.py
+src/jarvis/agent_skills/process_skill.py
+src/jarvis/agent_skills/story_skill.py

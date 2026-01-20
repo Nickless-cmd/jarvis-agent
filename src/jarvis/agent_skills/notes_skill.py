@@ -107,6 +107,27 @@ def _note_describe_intent(prompt: str) -> bool:
     return "kort beskrivelse" in p and ("note" in p or "noter" in p)
 
 
+def _is_note_related(prompt: str) -> bool:
+    p = prompt.lower()
+    return any(
+        fn(prompt) is not None
+        for fn in [
+            _delete_note_intent,
+            _keep_note_intent,
+            _note_remind_enable_intent,
+            _note_remind_stop_intent,
+            _note_update_due_intent,
+            _note_edit_intent,
+            _analyze_note_intent,
+        ]
+    ) or any(k in p for k in ["note", "noter", "opret note", "vis noter"])
+
+
+def _is_reminder_related(prompt: str) -> bool:
+    p = prompt.lower()
+    return "mind mig" in p or "påmind" in p or "påmindelse" in p or _list_reminders_intent(prompt)
+
+
 def _analyze_note_intent(prompt: str) -> int | None:
     match = re.search(r"\banaly[sz]er\s+note\s+(\d+)\b", prompt.lower())
     if match:
@@ -297,3 +318,38 @@ def handle_notes(
             return {"text": reply, "meta": {"tool": None, "tool_used": False}}
 
     return None
+
+
+def _format_note_brief(note: dict) -> str:
+    title = (note.get("title") or "").strip()
+    content = (note.get("content") or "").strip().replace("\n", " ")
+    if not title:
+        words = content.split()
+        title = " ".join(words[:6]) if words else "Note"
+    snippet = content
+    if len(snippet) > 120:
+        snippet = snippet[:117].rstrip() + "..."
+    if snippet and snippet.lower() != title.lower():
+        return f"{title}: {snippet}"
+    return title
+
+
+__all__ = [
+    "handle_notes",
+    "_is_note_related",
+    "_is_reminder_related",
+    "_format_note_brief",
+    "_note_intent",
+    "_remind_intent",
+    "_list_notes_intent",
+    "_list_reminders_intent",
+    "_note_edit_intent",
+    "_note_describe_intent",
+    "_note_list_since_intent",
+    "_delete_note_intent",
+    "_keep_note_intent",
+    "_note_remind_enable_intent",
+    "_note_remind_stop_intent",
+    "_note_update_due_intent",
+    "_analyze_note_intent",
+]

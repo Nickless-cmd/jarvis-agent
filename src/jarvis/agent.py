@@ -183,7 +183,25 @@ STORY_QUESTIONS = [
 if STT_ENABLED:
     from jarvis import stt
 
-from jarvis.agent_skills.notes_skill import handle_notes, _note_intent, _remind_intent, _list_notes_intent, _list_reminders_intent, _note_edit_intent, _note_describe_intent, _note_list_since_intent, _delete_note_intent, _keep_note_intent, _note_remind_enable_intent, _note_remind_stop_intent, _note_update_due_intent
+from jarvis.agent_skills.notes_skill import (
+    _analyze_note_intent,
+    _delete_note_intent,
+    _format_note_brief,
+    _is_note_related,
+    _is_reminder_related,
+    _keep_note_intent,
+    _list_notes_intent,
+    _list_reminders_intent,
+    _note_describe_intent,
+    _note_edit_intent,
+    _note_intent,
+    _note_list_since_intent,
+    _note_remind_enable_intent,
+    _note_remind_stop_intent,
+    _note_update_due_intent,
+    _remind_intent,
+    handle_notes,
+)
 
 def _debug(msg: str) -> None:
     if os.getenv("JARVIS_DEBUG") == "1":
@@ -1423,41 +1441,6 @@ def _simple_city(prompt: str) -> str | None:
     if len(raw.split()) <= 4:
         return raw
     return None
-
-
-def _is_note_related(prompt: str) -> bool:
-    p = prompt.lower()
-    return any(
-        fn(prompt) is not None
-        for fn in [
-            _delete_note_intent,
-            _keep_note_intent,
-            _note_remind_enable_intent,
-            _note_remind_stop_intent,
-            _note_update_due_intent,
-            _note_edit_intent,
-            _analyze_note_intent,
-        ]
-    ) or any(k in p for k in ["note", "noter", "opret note", "vis noter"])
-
-
-def _is_reminder_related(prompt: str) -> bool:
-    p = prompt.lower()
-    return "mind mig" in p or "påmind" in p or "påmindelse" in p or _list_reminders_intent(prompt)
-
-
-def _format_note_brief(note: dict) -> str:
-    title = (note.get("title") or "").strip()
-    content = (note.get("content") or "").strip().replace("\n", " ")
-    if not title:
-        words = content.split()
-        title = " ".join(words[:6]) if words else "Note"
-    snippet = content
-    if len(snippet) > 120:
-        snippet = snippet[:117].rstrip() + "..."
-    if snippet and snippet.lower() != title.lower():
-        return f"{title}: {snippet}"
-    return title
 
 
 def _format_tool_source(last: dict) -> str:

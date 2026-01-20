@@ -177,6 +177,8 @@ STORY_QUESTIONS = [
 if STT_ENABLED:
     from jarvis import stt
 
+from jarvis.agent_skills.notes_skill import handle_notes, _note_intent, _remind_intent, _list_notes_intent, _list_reminders_intent, _note_edit_intent, _note_describe_intent, _note_list_since_intent, _delete_note_intent, _keep_note_intent, _note_remind_enable_intent, _note_remind_stop_intent, _note_update_due_intent
+
 def _debug(msg: str) -> None:
     if os.getenv("JARVIS_DEBUG") == "1":
         print(msg)
@@ -1042,68 +1044,6 @@ def _summary_detail(prompt: str) -> str:
     return "short"
 
 
-def _note_intent(prompt: str) -> bool:
-    p = prompt.lower()
-    return p.startswith("note") or p.startswith("noter") or "opret note" in p
-
-
-def _list_notes_intent(prompt: str) -> bool:
-    p = prompt.lower()
-    return any(k in p for k in ["vis noter", "mine noter", "liste noter"])
-
-
-def _delete_note_intent(prompt: str) -> int | None:
-    match = re.search(r"\bslet note\s+(\d+)\b", prompt.lower())
-    if match:
-        return int(match.group(1))
-    return None
-
-
-def _keep_note_intent(prompt: str) -> int | None:
-    match = re.search(r"\b(behold|forny)\s+note\s+(\d+)\b", prompt.lower())
-    if match:
-        return int(match.group(2))
-    return None
-
-
-def _note_remind_enable_intent(prompt: str) -> int | None:
-    match = re.search(r"\b(mind mig om|påmind)\s+note\s+(\d+)\b", prompt.lower())
-    if match:
-        return int(match.group(2))
-    return None
-
-
-def _note_remind_stop_intent(prompt: str) -> int | None:
-    match = re.search(
-        r"\b(stop|slut|afslut)\s+(påmindelser|påmindelse|med at minde om)\s+note\s+(\d+)\b",
-        prompt.lower(),
-    )
-    if match:
-        return int(match.group(3))
-    return None
-
-
-def _note_update_due_intent(prompt: str) -> tuple[int, datetime, bool | None] | None:
-    match = re.search(r"\b(note)\s+(\d+)\b", prompt.lower())
-    if not match:
-        return None
-    note_id = int(match.group(2))
-    dt = _parse_time(prompt)
-    if not dt:
-        return None
-    remind = None
-    if "mind mig om" in prompt.lower() or "påmind" in prompt.lower():
-        remind = True
-    return note_id, dt, remind
-
-
-def _note_list_since_intent(prompt: str) -> datetime | None:
-    if "efter" not in prompt.lower() and "fra" not in prompt.lower():
-        return None
-    dt = _parse_time(prompt)
-    return dt
-
-
 def _list_files_intent(prompt: str) -> bool:
     p = prompt.lower()
     return any(k in p for k in ["vis filer", "mine filer", "liste filer", "list filer", "list files", "show files"])
@@ -1283,16 +1223,6 @@ def _ticket_reply_intent(prompt: str) -> tuple[int, str] | None:
     return None
 
 
-def _remind_intent(prompt: str) -> bool:
-    p = prompt.lower()
-    return "mind mig" in p or "påmind" in p or "timer" in p
-
-
-def _list_reminders_intent(prompt: str) -> bool:
-    p = prompt.lower()
-    return any(k in p for k in ["vis påmindelser", "mine påmindelser", "liste påmindelser", "hvad skal jeg huske"])
-
-
 def _ticket_intent(prompt: str) -> bool:
     p = prompt.lower()
     return any(k in p for k in ["opret ticket", "lav ticket", "meld fejl", "opret sag"])
@@ -1320,43 +1250,12 @@ def _safe_create_ticket(user_id_int: int, title: str, detail: str, priority: str
         return None
 
 
-def _parse_time(prompt: str) -> datetime | None:
-    tz = ZoneInfo("Europe/Copenhagen")
-    now = datetime.now(tz)
-    match = re.search(r"\bkl\.?\s*(\d{1,2})[:.](\d{2})\b", prompt.lower())
-    if match:
-        hh = int(match.group(1))
-        mm = int(match.group(2))
-        dt = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
-        if "i morgen" in prompt.lower() or "imorgen" in prompt.lower():
-            dt = dt + timedelta(days=1)
-        if dt < now:
-            dt = dt + timedelta(days=1)
-        return dt
-    match = re.search(r"\b(\d{1,2})[./-](\d{1,2})(?:[./-](\d{2,4}))?\b", prompt)
-    if match:
-        day = int(match.group(1))
-        month = int(match.group(2))
-        year = int(match.group(3) or now.year)
-        if year < 100:
-            year += 2000
-        dt = datetime(year, month, day, tzinfo=tz)
-        return dt
-    return None
-
-
-def _parse_timer_minutes(prompt: str) -> int | None:
-    match = re.search(r"\b(\d{1,3})\s*(min|minutter)\b", prompt.lower())
-    if match:
-        return int(match.group(1))
-    match = re.search(r"\b(\d{1,3})\s*(sek|sekunder)\b", prompt.lower())
-    if match:
-        seconds = int(match.group(1))
-        return max(1, round(seconds / 60))
-    return None
-
-
 def _format_dt(value: str) -> str:
+    try:
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(ZoneInfo("Europe/Copenhagen"))
+        return dt.strftime("%d.%m.%Y %H:%M")
+    except Exception:
+        return value
     try:
         dt = datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(ZoneInfo("Europe/Copenhagen"))
         return dt.strftime("%d.%m.%Y %H:%M")
@@ -1520,18 +1419,6 @@ def _tool_source_intent(prompt: str) -> bool:
 def _tool_error_intent(prompt: str) -> bool:
     p = prompt.lower()
     return any(k in p for k in ["hvad gik galt", "hvorfor fejlede", "hvorfor gik det galt"])
-
-
-def _note_edit_intent(prompt: str) -> tuple[int, str] | None:
-    match = re.search(r"\b(opdater|rediger)\s+note\s+(\d+)\s*:\s*(.+)$", prompt, re.I)
-    if not match:
-        return None
-    return int(match.group(2)), match.group(3).strip()
-
-
-def _note_describe_intent(prompt: str) -> bool:
-    p = prompt.lower()
-    return "kort beskrivelse" in p and ("note" in p or "noter" in p)
 
 
 def _cv_example_intent(prompt: str) -> bool:
@@ -3041,54 +2928,9 @@ def run_agent(
                 reply = "Jeg kunne ikke analysere billedet lige nu."
             add_message(session_id, "assistant", reply)
             return {"text": reply, "meta": {"tool": None, "tool_used": False}}
-    if session_id and _note_intent(prompt):
-        content = prompt.split(":", 1)[-1].strip() if ":" in prompt else prompt.replace("note", "", 1).strip()
-        if not content:
-            reply = "Hvad skal jeg gemme som note?"
-            if session_id:
-                set_pending_note(session_id, json.dumps({"awaiting_note": True}, ensure_ascii=False))
-        else:
-            item = add_note(user_id_int, content) if user_id_int else None
-            reply = f"Note gemt ({item['id']}) — {_format_dt(item['created_at'])}." if item else "Jeg kunne ikke gemme noten."
-        add_message(session_id, "assistant", reply)
-        return {"text": reply, "meta": {"tool": None, "tool_used": False}}
-    if session_id and _remind_intent(prompt):
-        state = _load_state(get_reminder_state(session_id)) or {}
-        if state.get("awaiting_time"):
-            when = _parse_time(prompt)
-            if not when:
-                reply = "Jeg mangler tidspunktet. Skriv fx 'i morgen kl 10:00'."
-                if session_id:
-                    set_pending_reminder(session_id, json.dumps({"awaiting_reminder": True}, ensure_ascii=False))
-                add_message(session_id, "assistant", reply)
-                return {"text": reply, "meta": {"tool": None, "tool_used": False}}
-            item = add_reminder(user_id_int, state.get("content", "Påmindelse"), when.astimezone(timezone.utc).isoformat()) if user_id_int else None
-            set_reminder_state(session_id, json.dumps({}))
-            clear_pending_reminder(session_id)
-            reply = f"Påmindelse sat til {_format_dt(item['remind_at'])}." if item else "Jeg kunne ikke gemme påmindelsen."
-            add_message(session_id, "assistant", reply)
-            return {"text": reply, "meta": {"tool": None, "tool_used": False}}
-        when = _parse_time(prompt)
-        timer_minutes = _parse_timer_minutes(prompt)
-        content = prompt
-        content = re.sub(r"\bmind mig om\b", "", content, flags=re.I).strip()
-        if not content:
-            reply = "Hvad skal jeg minde dig om?"
-            add_message(session_id, "assistant", reply)
-            return {"text": reply, "meta": {"tool": None, "tool_used": False}}
-        if not when and timer_minutes:
-            tz = ZoneInfo("Europe/Copenhagen")
-            when = datetime.now(tz) + timedelta(minutes=timer_minutes)
-        if not when:
-            set_reminder_state(session_id, json.dumps({"awaiting_time": True, "content": content}))
-            set_pending_reminder(session_id, json.dumps({"awaiting_reminder": True}, ensure_ascii=False))
-            reply = "Hvornår skal jeg minde dig om det?"
-            add_message(session_id, "assistant", reply)
-            return {"text": reply, "meta": {"tool": None, "tool_used": False}}
-        item = add_reminder(user_id_int, content, when.astimezone(timezone.utc).isoformat()) if user_id_int else None
-        reply = f"Påmindelse sat til {_format_dt(item['remind_at'])}." if item else "Jeg kunne ikke gemme påmindelsen."
-        add_message(session_id, "assistant", reply)
-        return {"text": reply, "meta": {"tool": None, "tool_used": False}}
+    result = handle_notes(prompt, session_id, user_id_int, display_name)
+    if result:
+        return result
     if session_id and _cv_intent(prompt) and not skip_cv_intent and not _load_state(get_cv_state(session_id)):
         set_cv_state(session_id, json.dumps({"pending_start": True, "prompt": prompt}, ensure_ascii=False))
         reply = "Vil du have, at jeg hjælper dig med et CV? Svar ja/nej."

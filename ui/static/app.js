@@ -993,12 +993,12 @@ function renderMessageBody(text, options = {}) {
     const pre = codeBlock.parentElement;
     const copyBtn = document.createElement('button');
     copyBtn.className = 'copy-btn';
-    copyBtn.textContent = '📋';
+    copyBtn.textContent = 'Copy';
     copyBtn.title = 'Copy to clipboard';
     copyBtn.onclick = () => {
       navigator.clipboard.writeText(codeBlock.textContent).then(() => {
-        copyBtn.textContent = '✅';
-        setTimeout(() => copyBtn.textContent = '📋', 2000);
+        copyBtn.textContent = 'Copied';
+        setTimeout(() => copyBtn.textContent = 'Copy', 2000);
       });
     };
     pre.style.position = 'relative';

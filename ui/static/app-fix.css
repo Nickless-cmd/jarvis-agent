@@ -30,7 +30,7 @@ header.topbar { white-space: nowrap; }
 .top-controls .control-btn { height: 34px; width: 34px; border-radius: 8px; }
 
 /* Status row above composer */
-.status-row { display:flex; align-items:center; gap:12px; padding:8px var(--content-pad, 24px) 8px 0; background: transparent; border-bottom: 1px solid var(--border); width: 100%; margin: 0; }
+.status-row { display:flex; align-items:center; gap:12px; padding:8px 0; background: transparent; border-bottom: 1px solid var(--border); width: 100%; margin: 0; }
 
 /* Chat feed spacing to prevent overlap with status row */
 .chat-feed { 
@@ -52,7 +52,7 @@ header.topbar { white-space: nowrap; }
 /* Composer container - ChatGPT style */
 .composer-wrap { 
   background: var(--panel); 
-  padding: 20px var(--content-pad, 24px) 30px 0; 
+  padding: 20px 0 30px 0; 
   display: flex; 
   align-items: flex-start; 
   gap: 8px; 

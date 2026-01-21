@@ -42,14 +42,14 @@ input[type="file"] { display: none !important; }
 .chat-pane {
   min-height: 0;
   overflow: auto;
-  max-width: 1200px;
+  max-width: none;
 }
 
 /* Main column contract - single max-width container */
 .main-column {
   max-width: var(--content-max, 1120px);
   margin: 0 auto;
-  padding: 0 var(--content-pad, 16px);
+  padding: 0 var(--content-pad, 24px);
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -583,20 +583,17 @@ body.sidebar-collapsed .session-initial {
 .chat-feed {
   flex: 1;
   overflow: auto;
-  padding-right: 6px;
+  padding-right: 0;
   display: flex;
   flex-direction: column;
   gap: 24px;
-  max-width: 100%;
   width: 100%;
   margin: 0 0 24px 0;
-  padding: 20px 20px 120px 0;
+  padding: 20px 0 120px 0;
   background: transparent;
   border: none;
   border-radius: 0;
   scrollbar-width: none;
-  max-width: 1200px;
-  max-height: 60vh;
 }
 .chat-feed::-webkit-scrollbar { display: none; }
 .status-row {
@@ -614,24 +611,7 @@ body.sidebar-collapsed .session-initial {
   border-radius: 16px;
   padding: 10px;
 }
-.chat-pane .status-row,
-.chat-pane .session-prompt-row,
-.chat-pane .composer,
-.chat-pane .suggestions,
-.chat-pane .greeting-banner,
-.chat-pane .chat-feed {
-  width: min(var(--content-max), calc(100% - 32px));
-  max-width: var(--content-max);
-}
-
-.composer-wrap {
-  margin-top: 12px;
-}
-
-.chat-pane .status-row {
-  width: min(var(--content-max), calc(100% - 32px));
-  max-width: var(--content-max);
-}
+.composer-wrap { margin-top: 12px; }
 .suggestions {
   max-width: 760px;
   width: 100%;

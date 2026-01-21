@@ -20,10 +20,10 @@ input,select,textarea{background:var(--panel);color:var(--text);border:1px solid
 .hidden{display:none !important}
 
 /* Topbar alignment fixes */
-header.topbar { display: flex; align-items: center; gap: 16px; padding: 12px 20px; white-space: nowrap; }
+header.topbar { display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; white-space: nowrap; }
 .brand { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .pill { margin-left: 4px; vertical-align: middle; }
-#topBanner { flex: 1; text-align: center; }
+#topBanner { margin: 0 auto; }
 .top-actions { display: flex; align-items: center; flex-shrink: 0; }
 .search-wrap { display: flex; align-items: center; gap: 8px; }
 

@@ -14,6 +14,7 @@
     <div class="brand">
       <h1 id="brandTop">Jarvis</h1>
       <span id="onlinePill" class="pill offline">Offline</span>
+      <span id="buildId" class="build-id">build: {{BUILD_ID}}</span>
       <span id="statusBadge" class="status hidden">Klar</span>
     </div>
     <div id="topBanner" class="top-banner" aria-live="polite">
@@ -233,17 +234,12 @@
     </aside>
   </main>
   <footer class="app-footer">
-    <div class="footer-left">
-      <span id="footerText">Jarvis v.1 @ 2026</span>
-    </div>
-    <div id="buildMarker" class="build-marker">BUILD {{BUILD_ID}}</div>
-    <div class="footer-right">
-      <span class="footer-links">
-        <a id="footerSupport" href="#">Support</a>
-        <a id="footerContact" href="#">Kontakt</a>
-        <a id="footerLicense" href="#">Open‑source licens</a>
-      </span>
-    </div>
+    <span id="footerText">Jarvis v.1 @ 2026</span>
+    <span class="footer-links">
+      <a id="footerSupport" href="#">Support</a>
+      <a id="footerContact" href="#">Kontakt</a>
+      <a id="footerLicense" href="#">Open‑source licens</a>
+    </span>
   </footer>
   <div id="cookieBanner" class="cookie-banner" style="display:none;">
     <div class="cookie-card">

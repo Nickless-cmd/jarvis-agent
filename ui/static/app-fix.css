@@ -21,10 +21,11 @@ input,select,textarea{background:var(--panel);color:var(--text);border:1px solid
 
 /* Topbar alignment fixes */
 header.topbar { display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; white-space: nowrap; }
-.brand { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.brand { display: flex; align-items: center; gap: 6px; flex-shrink: 0; margin-right: 40px; }
 .pill { margin-left: 4px; vertical-align: middle; }
+.build-id { margin-left: 2px; opacity:0.85; font-size: 0.85rem; }
 #topBanner { margin: 0 auto; }
-.top-actions { display: flex; align-items: center; flex-shrink: 0; }
+.top-actions { display: flex; align-items: center; flex-shrink: 0; margin-left: 40px; }
 .search-wrap { display: flex; align-items: center; gap: 8px; }
 
 /* Status row and tools placement (ensure tools sit under status and above composer) */
@@ -50,8 +51,6 @@ header.topbar { display: flex; align-items: center; justify-content: space-betwe
 
 /* Footer layout fix */
 .app-footer { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 20px; border-top:1px solid var(--border); background:var(--panel); color:var(--muted); position:relative }
-.footer-left, .footer-right { display:flex; align-items:center; }
-.build-marker { text-align:center; font-size:0.85rem; opacity:0.7; }
 
 /* Ensure sidebar and rightbar don't overlap main in narrow screens */
 @media (max-width: 980px) {

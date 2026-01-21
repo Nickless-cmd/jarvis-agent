@@ -403,44 +403,40 @@ function renderRightPanels(updatesLog = "", commands = []) {
 }
 
 async function loadRightPanels() {
-  try {
-    const data = await safeFetchJson("/settings/public", {}, {});
-    if (!data) return;
-    const notifWrap = document.getElementById("notifWrap");
-    if (notifWrap) {
-      if (data.notify_enabled) {
-        notifWrap.classList.remove("hidden");
-      } else {
-        notifWrap.classList.add("hidden");
-      }
-    }
-    const list = (data.updates_log || "").trim()
-      ? data.updates_log
-      : (data.updates_auto || []).join("\n");
-    window.__updatesLog = list || "";
-    window.__commandsList = data.commands || [];
-    renderRightPanels(window.__updatesLog, window.__commandsList);
-    const rightNotesPanel = document.getElementById("rightNotesPanel");
-    const rightTicketsPanel = document.getElementById("rightTicketsPanel");
-    if (isAdminUser) {
-      if (rightNotesPanel) rightNotesPanel.classList.add("hidden");
-      if (rightTicketsPanel) rightTicketsPanel.classList.remove("hidden");
+  const data = await safeJson("/settings/public", {});
+  if (!data) return;
+  const notifWrap = document.getElementById("notifWrap");
+  if (notifWrap) {
+    if (data.notify_enabled) {
+      notifWrap.classList.remove("hidden");
     } else {
-      if (rightTicketsPanel) rightTicketsPanel.classList.add("hidden");
-      if (rightNotesPanel) rightNotesPanel.classList.remove("hidden");
+      notifWrap.classList.add("hidden");
     }
-  } catch (err) {
-    console.warn("loadRightPanels failed", err);
+  }
+  const list = (data.updates_log || "").trim()
+    ? data.updates_log
+    : (data.updates_auto || []).join("\n");
+  window.__updatesLog = list || "";
+  window.__commandsList = data.commands || [];
+  renderRightPanels(window.__updatesLog, window.__commandsList);
+  const rightNotesPanel = document.getElementById("rightNotesPanel");
+  const rightTicketsPanel = document.getElementById("rightTicketsPanel");
+  if (isAdminUser) {
+    if (rightNotesPanel) rightNotesPanel.classList.add("hidden");
+    if (rightTicketsPanel) rightTicketsPanel.classList.remove("hidden");
+  } else {
+    if (rightTicketsPanel) rightTicketsPanel.classList.add("hidden");
+    if (rightNotesPanel) rightNotesPanel.classList.remove("hidden");
   }
 }
 
 async function loadRightNotes() {
   if (isAdminUser) return;
-  const data = await safeApiFetchJson("/notes", { method: "GET" }, {});
+  const data = await safeJson("/notes", {}, { method: "GET" });
   const rightNotesBody = document.getElementById("rightNotesBody");
   if (!rightNotesBody) return;
   const lang = getUiLang();
-  const items = data.items || [];
+  const items = (data && data.items) || [];
   if (!items.length) {
     rightNotesBody.innerHTML = `<div class="muted">${lang === "en" ? "No notes yet." : "Ingen noter endnu."}</div>`;
     return;
@@ -459,22 +455,15 @@ async function loadRightTickets() {
   const rightTicketsTitle = document.getElementById("rightTicketsTitle");
   const rightTicketsPanel = document.getElementById("rightTicketsPanel");
   if (!rightTicketsBody || !rightTicketsPanel) return;
+  const data = await safeJson("/admin/tickets", { method: "GET" }, {});
   let all = [];
-  try {
-    const data = await safeApiFetchJson("/admin/tickets", { method: "GET" }, {});
-    if (!data) {
-      rightTicketsBody.innerHTML = `<div class="muted">${getUiLang() === "en" ? "No ticket data." : "Ingen ticket-data."}</div>`;
-      return;
-    }
+  if (data) {
     all = data.tickets || [];
-    const activeCount = all.filter((t) => t.status !== "closed" && t.status !== "fixed").length;
-    if (rightTicketsTitle) {
-      rightTicketsTitle.textContent =
-        getUiLang() === "en" ? `Tickets (${activeCount} active)` : `Tickets (${activeCount} aktive)`;
-    }
-  } catch (err) {
-    console.warn("loadRightTickets failed", err);
-    rightTicketsBody.innerHTML = `<div class="muted">${getUiLang() === "en" ? "No ticket data." : "Ingen ticket-data."}</div>`;
+  }
+  const activeCount = all.filter((t) => t.status !== "closed" && t.status !== "fixed").length;
+  if (rightTicketsTitle) {
+    rightTicketsTitle.textContent =
+      getUiLang() === "en" ? `Tickets (${activeCount} active)` : `Tickets (${activeCount} aktive)`;
   }
   const list = all.slice(0, 5);
   if (!list.length) {
@@ -494,25 +483,22 @@ async function loadRightTickets() {
 
 async function loadRightLogs() {
   if (!isAdminUser) return;
-  try {
-    const data = await safeApiFetchJson("/admin/logs", { method: "GET" }, {});
-    const files = data.files || [];
-    const statusPanel = document.getElementById("statusPanel");
-    if (!statusPanel) return;
-    const lang = getUiLang();
-    if (!files.length) {
-      statusPanel.innerHTML = `<div class="muted">${lang === "en" ? "No logs yet." : "Ingen logs endnu."}</div>`;
-      return;
-    }
-    const latest = files[0]?.name;
-    if (!latest) return;
-    const payload = await safeApiFetchJson(`/admin/logs/${latest}`, { method: "GET" }, {});
-    const content = (payload.content || "").trim();
-    const lines = content.split("\n").slice(-12).join("\n");
-    statusPanel.innerHTML = `<pre>${lines || (lang === "en" ? "No logs yet." : "Ingen logs endnu.")}</pre>`;
-  } catch (err) {
-    console.warn("loadRightLogs failed", err);
+  const data = await safeJson("/admin/logs", { method: "GET" }, {});
+  if (!data) return;
+  const files = data.files || [];
+  const statusPanel = document.getElementById("statusPanel");
+  if (!statusPanel) return;
+  const lang = getUiLang();
+  if (!files.length) {
+    statusPanel.innerHTML = `<div class="muted">${lang === "en" ? "No logs yet." : "Ingen logs endnu."}</div>`;
+    return;
   }
+  const latest = files[0]?.name;
+  if (!latest) return;
+  const payload = await safeJson(`/admin/logs/${latest}`, { method: "GET" }, {});
+  const content = (payload.content || "").trim();
+  const lines = content.split("\n").slice(-12).join("\n");
+  statusPanel.innerHTML = `<pre>${lines || (lang === "en" ? "No logs yet." : "Ingen logs endnu.")}</pre>`;
 }
 
 function updatePromptPlaceholder() {
@@ -915,8 +901,8 @@ async function uploadFile(file) {
 
 async function loadNotes() {
   if (!notesList) return;
-  const data = await safeApiFetchJson("/notes", { method: "GET" }, {});
-  const items = data.notes || [];
+  const data = await safeJson("/notes", {}, { method: "GET" });
+  const items = (data && data.notes) || [];
   notesList.innerHTML = "";
   if (!items.length) {
     if (notesPanel) notesPanel.style.display = "none";
@@ -965,7 +951,8 @@ async function createNoteQuick() {
 
 async function loadFiles() {
   if (!filesList) return;
-  const data = await safeApiFetchJson("/files", { method: "GET" }, {});
+  const data = await safeJson("/files", { method: "GET" }, {});
+  if (!data) return;
   const items = data.files || [];
   filesList.innerHTML = "";
   if (!items.length) {
@@ -1722,6 +1709,16 @@ async function safeApiFetchJson(url, opts = {}, fallback = {}) {
   }
 }
 
+// New safeJson helper using existing apiFetch
+async function safeJson(url, fallback = null, opts = {}) {
+  try {
+    return await apiFetch(url, opts);
+  } catch (e) {
+    console.warn("fetch failed", url, e);
+    return fallback;
+  }
+}
+
 async function safeFetchJson(url, opts = {}, fallback = {}) {
   try {
     const res = await fetch(url, opts);
@@ -1810,19 +1807,12 @@ async function loadQuotaBar() {
 
 async function loadStatus() {
   if (!jarvisDot) return;
-  try {
-    const res = await fetch("/status", { credentials: "include" });
-    if (!res.ok) {
-      // treat non-ok as unknown rather than outright offline
-      setOnlineStatus(null);
-      return;
-    }
-    const data = await res.json().catch(() => ({}));
-    setOnlineStatus(data.online !== false);
-  } catch (err) {
-    console.warn("loadStatus failed", err);
-    setOnlineStatus(null);
+  const data = await safeJson("/status", null, { credentials: "include" });
+  if (!data) {
+    setOnlineStatus(false);
+    return;
   }
+  setOnlineStatus(data.online !== false);
 }
 
 function setOnlineStatus(isOnline) {
@@ -2692,32 +2682,24 @@ document.addEventListener("keydown", (e) => {
 async function loadNotifications() {
   if (!getToken()) return;
   const url = "/v1/notifications" + (notificationsLastId ? `?since_id=${notificationsLastId}` : "");
-  const data = await safeApiFetchJson(url, { method: "GET" }, null);
+  const data = await safeJson(url, null, { method: "GET" });
   if (!data) return;
-  try {
-    const notifications = data.notifications || [];
-    notificationsCache = [...notificationsCache, ...notifications];
-    if (notifications.length > 0) {
-      notificationsLastId = notifications[notifications.length - 1].id;
-    }
-    updateNotificationsBadge();
-    renderNotificationsDropdown();
-  } catch (err) {
-    console.error("Failed to load notifications:", err);
+  const notifications = data.notifications || [];
+  notificationsCache = [...notificationsCache, ...notifications];
+  if (notifications.length > 0) {
+    notificationsLastId = notifications[notifications.length - 1].id;
   }
+  updateNotificationsBadge();
+  renderNotificationsDropdown();
 }
 
 async function updateNotificationsBadge() {
-  const data = await safeApiFetchJson("/v1/notifications/unread_count", { method: "GET" }, null);
+  const data = await safeJson("/v1/notifications/unread_count", null, { method: "GET" });
   if (!data) return;
-  try {
-    const unreadCount = data.count || 0;
-    if (notificationsBadge) {
-      notificationsBadge.textContent = unreadCount > 0 ? unreadCount : "";
-      notificationsBadge.style.display = unreadCount > 0 ? "inline" : "none";
-    }
-  } catch (err) {
-    console.error("Failed to update notifications badge:", err);
+  const unreadCount = data.count || 0;
+  if (notificationsBadge) {
+    notificationsBadge.textContent = unreadCount > 0 ? unreadCount : "";
+    notificationsBadge.style.display = unreadCount > 0 ? "inline" : "none";
   }
 }
 

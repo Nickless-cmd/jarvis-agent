@@ -74,6 +74,12 @@ def register_tool(spec: ToolSpec, fn: Callable) -> None:
     _tool_registry[spec.name] = (spec, fn)
 
 
+def get_spec(name: str) -> ToolSpec | None:
+    """Return tool spec if registered."""
+    entry = _tool_registry.get(name)
+    return entry[0] if entry else None
+
+
 def _redact_args(args: Dict[str, Any]) -> Dict[str, Any]:
     """Redact sensitive fields from args."""
     redacted = {}

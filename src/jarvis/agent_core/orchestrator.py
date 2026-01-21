@@ -236,6 +236,47 @@ def handle_turn(
     preloaded["pending_scope"] = pending_scope
     preloaded["pending_prompt"] = pending_prompt
 
+    # Pending tool approval
+    pending_tool = preloaded["conversation_state"].pending_tool_action if preloaded.get("conversation_state") else None
+    if pending_tool:
+        from jarvis.agent import _affirm_intent, _deny_intent
+        if _affirm_intent(prompt):
+            # Execute stored tool
+            from jarvis.agent_core.tool_registry import call_tool
+            try:
+                result = call_tool(pending_tool["name"], pending_tool.get("args", {}), user_id, session_id)
+                reply = result if isinstance(result, str) else str(result)
+                if isinstance(result, dict) and "text" in result:
+                    reply = result["text"]
+                preloaded["conversation_state"].pending_tool_action = None
+                set_conversation_state(session_id, preloaded["conversation_state"].to_json())
+                return build_response(
+                    TurnResult(reply_text=reply, meta={"tool": pending_tool["name"], "tool_used": True}),
+                    session_id,
+                    preloaded["reminders_due"],
+                    preloaded["user_id_int"],
+                    prompt,
+                    user_id,
+                    memory_used=preloaded["memory_used"],
+                    resume_hint=preloaded.get("resume_hint"),
+                    ui_lang=ui_lang,
+                )
+            except Exception as exc:
+                preloaded["conversation_state"].pending_tool_action = None
+                set_conversation_state(session_id, preloaded["conversation_state"].to_json())
+                return {
+                    "text": f"Tool '{pending_tool['name']}' failed: {exc}",
+                    "meta": {"tool": pending_tool["name"], "tool_used": False},
+                }
+        if _deny_intent(prompt):
+            preloaded["conversation_state"].pending_tool_action = None
+            set_conversation_state(session_id, preloaded["conversation_state"].to_json())
+            cancel_msg = "Forstår. Jeg kører ikke værktøjet." if not ui_lang or not ui_lang.startswith("en") else "Understood. I will not run the tool."
+            return {
+                "text": cancel_msg,
+                "meta": {"tool": None, "tool_used": False},
+            }
+
     # Resume hint (only once after inactivity)
     resume_hint_text = None
     if session_id:

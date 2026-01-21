@@ -4,6 +4,7 @@ Process skill handler - thin wrapper for process/system/ping intents.
 
 import re
 import json
+from typing import Callable, Optional
 
 
 def _butler_prefix(display_name: str | None) -> str:
@@ -147,6 +148,8 @@ def handle_process(
     user_id_int: int | None = None,
     display_name: str | None = None,
     resume_prompt: str | None = None,
+    conversation_state=None,
+    set_conversation_state_fn: Optional[Callable[[str], None]] = None,
 ):
     """
     Handle process/system/ping intents and tool results.

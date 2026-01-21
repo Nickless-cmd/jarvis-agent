@@ -101,6 +101,7 @@ from jarvis.db import get_conn
 from jarvis import tools, tts
 from jarvis.agent_policy.language import _should_translate_vision_response
 from jarvis.agent_core.orchestrator import TurnResult, coerce_to_turn_result
+from jarvis.agent_core.tool_registry import get_spec
 from jarvis.agent_core.tool_registry import call_tool
 from jarvis.agent_policy.vision_guard import (
     _describe_image_ollama,
@@ -1703,9 +1704,19 @@ def _run_agent_core_fallback(
                 add_memory("assistant", reply, user_id=user_id)
                 return TurnResult(reply_text=reply, meta={"tool": "process", "tool_used": False})
             else:
-                set_process_state(session_id, json.dumps({"pid": pid}))
-                reply = f"Jeg kan afslutte proces {pid}. Skriv 'bekræft' for at fortsætte."
+                risk = "high"
+                spec = get_spec("kill_process")
+                if spec and getattr(spec, "risk_level", None):
+                    risk = spec.risk_level
+                if conversation_state:
+                    conversation_state.set_pending_tool("kill_process", {"pid": int(pid)}, risk_level=risk)
+                    set_conversation_state(session_id, conversation_state.to_json())
+                reply = "Jeg kan afslutte proces {pid}. Bekræft?" if (ui_lang or "").startswith("en") else f"Jeg kan afslutte proces {pid}. Skriv 'bekræft' for at fortsætte."
+                plan = "- Terminer processen med kill_process" if not (ui_lang or "").startswith("en") else "- Terminate the process via kill_process"
+                reply = reply.format(pid=pid) + f"\n{plan}"
                 add_memory("assistant", reply, user_id=user_id)
+                if session_id:
+                    add_message(session_id, "assistant", reply)
                 return TurnResult(reply_text=reply, meta={"tool": "process", "tool_used": False})
         elif action == "find":
             tool_result = call_tool("find_process", {"query": prompt}, user_id, session_id)
@@ -1887,15 +1898,60 @@ def _run_agent_core_fallback(
         add_memory("assistant", reply, user_id=user_id)
         return TurnResult(reply_text=reply, meta={"tool": "time", "tool_used": True})
 
-    system_response = handle_process(user_id, prompt, session_id, allowed_tools, ui_city, ui_lang, tool="system", tool_result=tool_result, reminders_due=reminders_due, user_id_int=user_id_int, display_name=display_name, resume_prompt=resume_prompt)
+    system_response = handle_process(
+        user_id,
+        prompt,
+        session_id,
+        allowed_tools,
+        ui_city,
+        ui_lang,
+        tool="system",
+        tool_result=tool_result,
+        reminders_due=reminders_due,
+        user_id_int=user_id_int,
+        display_name=display_name,
+        resume_prompt=resume_prompt,
+        conversation_state=conversation_state,
+        set_conversation_state_fn=(lambda data: set_conversation_state(session_id, data) if session_id else None),
+    )
     if system_response:
         return coerce_to_turn_result(system_response)
 
-    ping_response = handle_process(user_id, prompt, session_id, allowed_tools, ui_city, ui_lang, tool="ping", tool_result=tool_result, reminders_due=reminders_due, user_id_int=user_id_int, display_name=display_name, resume_prompt=resume_prompt)
+    ping_response = handle_process(
+        user_id,
+        prompt,
+        session_id,
+        allowed_tools,
+        ui_city,
+        ui_lang,
+        tool="ping",
+        tool_result=tool_result,
+        reminders_due=reminders_due,
+        user_id_int=user_id_int,
+        display_name=display_name,
+        resume_prompt=resume_prompt,
+        conversation_state=conversation_state,
+        set_conversation_state_fn=(lambda data: set_conversation_state(session_id, data) if session_id else None),
+    )
     if ping_response:
         return coerce_to_turn_result(ping_response)
 
-    process_response = handle_process(user_id, prompt, session_id, allowed_tools, ui_city, ui_lang, tool="process", tool_result=tool_result, reminders_due=reminders_due, user_id_int=user_id_int, display_name=display_name, resume_prompt=resume_prompt)
+    process_response = handle_process(
+        user_id,
+        prompt,
+        session_id,
+        allowed_tools,
+        ui_city,
+        ui_lang,
+        tool="process",
+        tool_result=tool_result,
+        reminders_due=reminders_due,
+        user_id_int=user_id_int,
+        display_name=display_name,
+        resume_prompt=resume_prompt,
+        conversation_state=conversation_state,
+        set_conversation_state_fn=(lambda data: set_conversation_state(session_id, data) if session_id else None),
+    )
     if process_response:
         return coerce_to_turn_result(process_response)
 

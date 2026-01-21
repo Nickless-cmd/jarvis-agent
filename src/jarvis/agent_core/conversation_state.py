@@ -18,6 +18,7 @@ class ConversationState:
     last_summary: str = ""
     response_mode: str = "normal"  # short | normal | deep
     resume_hint_shown: bool = False
+    pending_tool_action: dict | None = None
 
     def to_json(self) -> str:
         payload = {
@@ -27,6 +28,7 @@ class ConversationState:
             "last_summary": (self.last_summary or "")[:MAX_SUMMARY],
             "response_mode": self.response_mode or "normal",
             "resume_hint_shown": bool(self.resume_hint_shown),
+            "pending_tool_action": self.pending_tool_action or None,
         }
         return json.dumps(payload, ensure_ascii=False)
 
@@ -45,6 +47,7 @@ class ConversationState:
             last_summary=(data.get("last_summary", "") or "")[:MAX_SUMMARY],
             response_mode=data.get("response_mode", "normal") or "normal",
             resume_hint_shown=bool(data.get("resume_hint_shown", False)),
+            pending_tool_action=data.get("pending_tool_action"),
         )
 
     def set_goal(self, goal: str) -> None:
@@ -101,6 +104,20 @@ class ConversationState:
         mode = (mode or "").lower()
         if mode in {"short", "normal", "deep"}:
             self.response_mode = mode
+
+    def set_pending_tool(self, name: str, args: dict | None = None, risk_level: str | None = None) -> None:
+        """Store a pending tool action awaiting user approval."""
+        if not name:
+            return
+        self.pending_tool_action = {
+            "name": name,
+            "args": args or {},
+            "risk_level": risk_level or "medium",
+        }
+
+    def clear_pending_tool(self) -> None:
+        """Clear any pending tool action."""
+        self.pending_tool_action = None
 
 
 def should_show_resume_hint(session_hist: list[dict], now_dt, threshold_minutes: int = 45, already_shown: bool = False) -> bool:

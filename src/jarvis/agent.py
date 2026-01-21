@@ -153,6 +153,7 @@ from jarvis.agent_skills.notes_skill import (
 )
 
 from jarvis.agent_skills.process_skill import handle_process
+from jarvis.agent_skills.recap_skill import handle_recap, maybe_store_confirmation
 
 def _debug(msg: str) -> None:
     if os.getenv("JARVIS_DEBUG") == "1":
@@ -1645,6 +1646,27 @@ def _run_agent_core_fallback(
         if session_id:
             add_message(session_id, "assistant", pm_cmd.reply_text)
         return pm_cmd
+
+    # Recap confirmation (store milestone/roadmap)
+    if session_id and isinstance(pending_file, dict) and pending_file.get("recap_data"):
+        confirm_reply = maybe_store_confirmation(prompt, pending_file.get("recap_data"), ui_lang)
+        if confirm_reply:
+            clear_pending_file(session_id)
+            add_memory("assistant", confirm_reply, user_id=user_id)
+            add_message(session_id, "assistant", confirm_reply)
+            return TurnResult(reply_text=confirm_reply, meta={"tool": "recap", "tool_used": False})
+
+    # Recap intent (chatlog analysis)
+    recap_result = handle_recap(user_id, prompt, session_id, user_id_int, user_key, ui_lang)
+    if recap_result:
+        if recap_result.data and session_id:
+            payload = pending_file if isinstance(pending_file, dict) else {}
+            payload = dict(payload)
+            payload["recap_data"] = recap_result.data
+            set_pending_file(session_id, json.dumps(payload, ensure_ascii=False))
+        add_memory("assistant", recap_result.reply_text, user_id=user_id)
+        add_message(session_id, "assistant", recap_result.reply_text)
+        return recap_result
 
     if session_id:
         pending_process = _load_state(get_process_state(session_id))

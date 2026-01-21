@@ -327,6 +327,7 @@ function applyUiTheme(value) {
     document.documentElement.setAttribute("data-theme", want);
     document.documentElement.setAttribute("data-theme-mode", "manual");
   }
+  const themeSelect = getThemeSelect();
   if (themeSelect) themeSelect.value = want;
 }
 
@@ -1145,13 +1146,15 @@ function createMessageElement(role, content, meta = {}) {
 }
 
 function renderChatMessage(msg) {
+  const feed = getChatFeed();
+  const shouldScroll = isNearBottom(feed);
   const element = createMessageElement(msg.role, msg.content, { when: msg.when });
   const chat = getChat();
   if (chat) chat.appendChild(element);
   const greetingBanner = getGreetingBanner();
   if (greetingBanner) greetingBanner.style.display = "none";
   hasMessages = true;
-  scrollChatToBottom();
+  if (shouldScroll) scrollChatToBottom();
   return element;
 }
 
@@ -1526,8 +1529,7 @@ async function loadSessionMessages(id) {
   hasMessages = (data.messages || []).length > 0;
   const greetingBanner = getGreetingBanner();
   if (greetingBanner) greetingBanner.style.display = hasMessages ? "none" : "block";
-  const feed = getChatFeed();
-  if (feed) feed.scrollTop = feed.scrollHeight;
+  scrollChatToBottom();
 }
 
 async function shareSession(id) {

@@ -96,6 +96,7 @@ let currentUserName = "";
 let autoSessionInFlight = false;
 let maintenanceEnabled = false;
 let maintenanceMessage = "";
+lastEventId = null;
 let notificationsCache = [];
 let notificationsLastId = null;
 

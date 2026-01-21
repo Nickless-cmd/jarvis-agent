@@ -2306,6 +2306,39 @@ async def public_settings(x_ui_lang: str | None = Header(None)):
     }
 
 
+@app.get("/v1/brand")
+async def v1_brand():
+    settings = _get_settings(["brand_top_label", "brand_core_label"])
+    return {
+        "name": settings.get("brand_core_label", "Jarvis"),
+        "short": settings.get("brand_core_label", "Jarvis"),
+        "top": settings.get("brand_top_label", "Jarvis"),
+        "version": "1.0.0",
+    }
+
+
+@app.get("/v1/settings")
+async def v1_settings():
+    return {
+        "maintenance": {
+            "enabled": _maintenance_enabled(),
+            "message": _maintenance_message(),
+        },
+        "default_lang": "da",
+        "default_theme": "light",
+        "features": {
+            "captcha": False,
+        },
+    }
+
+
+@app.get("/v1/captcha")
+async def v1_captcha():
+    return {
+        "enabled": False,
+    }
+
+
 @app.get("/status")
 async def status():
     return {"online": True}

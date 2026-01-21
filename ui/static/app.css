@@ -10,6 +10,75 @@
   --panel-gap: 10px;
   --bar-height: 56px;
 }
+/* utility hidden class (use !important to avoid accidental overrides) */
+.hidden { display: none !important; }
+
+/* Topbar control styling: scope inputs/selects/textareas to topbar to avoid global overrides */
+header.topbar input,
+header.topbar select,
+header.topbar textarea {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 6px 8px;
+  border-radius: 8px;
+  outline: none;
+}
+header.topbar select {
+  appearance: none;
+  -webkit-appearance: none;
+}
+/* Ensure dropdowns sit above other elements */
+header.topbar .top-actions { position: relative; z-index: 30; }
+
+/* online/offline pill and dot */
+.pill { padding: 6px 10px; border-radius: 999px; font-size: 12px; display: inline-block; }
+.pill.online { background: #16a34a; color: white; }
+.pill.offline { background: #6b7280; color: white; }
+.jarvis-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; background: #9ca3af; margin-left: 8px; }
+.jarvis-dot.online { background: #22c55e; }
+.jarvis-dot.offline { background: #6b7280; }
+
+/* Dev info box (small, subtle) */
+.dev-info {
+  position: fixed;
+  left: 8px;
+  bottom: 8px;
+  background: rgba(17,24,39,0.8);
+  color: var(--muted);
+  font-size: 11px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  z-index: 1200;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dev-info a { color: var(--accent); }
+
+.dev-info-toggle {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  margin-left: 8px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.dev-info-full {
+  margin-top: 6px;
+  font-family: monospace;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: normal;
+  max-height: 160px;
+  overflow: auto;
+}
+.dev-info.expanded {
+  max-width: 66%;
+  white-space: normal;
+}
+.dev-info.hidden { display: none !important; }
 html[data-theme="light"] {
   --bg: #f6f7fb;
   --panel: #ffffff;

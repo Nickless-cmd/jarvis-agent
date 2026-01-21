@@ -28,3 +28,14 @@ Hvis du vil bruge en anden DB‑placering:
 ```
 JARVIS_DB_PATH=/tmp/jarvis.db
 ```# jarvis-agent
+
+## Development tip
+
+When developing locally make sure the running server uses the repository workspace UI. Start with:
+
+```bash
+# from your workspace root
+JARVIS_PROJECT_ROOT=/home/bs/vscode/jarvis-agent PYTHONPATH=src uvicorn jarvis.server:app --reload --host 127.0.0.1 --port 8000
+```
+
+This ensures the server mounts `ui/` and `ui/static/` from the repository path and exposes runtime info at `/v1/info` for quick verification.

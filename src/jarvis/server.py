@@ -101,6 +101,32 @@ except Exception:
 app.mount("/ui/static", StaticFiles(directory=str(UI_DIR / "static")), name="ui-static")
 # Removed /ui mount to allow routes to handle /ui/ redirects without interference
 
+# Allow overriding project root at runtime (helps when uvicorn was started from another copy)
+EXPECTED_ROOT = Path(os.getenv("JARVIS_PROJECT_ROOT", "/home/bs/vscode/jarvis-agent"))
+if EXPECTED_ROOT.exists() and EXPECTED_ROOT != ROOT:
+    # switch UI_DIR/APP_HTML to the expected repo path
+    ROOT = EXPECTED_ROOT
+    UI_DIR = ROOT / "ui"
+    APP_HTML = UI_DIR / "app.html"
+    try:
+        # re-mount static directories to point to the repository UI
+        app.mount("/ui/static", StaticFiles(directory=str(UI_DIR / "static")), name="ui-static")
+        app.mount("/static", StaticFiles(directory=os.path.join(UI_DIR, "static")), name="static")
+    except Exception:
+        # ignore mount errors if already mounted
+        pass
+
+
+@app.on_event("startup")
+async def _log_startup_paths():
+    # Log which server file and project root are active so authors can verify the correct repo is used.
+    try:
+        _req_logger.info(f"STARTUP: jarvis.server file: {__file__}")
+        _req_logger.info(f"STARTUP: PROJECT_ROOT: {ROOT}")
+        _req_logger.info(f"STARTUP: APP_HTML path: {APP_HTML} exists={APP_HTML.exists()}")
+    except Exception:
+        pass
+
 # UI routing: Legacy index.html redirects to modern app.html for deterministic UX
 # Users should always land on /app (ui/app.html), not legacy /ui/index.html
 
@@ -2358,6 +2384,26 @@ async def v1_captcha():
 @app.get("/status")
 async def status():
     return {"ok": True, "online": True, "version": "1.0.0"}
+
+
+@app.get("/v1/info")
+async def v1_info():
+    """Return runtime info useful for verifying which codebase is serving requests.
+
+    - `build_id`: cache-busting id
+    - `server_file`: the path to this server module
+    - `project_root`: the PROJECT_ROOT being used
+    - `app_html_exists`: whether ui/app.html exists at PROJECT_ROOT
+    """
+    try:
+        return {
+            "build_id": BUILD_ID,
+            "server_file": __file__,
+            "project_root": str(ROOT),
+            "app_html_exists": APP_HTML.exists(),
+        }
+    except Exception:
+        return {"build_id": BUILD_ID, "server_file": str(__file__), "project_root": str(ROOT), "app_html_exists": False}
 
 
 @app.post("/api/tickets")

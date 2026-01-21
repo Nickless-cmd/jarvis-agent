@@ -184,6 +184,12 @@
       <div id="suggestions" class="suggestions hidden"></div>
       <input id="uploadInput" type="file" class="hidden" />
       <input id="imageUploadInput" type="file" accept="image/*" class="hidden" />
+      <!-- Dev: runtime info (populated from /v1/info) -->
+      <div id="devInfo" class="dev-info hidden" aria-hidden="true">
+        <span id="devInfoCompact" class="dev-info-compact"></span>
+        <button id="devInfoToggle" class="dev-info-toggle" aria-expanded="false" aria-label="Toggle dev info">⋯</button>
+        <div id="devInfoFull" class="dev-info-full hidden" aria-hidden="true"></div>
+      </div>
       <div class="small" id="chatStatus"></div>
       <div class="composer-row">
         <div class="tools-inputs">

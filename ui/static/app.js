@@ -2009,7 +2009,110 @@ if (responseModeSelect) {
   responseModeSelect.value = savedMode;
 }
 
+// --- Status polling: robust check of /status endpoint to update online badge ---
+async function loadStatus() {
+  try {
+    const res = await fetch('/status', { credentials: 'include' });
+    if (!res.ok) throw new Error('status fetch failed');
+    const data = await res.json();
+    const online = data?.online === true || data?.ok === true;
+    if (onlinePill) {
+      onlinePill.textContent = online ? 'Online' : 'Offline';
+      onlinePill.classList.remove('online', 'offline');
+      onlinePill.classList.add(online ? 'online' : 'offline');
+    }
+    if (jarvisDot) {
+      jarvisDot.classList.remove('online', 'offline');
+      jarvisDot.classList.add(online ? 'online' : 'offline');
+    }
+    window.__jarvis_status_failures = 0;
+  } catch (err) {
+    window.__jarvis_status_failures = (window.__jarvis_status_failures || 0) + 1;
+    if (window.__jarvis_status_failures > 3) {
+      if (onlinePill) {
+        onlinePill.textContent = 'Offline';
+        onlinePill.classList.remove('online');
+        onlinePill.classList.add('offline');
+      }
+      if (jarvisDot) {
+        jarvisDot.classList.remove('online');
+        jarvisDot.classList.add('offline');
+      }
+    }
+  }
+}
+
+try {
+  loadStatus();
+  setInterval(loadStatus, 10000);
+} catch (e) {
+  console.warn('Status polling failed to start', e);
+}
+
 sessionSearch.addEventListener("input", renderSessionList);
+
+// Populate developer info box with runtime details from /v1/info
+async function loadDevInfo() {
+  const el = document.getElementById('devInfo');
+  if (!el) return;
+  try {
+    const res = await fetch('/v1/info');
+    if (!res.ok) throw new Error('Failed');
+    const info = await res.json();
+    const text = `build:${info.build_id} · app:${info.app_html_exists ? 'ok' : 'missing'} · root:${info.project_root}`;
+    el.textContent = text;
+    el.classList.remove('hidden');
+    el.setAttribute('aria-hidden', 'false');
+  } catch (err) {
+    // keep hidden on failure
+    el.classList.add('hidden');
+  }
+}
+
+try { loadDevInfo(); } catch (e) { /* ignore */ }
+// Toggle behavior for dev info box: expand/collapse and populate full details
+try {
+  const toggle = document.getElementById('devInfoToggle');
+  const box = document.getElementById('devInfo');
+  const compact = document.getElementById('devInfoCompact');
+  const full = document.getElementById('devInfoFull');
+  function renderFull(info) {
+    if (!full) return;
+    const lines = [];
+    lines.push(`build_id: ${info.build_id}`);
+    lines.push(`server_file: ${info.server_file}`);
+    lines.push(`project_root: ${info.project_root}`);
+    lines.push(`app_html_exists: ${info.app_html_exists}`);
+    full.textContent = lines.join('\n');
+  }
+  if (toggle && box) {
+    toggle.addEventListener('click', async (e) => {
+      e.preventDefault();
+      const expanded = box.classList.toggle('expanded');
+      toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+      if (expanded) {
+        // ensure we have latest info
+        try {
+          const res = await fetch('/v1/info');
+          if (res.ok) {
+            const info = await res.json();
+            renderFull(info);
+            compact.textContent = `build:${info.build_id} · app:${info.app_html_exists? 'ok':'missing'} · root:${info.project_root}`;
+          }
+        } catch (err) {
+          // ignore
+        }
+        full.classList.remove('hidden');
+        full.setAttribute('aria-hidden', 'false');
+      } else {
+        full.classList.add('hidden');
+        full.setAttribute('aria-hidden', 'true');
+      }
+    });
+  }
+} catch (err) {
+  // ignore
+}
 
 document.getElementById("newChatBtn").addEventListener("click", createSession);
 if (newChatInline) {

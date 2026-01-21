@@ -216,6 +216,25 @@ def _ensure_db():
         )
         conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS performance_metrics (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                session_id TEXT,
+                memory_retrieval_ms REAL DEFAULT 0,
+                tool_calls_total_ms REAL DEFAULT 0,
+                llm_call_ms REAL DEFAULT 0,
+                total_request_ms REAL DEFAULT 0,
+                context_items TEXT,  -- JSON
+                context_chars INTEGER DEFAULT 0,
+                budget_exceeded INTEGER DEFAULT 0,
+                items_trimmed INTEGER DEFAULT 0,
+                tool_calls TEXT  -- JSON
+            )
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS download_tokens (
                 token TEXT PRIMARY KEY,
                 user_id INTEGER NOT NULL,

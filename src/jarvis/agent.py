@@ -6,7 +6,9 @@ import re
 import sqlite3
 import requests
 import sys
-from datetime import datetime, time, timezone, timedelta
+import time
+from datetime import datetime, timezone, timedelta
+from typing import Optional
 from zoneinfo import ZoneInfo
 
 from jarvis.memory import search_memory, add_memory
@@ -101,7 +103,7 @@ from jarvis.agent_skills.files_skill import (
 from jarvis.db import get_conn
 from jarvis import tools, tts
 from jarvis.agent_policy.language import _should_translate_vision_response
-from jarvis.agent_core.orchestrator import TurnResult, coerce_to_turn_result
+from jarvis.agent_core.orchestrator import TurnResult, coerce_to_turn_result, get_last_metrics
 from jarvis.agent_core.tool_registry import get_spec
 from jarvis.agent_core.tool_registry import call_tool
 from jarvis.agent_policy.vision_guard import (
@@ -116,6 +118,10 @@ from jarvis.agent_policy.vision_guard import (
 from jarvis.agent_policy.freshness import inject_time_context, is_time_sensitive
 from jarvis.agent_format.ux_copy import ux_error, ux_notice
 from jarvis.agent_core.conversation_state import ConversationState, should_show_resume_hint
+from jarvis.performance_metrics import (
+    PerformanceMetrics, ContextBudget, get_budget, log_performance_metrics, 
+    get_recent_performance, format_performance_status
+)
 from jarvis.agent_core.project_memory import (
     add_milestone as pm_add_milestone,
     add_decision as pm_add_decision,
@@ -278,6 +284,9 @@ def _tool_label(tool: str) -> str:
     return labels.get(tool, tool)
 
 def call_ollama(messages):
+    import time
+    from jarvis.agent_core.orchestrator import set_last_metric
+    start = time.time()
     payload = {
         "model": os.getenv("OLLAMA_MODEL"),
         "messages": messages,
@@ -286,7 +295,9 @@ def call_ollama(messages):
     timeout = int(os.getenv("OLLAMA_TIMEOUT_SECONDS", "120"))
     try:
         r = requests.post(os.getenv("OLLAMA_URL"), json=payload, timeout=timeout)
-        return r.json()
+        res = r.json()
+        set_last_metric("llm_ms", (time.time() - start) * 1000)
+        return res
     except requests.exceptions.ReadTimeout:
         return {"error": "OLLAMA_TIMEOUT"}
     except requests.exceptions.RequestException as exc:
@@ -691,6 +702,27 @@ Download: /download/{token}"""
         return TurnResult(reply_text=error_msg, meta={"tool": None, "tool_used": False})
 
 
+def _is_perf_status_command(prompt: str, ui_lang: str) -> bool:
+    """Check if prompt is a performance status command."""
+    p = prompt.lower().strip()
+    if ui_lang.startswith("da"):
+        return p in ["perf status", "performance status", "ydelse status"]
+    else:
+        return p in ["perf status", "performance status"]
+
+
+def _handle_perf_status(user_id: str, session_id: Optional[str], ui_lang: str) -> TurnResult:
+    """Handle performance status command."""
+    try:
+        # Get recent performance metrics
+        metrics = get_recent_performance(user_id, session_id, limit=1)
+        status = format_performance_status(metrics, ui_lang)
+        return TurnResult(reply_text=status, meta={"tool": "perf_status", "tool_used": True})
+    except Exception as e:
+        error_msg = f"Fejl ved hentning af performance data: {e}" if ui_lang.startswith("da") else f"Error retrieving performance data: {e}"
+        return TurnResult(reply_text=error_msg, meta={"tool": None, "tool_used": False})
+
+
 def _cv_intent(prompt: str) -> bool:
     if _cv_own_intent(prompt) or _cv_example_intent(prompt) or _show_cv_intent(prompt) or _cv_cancel_intent(prompt):
         return False
@@ -737,6 +769,16 @@ def _first_name(profile: dict | None, fallback: str) -> str:
         if name:
             return name.split()[0]
     return fallback
+
+def _perf_status_intent(prompt: str) -> bool:
+    p = prompt.lower().strip()
+    return p in {
+        "perf status",
+        "performance status",
+        "status perf",
+        "status performance",
+        "ydeevne status",
+    }
 
 def _project_memory_command(prompt: str, ui_lang: str | None = None):
     """Handle project memory commands."""
@@ -1280,6 +1322,126 @@ def extract_location(prompt: str) -> str | None:
     return " ".join(loc_tokens)
 
 
+def _is_repo_snapshot_command(prompt: str, ui_lang: str) -> bool:
+    """Detect repo snapshot commands in Danish and English."""
+    p = prompt.lower().strip()
+    if ui_lang.startswith("da"):
+        return any(phrase in p for phrase in ["lav repo snapshot", "repo snapshot", "repository snapshot"])
+    else:
+        return any(phrase in p for phrase in ["make repo snapshot", "repo snapshot", "repository snapshot"])
+
+
+def _handle_repo_snapshot(user_id: str, ui_lang: str) -> TurnResult:
+    """Handle repo snapshot command by generating repository information."""
+    import subprocess
+    import json
+    from pathlib import Path
+    from jarvis.auth import get_user_profile as auth_get_profile
+    
+    try:
+        # Get user profile for user ID
+        profile = auth_get_profile(user_id)
+        if not profile:
+            return TurnResult(
+                reply_text="Kunne ikke finde brugerprofil." if ui_lang.startswith("da") else "Could not find user profile.",
+                meta={"tool": "repo_snapshot", "tool_used": False}
+            )
+        
+        user_id_int = profile.get("id")
+        
+        # Run repo snapshot script
+        script_path = Path(__file__).parent / "scripts" / "repo_snapshot.py"
+        result = subprocess.run(
+            [sys.executable, str(script_path)],
+            capture_output=True,
+            text=True,
+            cwd=Path(__file__).parent.parent
+        )
+        
+        if result.returncode != 0:
+            return TurnResult(
+                reply_text=f"Kunne ikke generere repo snapshot: {result.stderr}" if ui_lang.startswith("da") else f"Could not generate repo snapshot: {result.stderr}",
+                meta={"tool": "repo_snapshot", "tool_used": False}
+            )
+        
+        # Parse the JSON output
+        snapshot_data = json.loads(result.stdout)
+        
+        # Create download token
+        download_token = create_download_token(user_id_int, "repo_snapshot.json", snapshot_data)
+        
+        # Format response
+        git_info = snapshot_data.get("git_info", {})
+        branch = git_info.get("branch", "unknown")
+        status = git_info.get("status", {})
+        is_clean = status.get("is_clean", False)
+        changed_files = status.get("changed_files_count", 0)
+        
+        file_stats = snapshot_data.get("file_stats", {})
+        agent_py_lines = file_stats.get("agent_py_lines", 0)
+        total_src_lines = file_stats.get("total_src_jarvis_lines", 0)
+        
+        if ui_lang.startswith("da"):
+            status_text = "ren" if is_clean else f"{changed_files} ændrede filer"
+            reply = f"Repository snapshot genereret for {branch} branch ({status_text}).\n"
+            reply += f"Agent kode: {agent_py_lines} linjer\n"
+            reply += f"Total JARVIS src: {total_src_lines} linjer\n"
+            reply += f"Download: /download/{download_token}"
+        else:
+            status_text = "clean" if is_clean else f"{changed_files} changed files"
+            reply = f"Repository snapshot generated for {branch} branch ({status_text}).\n"
+            reply += f"Agent code: {agent_py_lines} lines\n"
+            reply += f"Total JARVIS src: {total_src_lines} lines\n"
+            reply += f"Download: /download/{download_token}"
+        
+        return TurnResult(
+            reply_text=reply,
+            meta={"tool": "repo_snapshot", "tool_used": True}
+        )
+        
+    except Exception as e:
+        error_msg = f"Kunne ikke generere repo snapshot: {str(e)}" if ui_lang.startswith("da") else f"Error generating snapshot: {str(e)}"
+        return TurnResult(
+            reply_text=error_msg,
+            meta={"tool": "repo_snapshot", "tool_used": False}
+        )
+
+
+def _is_perf_status_command(prompt: str, ui_lang: str) -> bool:
+    """Detect perf status commands in Danish and English."""
+    p = prompt.lower().strip()
+    if ui_lang.startswith("da"):
+        return any(phrase in p for phrase in ["perf status", "performance status", "ydelses status", "vis performance"])
+    else:
+        return any(phrase in p for phrase in ["perf status", "performance status", "show performance", "performance stats"])
+
+
+def _handle_perf_status(user_id: str, session_id: str | None, ui_lang: str) -> TurnResult:
+    """Handle perf status command by showing recent performance metrics."""
+    try:
+        # Get recent performance metrics
+        recent_metrics = get_recent_performance(user_id, session_id, limit=10)
+        
+        if not recent_metrics:
+            reply = "Ingen performance data fundet endnu." if ui_lang.startswith("da") else "No performance data found yet."
+            return TurnResult(reply_text=reply, meta={"tool": "perf_status", "tool_used": False})
+        
+        # Format the performance status
+        status_text = format_performance_status(recent_metrics, ui_lang)
+        
+        return TurnResult(
+            reply_text=status_text,
+            meta={"tool": "perf_status", "tool_used": True}
+        )
+        
+    except Exception as e:
+        error_msg = f"Fejl ved hentning af performance data: {str(e)}" if ui_lang.startswith("da") else f"Error retrieving performance data: {str(e)}"
+        return TurnResult(
+            reply_text=error_msg,
+            meta={"tool": "perf_status", "tool_used": False}
+        )
+
+
 def run_agent(
     user_id: str,
     prompt: str,
@@ -1306,6 +1468,10 @@ def _run_agent_core_fallback(
     ui_lang: str | None = None,
     preloaded: dict | None = None,
 ):
+    from types import SimpleNamespace
+    perf_metrics = SimpleNamespace()
+    log_performance_metrics = lambda *args, **kwargs: None  # no-op placeholder
+    start_time = time.time()
     if preloaded:
         mem = preloaded["mem"]
         session_hist = preloaded["session_hist"]
@@ -1327,7 +1493,11 @@ def _run_agent_core_fallback(
         pending_prompt = preloaded["pending_prompt"]
         mode = preloaded["mode"]
     else:
+        # Time memory retrieval
+        mem_start = time.time()
         mem = search_memory(prompt, user_id=user_id)
+        perf_metrics.memory_retrieval_time = time.time() - mem_start
+        
         session_hist = get_recent_messages(session_id, limit=8) if session_id else []
         _debug(f"🧭 run_agent: user={user_id} session={session_id} prompt={prompt!r}")
         if session_id:
@@ -1335,16 +1505,25 @@ def _run_agent_core_fallback(
             if wants_prompt:
                 if custom.lower() in {"nulstil", "reset", "standard", "default"}:
                     set_custom_prompt(session_id, None)
+                    # Record total request time and log performance metrics
+                    perf_metrics.total_request_time = time.time() - start_time
+                    log_performance_metrics(user_id, session_id, perf_metrics)
                     return {
                         "text": "Session‑personlighed nulstillet. Jeg bruger standarden igen.",
                         "meta": {"tool_used": False},
                     }
                 if not custom:
+                    # Record total request time and log performance metrics
+                    perf_metrics.total_request_time = time.time() - start_time
+                    log_performance_metrics(user_id, session_id, perf_metrics)
                     return {
                         "text": "Skriv den ønskede personlighed efter kommandoen, fx: /personlighed Kort, varm og praktisk.",
                         "meta": {"tool_used": False},
                     }
                 set_custom_prompt(session_id, custom)
+                # Record total request time and log performance metrics
+                perf_metrics.total_request_time = time.time() - start_time
+                log_performance_metrics(user_id, session_id, perf_metrics)
                 return {
                     "text": "Session‑personlighed opdateret.",
                     "meta": {"tool_used": False},
@@ -1371,6 +1550,14 @@ def _run_agent_core_fallback(
             if session_id:
                 set_conversation_state(session_id, conversation_state.to_json())
         mode = get_mode(session_id) if session_id else "balanced"
+    budget = get_budget()
+    session_hist, mem, context_counts, budget_exceeded, items_trimmed = budget.enforce_budget(session_hist, mem)
+    if preloaded:
+        preloaded["mem"] = mem
+        preloaded["session_hist"] = session_hist
+    context_counts = context_counts if 'context_counts' in locals() else {}
+    budget_exceeded = budget_exceeded if 'budget_exceeded' in locals() else False
+    items_trimmed = items_trimmed if 'items_trimmed' in locals() else 0
     
     # Handle user preference commands
     pref_updates = parse_preference_command(prompt, ui_lang or "da")
@@ -1402,11 +1589,24 @@ def _run_agent_core_fallback(
                 msg = "Jeg vender tilbage til normal længde." if (ui_lang or "da").startswith("da") else "I'll return to normal length."
         else:
             msg = "Præferencer opdateret." if (ui_lang or "da").startswith("da") else "Preferences updated."
+        # Record total request time and log performance metrics
+        perf_metrics.total_request_time = time.time() - start_time
+        log_performance_metrics(user_id, session_id, perf_metrics)
         return TurnResult(reply_text=msg, meta={"tool": None, "tool_used": False})
     
     # Handle repo snapshot command
     if _is_repo_snapshot_command(prompt, ui_lang or "da"):
+        # Record total request time and log performance metrics
+        perf_metrics.total_request_time = time.time() - start_time
+        log_performance_metrics(user_id, session_id, perf_metrics)
         return _handle_repo_snapshot(user_id, ui_lang or "da")
+    
+    # Handle perf status command
+    if _is_perf_status_command(prompt, ui_lang or "da"):
+        # Record total request time and log performance metrics
+        perf_metrics.total_request_time = time.time() - start_time
+        log_performance_metrics(user_id, session_id, perf_metrics)
+        return _handle_perf_status(user_id, session_id, ui_lang or "da")
     
     cv_state_active = _load_state(get_cv_state(session_id)) if session_id else None
     forced_tool = None
@@ -1638,6 +1838,27 @@ def _run_agent_core_fallback(
             reply = f"Værktøjet {label} er slået fra. Slå det til i Værktøjer og prøv igen."
             add_memory("assistant", reply, user_id=user_id)
             return TurnResult(reply_text=reply, meta={"tool": requested_tool, "tool_used": False})
+
+    # Performance status command
+    if _perf_status_intent(prompt):
+        metrics = get_last_metrics()
+        if not metrics:
+            reply = "Ingen performance data." if not (ui_lang or "").startswith("en") else "No performance data."
+        else:
+            timings = metrics.get("timings", metrics)
+            parts = []
+            parts.append(f"Total: {timings.get('total_ms', 0):.1f} ms")
+            if "memory_ms" in timings:
+                parts.append(f"Memory: {timings.get('memory_ms', 0):.1f} ms")
+            if "memory_retrieve_ms" in timings:
+                parts.append(f"Memory retrieve: {timings.get('memory_retrieve_ms', 0):.1f} ms")
+            if "llm_ms" in timings:
+                parts.append(f"LLM: {timings.get('llm_ms', 0):.1f} ms")
+            reply = "Performance:\n" + "\n".join(f"- {p}" for p in parts)
+        add_memory("assistant", reply, user_id=user_id)
+        if session_id:
+            add_message(session_id, "assistant", reply)
+        return TurnResult(reply_text=reply, meta={"tool": None, "tool_used": False})
 
     # Project memory commands
     pm_cmd = _project_memory_command(prompt, ui_lang)
@@ -2282,6 +2503,9 @@ def _run_agent_core_fallback(
         add_memory("assistant", reply, user_id=user_id)
         if session_id:
             add_message(session_id, "assistant", reply)
+        # Record total request time and log performance metrics even on error
+        perf_metrics.total_request_time = time.time() - start_time
+        log_performance_metrics(user_id, session_id, perf_metrics)
         return {"text": reply, "meta": {"tool": tool or None, "tool_used": tool_used}}
     if os.getenv("DEBUG_OLLAMA") == "1":
         print(f"DEBUG_OLLAMA response keys: {list(res.keys())}")
@@ -2296,6 +2520,10 @@ def _run_agent_core_fallback(
         reply = f"{reply}\n\n{resume_prompt}"
 
     add_memory("assistant", reply, user_id=user_id)
+
+    # Record total request time and log performance metrics
+    perf_metrics.total_request_time = time.time() - start_time
+    log_performance_metrics(user_id, session_id, perf_metrics)
 
     if os.getenv("TTS", "true").lower() == "true":
         audio_file = tts.speak(reply)

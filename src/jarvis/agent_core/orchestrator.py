@@ -7,6 +7,9 @@ from typing import Dict, Any, Optional
 
 from jarvis.agent_core.state_service import AgentStateService
 from jarvis.notifications import add_notification
+import time
+
+last_turn_metrics: Dict[str, Any] | None = None
 
 @dataclass
 class TurnResult:
@@ -18,6 +21,17 @@ class TurnResult:
     download_info: Optional[Dict[str, Any]] = None
     reminders_already_prepended: bool = False
     message_already_added: bool = False
+
+
+def set_last_metric(key: str, value: Any) -> None:
+    global last_turn_metrics
+    if last_turn_metrics is None:
+        last_turn_metrics = {}
+    last_turn_metrics[key] = value
+
+
+def get_last_metrics() -> Dict[str, Any] | None:
+    return last_turn_metrics.copy() if last_turn_metrics else None
 
 def coerce_to_turn_result(result: Dict[str, Any]) -> TurnResult:
     """Convert a legacy result dict to TurnResult."""
@@ -116,8 +130,19 @@ def handle_turn(
     )
     from jarvis.agent_core.conversation_state import ConversationState
     from jarvis.agent import get_conversation_state, set_conversation_state
+    import time
 
+    timings = {}
+    start_total = time.time()
+
+    def _finish(resp):
+        timings.setdefault("total_ms", (time.time() - start_total) * 1000)
+        set_last_metric("timings", timings)
+        return resp
+
+    start = time.time()
     mem = search_memory(prompt, user_id=user_id)
+    timings["memory_ms"] = (time.time() - start) * 1000
     memory_used_flag = bool(mem)
     session_hist = get_recent_messages(session_id, limit=8) if session_id else []
     _debug(f"🧭 run_agent: user={user_id} session={session_id} prompt={prompt!r}")
@@ -132,14 +157,14 @@ def handle_turn(
                     "meta": {"tool_used": False},
                 }
                 turn_result = coerce_to_turn_result(result)
-                return build_response(turn_result, session_id, [], None, prompt, user_id, memory_used=False, resume_hint=None, ui_lang=ui_lang)
+                return _finish(build_response(turn_result, session_id, [], None, prompt, user_id, memory_used=False, resume_hint=None, ui_lang=ui_lang))
             if not custom:
                 result = {
                     "text": "Skriv den ønskede personlighed efter kommandoen, fx: /personlighed Kort, varm og praktisk.",
                     "meta": {"tool_used": False},
                 }
                 turn_result = coerce_to_turn_result(result)
-                return build_response(turn_result, session_id, [], None, prompt, user_id, memory_used=False, resume_hint=None, ui_lang=ui_lang)
+                return _finish(build_response(turn_result, session_id, [], None, prompt, user_id, memory_used=False, resume_hint=None, ui_lang=ui_lang))
             from jarvis.agent import set_custom_prompt
             set_custom_prompt(session_id, custom)
             result = {
@@ -147,7 +172,7 @@ def handle_turn(
                 "meta": {"tool_used": False},
             }
             turn_result = coerce_to_turn_result(result)
-            return build_response(turn_result, session_id, [], None, prompt, user_id, memory_used=False, resume_hint=None, ui_lang=ui_lang)
+            return _finish(build_response(turn_result, session_id, [], None, prompt, user_id, memory_used=False, resume_hint=None, ui_lang=ui_lang))
     profile = get_user_profile(user_id)
     display_name = _first_name(profile, user_id)
     user_id_int = (profile or {}).get("id")
@@ -197,11 +222,16 @@ def handle_turn(
             "meta": {"tool_used": False},
         }
         turn_result = coerce_to_turn_result(result)
-        return build_response(turn_result, session_id, preloaded["reminders_due"], preloaded["user_id_int"], prompt, user_id, memory_used=preloaded["memory_used"], resume_hint=preloaded.get("resume_hint"), ui_lang=ui_lang)
+        resp = build_response(turn_result, session_id, preloaded["reminders_due"], preloaded["user_id_int"], prompt, user_id, memory_used=preloaded["memory_used"], resume_hint=preloaded.get("resume_hint"), ui_lang=ui_lang)
+        timings["total_ms"] = (time.time() - start_total) * 1000
+        set_last_metric("timings", timings)
+        return resp
     
     from jarvis.agent_core.memory_manager import should_retrieve_memory
     if should_retrieve_memory(prompt, ui_lang):
+        start_mem = time.time()
         memory_context = retrieve_context(user_id, prompt)
+        timings["memory_retrieve_ms"] = (time.time() - start_mem) * 1000
         if memory_context:
             preloaded["mem"].append(f"assistant: {memory_context}")
             preloaded["memory_used"] = True
@@ -337,7 +367,10 @@ def handle_turn(
                 reply = _prepend_reminders(reply, preloaded["reminders_due"], preloaded["user_id_int"])
             add_message(session_id, "assistant", reply)
             turn_result = TurnResult(reply_text=reply, meta={"tool": None, "tool_used": False}, reminders_already_prepended=True, message_already_added=True)
-            return build_response(turn_result, session_id, preloaded["reminders_due"], preloaded["user_id_int"], prompt, user_id, memory_used=preloaded["memory_used"], resume_hint=preloaded.get("resume_hint"), ui_lang=ui_lang)
+            resp = build_response(turn_result, session_id, preloaded["reminders_due"], preloaded["user_id_int"], prompt, user_id, memory_used=preloaded["memory_used"], resume_hint=preloaded.get("resume_hint"), ui_lang=ui_lang)
+            timings["total_ms"] = (time.time() - start_total) * 1000
+            set_last_metric("timings", timings)
+            return resp
 
     from jarvis.agent_skills.admin_skill import handle_admin
     admin_response = handle_admin(user_id, prompt, session_id, allowed_tools, ui_city, ui_lang, user_id_int=preloaded["user_id_int"])
@@ -383,6 +416,8 @@ def handle_turn(
     from jarvis.agent_skills.story_skill import handle_story
     story_response = handle_story(user_id, prompt, session_id, allowed_tools, ui_city, ui_lang, preloaded["user_id_int"], preloaded["reminders_due"], preloaded["profile"])
     if story_response:
+        timings["total_ms"] = (time.time() - start_total) * 1000
+        set_last_metric("timings", timings)
         return story_response
 
     # Fallback
@@ -396,4 +431,7 @@ def handle_turn(
         ui_lang=ui_lang,
         preloaded=preloaded,
     )
-    return build_response(turn_result, session_id, preloaded["reminders_due"], preloaded["user_id_int"], prompt, user_id, memory_used=preloaded["memory_used"], resume_hint=preloaded.get("resume_hint"), ui_lang=ui_lang)
+    resp = build_response(turn_result, session_id, preloaded["reminders_due"], preloaded["user_id_int"], prompt, user_id, memory_used=preloaded["memory_used"], resume_hint=preloaded.get("resume_hint"), ui_lang=ui_lang)
+    timings["total_ms"] = (time.time() - start_total) * 1000
+    set_last_metric("timings", timings)
+    return resp

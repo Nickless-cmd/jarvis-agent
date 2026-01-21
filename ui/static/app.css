@@ -565,7 +565,7 @@ body.sidebar-collapsed .session-initial {
   border: none;
   border-radius: 0;
   scrollbar-width: none;
-  max-width: 1120px;
+  max-width: 1200px;
 }
 .chat-feed::-webkit-scrollbar { display: none; }
 .composer {
@@ -586,11 +586,11 @@ body.sidebar-collapsed .session-initial {
 .chat-pane .suggestions,
 .chat-pane .greeting-banner,
 .chat-pane .chat-feed {
-  max-width: 1120px;
+  max-width: 1200px;
 }
 
 .chat-pane .status-row {
-  max-width: 1120px;
+  max-width: 1200px;
   margin-left: auto;
   margin-right: auto;
 }
@@ -705,6 +705,8 @@ button#sendBtn:hover {
 }
 .msg-assistant { 
   align-self: flex-start; 
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.1);
 }
 .msg-system {
   align-self: center;
@@ -797,6 +799,7 @@ button#sendBtn:hover {
 }
 .msg-list li { line-height: 1.4; }
 .msg-spacer { height: 6px; }
+.status-line { font-size: 0.9em; color: var(--muted); }
 .news-list {
   margin-top: 8px;
   display: flex;

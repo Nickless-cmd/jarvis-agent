@@ -31,6 +31,7 @@ from jarvis.auth import (
 )
 from jarvis.db import get_conn, log_login_session
 from jarvis.personality import SYSTEM_PROMPT
+from jarvis.prompts.system_prompts import SYSTEM_PROMPT_USER, SYSTEM_PROMPT_ADMIN
 from jarvis.memory import purge_user_memory
 from jarvis.files import (
     safe_path,
@@ -168,6 +169,8 @@ if not _req_logger.handlers:
 _req_logger.setLevel(logging.INFO)
 _last_log_cleanup = 0.0
 _TEST_MODE = os.getenv("JARVIS_TEST_MODE", "0") == "1"
+_PROMPT_CACHE: dict[str, str] = {}
+_EXPOSE_SYSTEM_PROMPT = os.getenv("JARVIS_EXPOSE_SYSTEM_PROMPT", "0") == "1"
 
 LOGIN_PATH = UI_DIR / "login.html"
 REGISTER_PATH = UI_DIR / "registere.html"
@@ -578,6 +581,29 @@ def _get_settings(keys: list[str]) -> dict:
 def _get_setting(key: str, default: str) -> str:
     settings = _get_settings([key])
     return settings.get(key, default)
+
+
+def _load_prompts() -> dict[str, str]:
+    """Load system/admin prompts once and cache them."""
+    global _PROMPT_CACHE
+    if _PROMPT_CACHE:
+        return _PROMPT_CACHE
+    _PROMPT_CACHE = {
+        "user": SYSTEM_PROMPT_USER,
+        "admin": SYSTEM_PROMPT_ADMIN,
+    }
+    return _PROMPT_CACHE
+
+
+def _current_system_prompt() -> str:
+    """Return active system prompt (DB override if set, otherwise bundled prompt)."""
+    prompts = _load_prompts()
+    return _get_setting("system_prompt", prompts.get("user", SYSTEM_PROMPT))
+
+
+def _current_admin_prompt() -> str:
+    prompts = _load_prompts()
+    return prompts.get("admin", SYSTEM_PROMPT)
 
 
 def _parse_banner_entries(raw: str) -> list[dict]:
@@ -1096,6 +1122,43 @@ async def list_events_endpoint(
     return {"events": events}
 
 
+@app.get("/v1/prompts")
+async def prompts_endpoint(
+    authorization: str | None = Header(None),
+    token: str | None = Depends(_resolve_token),
+):
+    if not _auth_or_token_ok(authorization, token):
+        raise HTTPException(401, detail="Invalid API key")
+    user = get_user_by_token(token)
+    if not user:
+        raise HTTPException(401, detail="Missing or invalid user token")
+    if user.get("is_disabled"):
+        raise HTTPException(403, detail="User is disabled")
+    _enforce_maintenance(user)
+    payload = {"build_id": BUILD_ID}
+    if _EXPOSE_SYSTEM_PROMPT or user.get("is_admin"):
+        payload["system_prompt"] = _current_system_prompt()
+    return payload
+
+
+@app.get("/v1/prompts/admin")
+async def prompts_admin_endpoint(
+    authorization: str | None = Header(None),
+    token: str | None = Depends(_resolve_token),
+):
+    if not _auth_or_token_ok(authorization, token):
+        raise HTTPException(401, detail="Invalid API key")
+    user = get_user_by_token(token)
+    if not user:
+        raise HTTPException(401, detail="Missing or invalid user token")
+    if not user.get("is_admin"):
+        raise HTTPException(403, detail="Admin required")
+    if user.get("is_disabled"):
+        raise HTTPException(403, detail="User is disabled")
+    _enforce_maintenance(user)
+    return {"admin_prompt": _current_admin_prompt(), "build_id": BUILD_ID}
+
+
 @app.post("/v1/events/{event_id}/dismiss")
 async def dismiss_event_endpoint(
     event_id: int,
@@ -1132,7 +1195,7 @@ async def list_notifications_endpoint(
         raise HTTPException(403, detail="User is disabled")
     _enforce_maintenance(user)
     notifications = list_notifications(user["id"], limit=limit, since_id=since_id)
-    return {"notifications": notifications}
+    return {"notifications": notifications, "items": notifications}
 
 
 @app.post("/v1/notifications/{notification_id}/read")

@@ -1556,6 +1556,7 @@ async function loadBrand() {
   } catch (err) {
     console.warn("loadBrand failed", err);
     // Set defaults even if fetch fails
+    brandCoreLabel = "Jarvis";
     if (brandTop) brandTop.textContent = "Jarvis";
     if (brandCore) brandCore.textContent = "Jarvis";
     if (brandShort) brandShort.textContent = "J";

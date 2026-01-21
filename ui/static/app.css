@@ -156,7 +156,7 @@ body {
 header.topbar {
   padding: 12px 20px;
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  grid-template-columns: auto 1fr auto;
   align-items: center;
   gap: 12px;
   border-bottom: 1px solid var(--border);
@@ -367,7 +367,7 @@ body.sidebar-collapsed .sidebar-footer {
 .rail-btn {
   width: 36px;
   height: 36px;
-  border-radius: 12px;
+  border-radius: 6px;
   background: var(--panel);
   border: 1px solid var(--border);
   color: var(--text);
@@ -1657,7 +1657,7 @@ input[type="file"].hidden::file-selector-button {
 .notifications-badge.hidden {
   display: none;
 }
-.notifications-wrap { position: relative; }
+.notif-wrap { position: relative; }
 .notifications-dropdown {
   position: absolute;
   top: calc(100% + 8px);

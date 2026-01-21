@@ -62,6 +62,7 @@ def add_event(
 def list_events(user_id: int, since_id: int | None = None, limit: int = 50) -> List[Dict[str, Any]]:
     """List events for a user in ascending id order."""
     _sync_db_path_from_env()
+    _ensure_table()
     query = "SELECT id, created_utc, type, severity, title, body, meta_json, read FROM events WHERE user_id = ?"
     params: list[Any] = [user_id]
     if since_id is not None:
@@ -100,6 +101,7 @@ def list_events(user_id: int, since_id: int | None = None, limit: int = 50) -> L
 def mark_read(user_id: int, event_id: int) -> bool:
     """Mark an event as read."""
     _sync_db_path_from_env()
+    _ensure_table()
     with get_conn() as conn:
         cur = conn.execute("UPDATE events SET read = 1 WHERE id = ? AND user_id = ?", (event_id, user_id))
         conn.commit()
@@ -137,6 +139,8 @@ def mark_notification_read(user_id: int, notification_id: int) -> bool:
 
 def get_unread_notifications_count(user_id: int) -> int:
     """Get count of unread notifications for a user."""
+    _sync_db_path_from_env()
+    _ensure_table()
     with get_conn() as conn:
         row = conn.execute(
             "SELECT COUNT(*) FROM events WHERE user_id = ? AND read = 0",
@@ -147,6 +151,8 @@ def get_unread_notifications_count(user_id: int) -> int:
 
 def mark_all_notifications_read(user_id: int) -> None:
     """Mark all notifications as read for a user."""
+    _sync_db_path_from_env()
+    _ensure_table()
     with get_conn() as conn:
         conn.execute(
             "UPDATE events SET read = 1 WHERE user_id = ? AND read = 0",

@@ -112,6 +112,47 @@ def get_budget() -> ContextBudget:
     return _budget
 
 
+# Model profile definitions for Ollama runtime tuning
+MODEL_PROFILES = {
+    "fast": {
+        "num_ctx": 2048,  # Lower context for speed
+        "num_predict": 512,  # Shorter responses
+        "temperature": 0.7,  # Balanced creativity
+        "top_p": 0.9,  # Focused sampling
+        "description": "Fast responses with lower context"
+    },
+    "balanced": {
+        "num_ctx": 4096,  # Standard context
+        "num_predict": 1024,  # Standard response length
+        "temperature": 0.8,  # Good creativity
+        "top_p": 0.95,  # Balanced sampling
+        "description": "Balanced performance and quality"
+    },
+    "quality": {
+        "num_ctx": 8192,  # Higher context for complex tasks
+        "num_predict": 2048,  # Longer responses
+        "temperature": 0.9,  # Higher creativity
+        "top_p": 0.98,  # Diverse sampling
+        "description": "High quality with more context and tokens"
+    }
+}
+
+
+def get_model_profile_params(profile: str) -> Dict[str, Any]:
+    """Get Ollama parameters for a model profile."""
+    return MODEL_PROFILES.get(profile, MODEL_PROFILES["balanced"]).copy()
+
+
+def get_available_profiles() -> List[str]:
+    """Get list of available model profiles."""
+    return list(MODEL_PROFILES.keys())
+
+
+def validate_profile(profile: str) -> bool:
+    """Validate if a profile name is valid."""
+    return profile in MODEL_PROFILES
+
+
 def log_performance_metrics(metrics: PerformanceMetrics) -> None:
     """Log performance metrics to database."""
     try:

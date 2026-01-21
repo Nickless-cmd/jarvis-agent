@@ -283,14 +283,20 @@ def _tool_label(tool: str) -> str:
     }
     return labels.get(tool, tool)
 
-def call_ollama(messages):
+def call_ollama(messages, model_profile: str = "balanced"):
     import time
     from jarvis.agent_core.orchestrator import set_last_metric
+    from jarvis.performance_metrics import get_model_profile_params
     start = time.time()
+    
+    # Get profile parameters
+    profile_params = get_model_profile_params(model_profile)
+    
     payload = {
         "model": os.getenv("OLLAMA_MODEL"),
         "messages": messages,
-        "stream": False
+        "stream": False,
+        **profile_params  # Add profile parameters
     }
     timeout = int(os.getenv("OLLAMA_TIMEOUT_SECONDS", "120"))
     try:
@@ -566,7 +572,7 @@ def _summarize_text(text: str, sentences: int = 1) -> str:
         {"role": "assistant", "content": snippet},
         {"role": "user", "content": "Kort opsummering:"},
     ]
-    res = call_ollama(messages)
+    res = call_ollama(messages, "balanced")
     summary = res.get("choices", [{}])[0].get("message", {}).get("content", "")
     summary = _dedupe_repeated_words(summary).strip()
     summary = re.sub(r"^kort opsummering:\s*", "", summary, flags=re.I)
@@ -1426,6 +1432,38 @@ def _is_perf_status_command(prompt: str, ui_lang: str) -> bool:
         return any(phrase in p for phrase in ["perf status", "performance status", "show performance", "performance stats"])
 
 
+def _is_model_profile_command(prompt: str, ui_lang: str) -> tuple[bool, str]:
+    """Detect model profile commands in Danish and English. Returns (is_command, profile)."""
+    p = prompt.lower().strip()
+    
+    # Profile name mappings
+    profile_map = {
+        "fast": "fast",
+        "balanced": "balanced", 
+        "quality": "quality",
+        # Danish mappings
+        "hurtig": "fast",
+        "balanceret": "balanced",
+        "kvalitet": "quality"
+    }
+    
+    if ui_lang.startswith("da"):
+        for phrase in ["skift til", "skift model til", "sæt profil til"]:
+            if p.startswith(phrase):
+                profile_input = p[len(phrase):].strip()
+                profile = profile_map.get(profile_input)
+                if profile:
+                    return True, profile
+    else:
+        for phrase in ["switch to", "set profile to", "change to"]:
+            if p.startswith(phrase):
+                profile_input = p[len(phrase):].strip()
+                profile = profile_map.get(profile_input)
+                if profile:
+                    return True, profile
+    return False, ""
+
+
 def _handle_perf_status(user_id: str, session_id: str | None, ui_lang: str) -> TurnResult:
     """Handle perf status command by showing recent performance metrics."""
     try:
@@ -1502,6 +1540,7 @@ def _run_agent_core_fallback(
         pending_scope = preloaded["pending_scope"]
         pending_prompt = preloaded["pending_prompt"]
         mode = preloaded["mode"]
+        model_profile = preloaded.get("model_profile", mode)  # Use mode as fallback
     else:
         # Time memory retrieval
         mem_start = time.time()
@@ -1559,7 +1598,7 @@ def _run_agent_core_fallback(
             conversation_state.set_response_mode(mode_request)
             if session_id:
                 set_conversation_state(session_id, conversation_state.to_json())
-        mode = get_mode(session_id) if session_id else "balanced"
+        model_profile = get_mode(session_id) if session_id else "balanced"
     budget = get_budget()
     session_hist, mem, context_counts, budget_exceeded, items_trimmed = budget.enforce_budget(session_hist, mem)
     if preloaded:
@@ -1610,6 +1649,16 @@ def _run_agent_core_fallback(
         perf_metrics.total_request_time = time.time() - start_time
         log_performance_metrics(user_id, session_id, perf_metrics)
         return _handle_repo_snapshot(user_id, ui_lang or "da")
+    
+    # Handle model profile commands
+    is_profile_cmd, profile = _is_model_profile_command(prompt, ui_lang or "da")
+    if is_profile_cmd:
+        set_mode(session_id, profile)
+        reply = f"Model profil skiftet til {profile}." if (ui_lang or "da").startswith("da") else f"Model profile switched to {profile}."
+        # Record total request time and log performance metrics
+        perf_metrics.total_request_time = time.time() - start_time
+        log_performance_metrics(user_id, session_id, perf_metrics)
+        return TurnResult(reply_text=reply, meta={"tool": None, "tool_used": False})
     
     # Handle perf status command
     if _is_perf_status_command(prompt, ui_lang or "da"):
@@ -1818,7 +1867,7 @@ def _run_agent_core_fallback(
                 {"role": "assistant", "content": article.get("text", "")},
                 {"role": "user", "content": "Giv et kort resume."},
             ]
-            res = call_ollama(article_messages)
+            res = call_ollama(article_messages, "balanced")
             reply = res.get("choices",[{}])[0].get("message",{}).get("content","")
             reply = _dedupe_repeated_words(reply)
             if not reply.strip():
@@ -1831,11 +1880,14 @@ def _run_agent_core_fallback(
             })
     if session_id and prompt.strip().lower().startswith("/mode "):
         requested = prompt.strip().split(None, 1)[1].strip().lower()
-        if requested in {"fakta", "snak", "balanced"}:
+        from jarvis.performance_metrics import validate_profile
+        if validate_profile(requested):
             set_mode(session_id, requested)
-            reply = f"Mode sat til {requested}."
+            reply = f"Model profil sat til {requested}."
         else:
-            reply = "Ukendt mode. Brug /mode fakta, /mode snak eller /mode balanced."
+            from jarvis.performance_metrics import get_available_profiles
+            available = get_available_profiles()
+            reply = f"Ukendt profil. Brug /mode {' eller '.join(available)}."
         add_memory("assistant", reply, user_id=user_id)
         return TurnResult(reply_text=reply, meta={"tool": None, "tool_used": False})
     if not session_id and prompt.strip().lower().startswith("/mode "):
@@ -2304,7 +2356,7 @@ def _run_agent_core_fallback(
                 {"role": "assistant", "content": "\n".join(summaries or snippets)},
                 {"role": "user", "content": "Giv en samlet beskrivelse og en CV-struktur (overskrifter) samt 3-6 konkrete punkter."},
             ]
-            res = call_ollama(summary_messages)
+            res = call_ollama(summary_messages, "balanced")
             cv_reply = res.get("choices", [{}])[0].get("message", {}).get("content", "")
             cv_reply = _dedupe_repeated_words(cv_reply).strip()
             if cv_reply:
@@ -2434,8 +2486,9 @@ def _run_agent_core_fallback(
                 rendered_lines.append(f"• {label}: {text}")
         rendered_text = "\n".join([header] + rendered_lines[:5])
         reply = rendered_text
-        if mode == "snak":
-            reply = f"{reply}\nBritisk vejr, dansk tålmodighed."
+        response_mode = conversation_state.response_mode if conversation_state else "normal"
+        if response_mode == "deep":
+            reply = f"{reply}\n\nDetaljeret vejrudsigt med yderligere kontekst."
         if session_id:
             last_payload = {
                 "tool": "weather",
@@ -2468,12 +2521,13 @@ def _run_agent_core_fallback(
         }, rendered_text=rendered_text)
 
     mode_hint = ""
-    if mode == "fakta":
-        mode_hint = "Mode fakta: max 4 linjer, ingen humor, punktform."
-    elif mode == "snak":
-        mode_hint = "Mode snak: max 6 linjer, en kort tør joke til sidst."
+    response_mode = conversation_state.response_mode if conversation_state else "normal"
+    if response_mode == "short":
+        mode_hint = "Mode kort: max 4 linjer, koncist svar."
+    elif response_mode == "deep":
+        mode_hint = "Mode dyb: detaljeret og uddybende svar."
     else:
-        mode_hint = "Mode balanced: kort og præcist."
+        mode_hint = "Mode normal: balanceret længde og dybde."
 
     sys_prompt = _get_system_prompt()
     if session_id:
@@ -2505,7 +2559,7 @@ def _run_agent_core_fallback(
         payload = tool_summary if tool_summary else tool_result
         messages.append({"role": "assistant", "content": f"Tool result: {payload}"})
 
-    res = call_ollama(messages)
+    res = call_ollama(messages, model_profile)
     if res.get("error"):
         reply = ux_error("model_timeout", ui_lang)
         if reminders_due and _should_attach_reminders(prompt):

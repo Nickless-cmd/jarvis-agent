@@ -90,3 +90,43 @@ class TestRepoSnapshot:
         
         assert "Error generating snapshot" in result.reply_text
         assert result.meta["tool_used"] == False
+
+    def test_is_model_profile_command_danish(self):
+        """Test Danish model profile command detection."""
+        from jarvis.agent import _is_model_profile_command
+        
+        is_cmd, profile = _is_model_profile_command("skift til hurtig", "da")
+        assert is_cmd == True
+        assert profile == "fast"
+        
+        is_cmd, profile = _is_model_profile_command("skift til balanceret", "da")
+        assert is_cmd == True
+        assert profile == "balanced"
+        
+        is_cmd, profile = _is_model_profile_command("skift model til kvalitet", "da")
+        assert is_cmd == True
+        assert profile == "quality"
+        
+        is_cmd, profile = _is_model_profile_command("hello world", "da")
+        assert is_cmd == False
+        assert profile == ""
+
+    def test_is_model_profile_command_english(self):
+        """Test English model profile command detection."""
+        from jarvis.agent import _is_model_profile_command
+        
+        is_cmd, profile = _is_model_profile_command("switch to fast", "en")
+        assert is_cmd == True
+        assert profile == "fast"
+        
+        is_cmd, profile = _is_model_profile_command("set profile to quality", "en")
+        assert is_cmd == True
+        assert profile == "quality"
+        
+        is_cmd, profile = _is_model_profile_command("change to balanced", "en")
+        assert is_cmd == True
+        assert profile == "balanced"
+        
+        is_cmd, profile = _is_model_profile_command("hello world", "en")
+        assert is_cmd == False
+        assert profile == ""

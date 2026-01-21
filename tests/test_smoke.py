@@ -26,7 +26,7 @@ def _mock_llm(monkeypatch):
     """
     import jarvis.agent as agent_mod
 
-    def fake_call_ollama(messages):
+    def fake_call_ollama(messages, model_profile=None):
         # Returnér samme struktur som din agent forventer (her antager vi res er en tekst)
         # return "OK (mock)"
         return {"choices": [{"message": {"content": "OK (mock)"}}]}

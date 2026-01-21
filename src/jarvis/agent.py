@@ -5,6 +5,7 @@ import os
 import re
 import sqlite3
 import requests
+import sys
 from datetime import datetime, time, timezone, timedelta
 from zoneinfo import ZoneInfo
 
@@ -594,6 +595,99 @@ def _name_intent(prompt: str) -> bool:
             "min navn",
         ]
     )
+
+
+def _is_repo_snapshot_command(prompt: str, ui_lang: str) -> bool:
+    """Check if prompt is a repo snapshot command."""
+    p = prompt.lower().strip()
+    if ui_lang.startswith("da"):
+        return p in ["lav repo snapshot", "repo snapshot", "repository snapshot"]
+    else:
+        return p in ["make repo snapshot", "repo snapshot", "repository snapshot"]
+
+
+def _handle_repo_snapshot(user_id: str, ui_lang: str) -> TurnResult:
+    """Handle repo snapshot command."""
+    import subprocess
+    import json
+    import datetime
+    from pathlib import Path
+    
+    try:
+        # Get user_id_int for download token
+        from jarvis.auth import get_user_profile
+        profile = get_user_profile(user_id)
+        user_id_int = (profile or {}).get("id")
+        if not user_id_int:
+            error_msg = "Kunne ikke finde brugerprofil." if ui_lang.startswith("da") else "Could not find user profile."
+            return TurnResult(reply_text=error_msg, meta={"tool": None, "tool_used": False})
+        
+        # Run the snapshot script
+        result = subprocess.run(
+            [sys.executable, "scripts/repo_snapshot.py"],
+            cwd=Path(__file__).parent.parent,
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        
+        if result.returncode != 0:
+            error_msg = "Kunne ikke generere repo snapshot." if ui_lang.startswith("da") else "Could not generate repo snapshot."
+            return TurnResult(reply_text=error_msg, meta={"tool": None, "tool_used": False})
+        
+        # Parse the JSON output
+        snapshot = json.loads(result.stdout)
+        
+        # Save to user workspace
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"repo_snapshot_{timestamp}.json"
+        filepath = Path("data") / "user_uploads" / user_id / filename
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+        
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(snapshot, f, indent=2, ensure_ascii=False)
+        
+        # Create download token
+        from jarvis.files import create_download_token
+        token = create_download_token(user_id_int, str(filepath))
+        
+        # Generate human summary
+        git_info = snapshot["git_info"]
+        file_stats = snapshot["file_stats"]
+        modules = snapshot["module_inventory"]
+        
+        if ui_lang.startswith("da"):
+            summary = f"""Repository snapshot genereret:
+
+Git status: {git_info['branch']} branch, {'ren' if git_info['status']['is_clean'] else f'{git_info["status"]["changed_files_count"]} ændrede filer'}
+Seneste commit: {git_info['recent_commits'][0]['subject'][:50] if git_info['recent_commits'] else 'ingen'}
+
+Kode statistik:
+- agent.py: {file_stats['agent_py_lines']} linjer
+- Total src/jarvis: {file_stats['total_src_jarvis_lines']} linjer
+
+Moduler: {len(modules['skills_modules'])} skills, {len(modules['core_modules'])} core
+
+Download: /download/{token}"""
+        else:
+            summary = f"""Repository snapshot generated:
+
+Git status: {git_info['branch']} branch, {'clean' if git_info['status']['is_clean'] else f'{git_info["status"]["changed_files_count"]} changed files'}
+Latest commit: {git_info['recent_commits'][0]['subject'][:50] if git_info['recent_commits'] else 'none'}
+
+Code stats:
+- agent.py: {file_stats['agent_py_lines']} lines
+- Total src/jarvis: {file_stats['total_src_jarvis_lines']} lines
+
+Modules: {len(modules['skills_modules'])} skills, {len(modules['core_modules'])} core
+
+Download: /download/{token}"""
+        
+        return TurnResult(reply_text=summary, meta={"tool": "repo_snapshot", "tool_used": True})
+        
+    except Exception as e:
+        error_msg = f"Fejl ved generering af snapshot: {e}" if ui_lang.startswith("da") else f"Error generating snapshot: {e}"
+        return TurnResult(reply_text=error_msg, meta={"tool": None, "tool_used": False})
 
 
 def _cv_intent(prompt: str) -> bool:
@@ -1308,6 +1402,10 @@ def _run_agent_core_fallback(
         else:
             msg = "Præferencer opdateret." if (ui_lang or "da").startswith("da") else "Preferences updated."
         return TurnResult(reply_text=msg, meta={"tool": None, "tool_used": False})
+    
+    # Handle repo snapshot command
+    if _is_repo_snapshot_command(prompt, ui_lang or "da"):
+        return _handle_repo_snapshot(user_id, ui_lang or "da")
     
     cv_state_active = _load_state(get_cv_state(session_id)) if session_id else None
     forced_tool = None

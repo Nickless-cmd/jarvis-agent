@@ -2,6 +2,7 @@ import os
 import pytest
 import sqlite3
 import unittest.mock as mock
+from fastapi.testclient import TestClient
 
 # Sørg for at appen bruger test-data (valgfrit, men rart)
 os.environ.setdefault("API_BEARER_TOKEN", "devkey")

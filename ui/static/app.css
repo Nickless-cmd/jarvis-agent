@@ -138,6 +138,12 @@ header.topbar {
   font-size: 14px;
 }
 .brand { display: flex; align-items: center; gap: 12px; }
+.build-id {
+  font-size: 11px;
+  color: var(--muted);
+  font-family: monospace;
+  opacity: 0.7;
+}
 .pill { background: var(--accent); }
 .status {
   font-size: 12px;
@@ -1527,6 +1533,22 @@ button.secondary {
   text-align: center;
   color: var(--muted);
   font-style: italic;
+}
+
+/* Build marker for cache-busting verification */
+.build-marker {
+  position: fixed;
+  top: 8px;
+  right: 8px;
+  background: var(--accent);
+  color: white;
+  font-size: 10px;
+  font-family: monospace;
+  padding: 2px 6px;
+  border-radius: 3px;
+  z-index: 1000;
+  opacity: 0.8;
+  pointer-events: none;
 }
 
 @media (max-width: 980px) {

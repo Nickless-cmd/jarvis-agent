@@ -967,86 +967,62 @@ function nowTime(value) {
 
 function renderMessageBody(body, text) {
   body.innerHTML = "";
-  const lines = (text || "").split(/\r?\n/);
-  let listEl = null;
-  const flushList = () => {
-    listEl = null;
-  };
-  const isListLine = (value) => /^(\d+\.\s+|[-•]\s+)/.test(value);
-  const anchorMatch = (value) =>
-    value.match(/<a\b[^>]*href=['"]([^'"]+)['"][^>]*>([^<]+)<\/a>/i);
-  const decodeAnchors = (value) => {
-    if (!value.includes("&lt;a")) return value;
-    return value
-      .replace(/&lt;/g, "<")
-      .replace(/&gt;/g, ">")
-      .replace(/&quot;/g, "\"")
-      .replace(/&#39;/g, "'")
-      .replace(/&amp;/g, "&");
-  };
-  const markdownLink = (value) =>
-    value.match(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/);
-  lines.forEach((line) => {
-    const trimmed = line.trim();
-    if (!trimmed) {
-      flushList();
-      const spacer = document.createElement("div");
-      spacer.className = "msg-spacer";
-      body.appendChild(spacer);
-      return;
-    }
-    if (isListLine(trimmed)) {
-      if (!listEl) {
-        listEl = document.createElement("ul");
-        listEl.className = "msg-list";
-        body.appendChild(listEl);
+  
+  // Simple markdown renderer for assistant messages
+  if (typeof marked !== 'undefined') {
+    // Use marked.js if available
+    const html = marked.parse(text);
+    body.innerHTML = html;
+  } else {
+    // Fallback: basic code block detection
+    const parts = text.split(/(```[\s\S]*?```)/g);
+    parts.forEach(part => {
+      if (part.startsWith('```') && part.endsWith('```')) {
+        // Code block
+        const codeContent = part.slice(3, -3);
+        const pre = document.createElement('pre');
+        const code = document.createElement('code');
+        code.textContent = codeContent;
+        pre.appendChild(code);
+        body.appendChild(pre);
+      } else {
+        // Regular text with line breaks
+        const lines = part.split('\n');
+        lines.forEach(line => {
+          if (line.trim()) {
+            const p = document.createElement('p');
+            p.textContent = line;
+            body.appendChild(p);
+          }
+        });
       }
-      const item = document.createElement("li");
-      item.textContent = trimmed.replace(/^(\d+\.\s+|[-•]\s+)/, "");
-      listEl.appendChild(item);
-      return;
-    }
-    flushList();
-    if (trimmed.endsWith(":") && trimmed.length <= 60) {
-      const section = document.createElement("div");
-      section.className = "msg-section";
-      section.textContent = trimmed;
-      body.appendChild(section);
-      return;
-    }
-    const row = document.createElement("div");
-    row.className = "msg-line";
-    const decoded = decodeAnchors(line);
-    const match = anchorMatch(decoded);
-    const mdMatch = markdownLink(decoded);
-    if (match) {
-      const [full, href, label] = match;
-      const before = decoded.split(full)[0];
-      const after = decoded.split(full)[1] || "";
-      if (before) row.appendChild(document.createTextNode(before));
-      const link = document.createElement("a");
-      link.href = href;
-      link.target = "_blank";
-      link.rel = "noopener";
-      link.textContent = label;
-      row.appendChild(link);
-      if (after) row.appendChild(document.createTextNode(after));
-    } else if (mdMatch) {
-      const [full, label, href] = mdMatch;
-      const before = decoded.split(full)[0];
-      const after = decoded.split(full)[1] || "";
-      if (before) row.appendChild(document.createTextNode(before));
-      const link = document.createElement("a");
-      link.href = href;
-      link.target = "_blank";
-      link.rel = "noopener";
-      link.textContent = label;
-      row.appendChild(link);
-      if (after) row.appendChild(document.createTextNode(after));
-    } else {
-      row.textContent = line;
-    }
-    body.appendChild(row);
+    });
+  }
+  
+  // Add copy buttons to code blocks
+  body.querySelectorAll('pre code').forEach(codeBlock => {
+    const pre = codeBlock.parentElement;
+    const copyBtn = document.createElement('button');
+    copyBtn.className = 'copy-btn';
+    copyBtn.textContent = '📋';
+    copyBtn.title = 'Copy to clipboard';
+    copyBtn.onclick = () => {
+      navigator.clipboard.writeText(codeBlock.textContent).then(() => {
+        copyBtn.textContent = '✅';
+        setTimeout(() => copyBtn.textContent = '📋', 2000);
+      });
+    };
+    pre.style.position = 'relative';
+    copyBtn.style.position = 'absolute';
+    copyBtn.style.top = '5px';
+    copyBtn.style.right = '5px';
+    copyBtn.style.background = 'rgba(0,0,0,0.7)';
+    copyBtn.style.color = 'white';
+    copyBtn.style.border = 'none';
+    copyBtn.style.borderRadius = '3px';
+    copyBtn.style.cursor = 'pointer';
+    copyBtn.style.fontSize = '12px';
+    pre.appendChild(copyBtn);
   });
 }
 
@@ -1550,8 +1526,8 @@ async function loadBrand() {
   const res = await fetch("/settings/brand");
   if (!res.ok) return;
   const data = await res.json();
-  const topLabel = (data.top_label || "Jarvis").trim();
-  const coreLabel = (data.core_label || "Jarvis").trim();
+  const topLabel = (data.top || "Jarvis").trim();
+  const coreLabel = (data.name || "Jarvis").trim();
   brandCoreLabel = coreLabel || "Jarvis";
   if (brandTop) brandTop.textContent = topLabel || "Jarvis";
   if (brandCore) brandCore.textContent = brandCoreLabel;

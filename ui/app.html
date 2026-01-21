@@ -4,14 +4,15 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Jarvis App</title>
-    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/static/styles.css" />
-    <link rel="stylesheet" href="/static/app.css?v=59" />
+    <link rel="icon" href="/ui/static/favicon.svg?v={{BUILD_ID}}" type="image/svg+xml" />
+    <link rel="stylesheet" href="/ui/static/styles.css?v={{BUILD_ID}}" />
+    <link rel="stylesheet" href="/ui/static/app.css?v={{BUILD_ID}}" />
   </head>
 <body>
   <header class="topbar">
     <div class="brand">
       <h1 id="brandTop">Jarvis</h1>
+      <span id="buildId" class="build-id">build: {{BUILD_ID}}</span>
       <span id="onlinePill" class="pill offline">Offline</span>
       <span id="statusBadge" class="status hidden">Klar</span>
     </div>
@@ -56,6 +57,9 @@
     </div>
     <div id="eventsList" class="events-list" aria-live="polite"></div>
   </header>
+
+  <!-- Build marker for cache-busting verification -->
+  <div id="buildMarker" class="build-marker">BUILD {{BUILD_ID}}</div>
 
   <main class="shell">
     <aside class="sidebar">
@@ -250,8 +254,9 @@
       </div>
     </div>
   </div>
-  <script src="/static/auth.js?v=9"></script>
-  <script src="/static/api.js?v=6"></script>
-  <script src="/static/app.js?v=45"></script>
+  <script src="/ui/static/auth.js?v={{BUILD_ID}}"></script>
+  <script src="/ui/static/api.js?v={{BUILD_ID}}"></script>
+  <script src="/ui/static/marked.min.js?v={{BUILD_ID}}"></script>
+  <script src="/ui/static/app.js?v={{BUILD_ID}}"></script>
 </body>
 </html>

@@ -12,7 +12,7 @@ from datetime import datetime, timezone, timedelta
 import uuid
 import sqlite3
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse, JSONResponse
+from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse, JSONResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -89,9 +89,30 @@ app = FastAPI()
 
 ROOT = Path(__file__).resolve().parents[2]
 UI_DIR = ROOT / "ui"
+APP_HTML = UI_DIR / "app.html"
+
+# Generate BUILD_ID for cache busting
+try:
+    import subprocess
+    BUILD_ID = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT).decode().strip()
+except Exception:
+    BUILD_ID = str(int(time.time()))
 
 app.mount("/ui/static", StaticFiles(directory=str(UI_DIR / "static")), name="ui-static")
-app.mount("/ui", StaticFiles(directory=str(UI_DIR), html=True), name="ui")
+# Removed /ui mount to allow routes to handle /ui/ redirects without interference
+
+# UI routing: Legacy index.html redirects to modern app.html for deterministic UX
+# Users should always land on /app (ui/app.html), not legacy /ui/index.html
+
+@app.api_route("/ui/", methods=["GET", "HEAD"])
+async def ui_root_redirect():
+    """Redirect /ui/ to /app to ensure users land on modern UI"""
+    return RedirectResponse(url="/app", status_code=302)
+
+@app.api_route("/ui/index.html", methods=["GET", "HEAD"])
+async def legacy_index_redirect():
+    """Redirect legacy index.html to modern app to avoid confusion"""
+    return RedirectResponse(url="/app", status_code=302)
 
 ensure_demo_user()
 start_repo_watcher_if_enabled()
@@ -2164,7 +2185,7 @@ async def footer_settings():
         ]
     )
     return {
-        "text": settings.get("footer_text", "Jarvis v.1 @ 2026"),
+        "text": settings.get("footer_text", f"Jarvis v.1.0.0 (build {BUILD_ID})"),
         "support_url": settings.get("footer_support_url", "#"),
         "contact_url": settings.get("footer_contact_url", "#"),
         "license_text": settings.get("footer_license_text", "Open‑source licens"),
@@ -2176,9 +2197,17 @@ async def footer_settings():
 async def brand_settings():
     settings = _get_settings(["brand_top_label", "brand_core_label"])
     return {
-        "top_label": settings.get("brand_top_label", "Jarvis"),
-        "core_label": settings.get("brand_core_label", "Jarvis"),
+        "name": settings.get("brand_core_label", "Jarvis"),
+        "short": settings.get("brand_core_label", "Jarvis"),
+        "top": settings.get("brand_top_label", "Jarvis"),
+        "version": "1.0.0",
     }
+
+
+@app.get("/v1/build")
+async def build_info():
+    """Return build information for cache busting"""
+    return {"build_id": BUILD_ID}
 
 
 @app.get("/account/profile")
@@ -2273,36 +2302,23 @@ async def update_account_profile(
 
 @app.get("/settings/public")
 async def public_settings(x_ui_lang: str | None = Header(None)):
-    google_enabled = _get_setting("google_auth_enabled", "0") == "1"
-    google_ready = bool(os.getenv("GOOGLE_CLIENT_ID")) and bool(os.getenv("GOOGLE_CLIENT_SECRET"))
-    raw_banner = _get_setting("banner_messages", "")
-    entries = _parse_banner_entries(raw_banner)
-    filtered = _filter_banner_entries(entries)
-    tz_name = "Europe/Copenhagen" if (x_ui_lang or "").lower().startswith("da") else "Europe/London"
-    if raw_banner:
-        try:
-            stored = json.dumps(filtered)
-            if stored != raw_banner:
-                with get_conn() as conn:
-                    conn.execute(
-                        "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
-                        ("banner_messages", stored),
-                    )
-                    conn.commit()
-        except Exception:
-            pass
     return {
-        "register_enabled": _get_setting("register_enabled", "1") == "1",
-        "captcha_enabled": _get_setting("captcha_enabled", "1") == "1",
-        "google_auth_enabled": google_enabled,
-        "google_auth_ready": google_ready,
-        "maintenance_enabled": _maintenance_enabled(),
-        "maintenance_message": _maintenance_message(),
-        "updates_log": _get_setting("updates_log", ""),
-        "updates_auto": _auto_updates_list(tz_name),
-        "commands": _command_list(),
-        "banner_enabled": _get_setting("banner_enabled", "1") == "1",
-        "banner_messages": _format_banner_entries(filtered, tz_name),
+        "maintenance": {
+            "enabled": _maintenance_enabled(),
+            "message": _maintenance_message(),
+        },
+        "default_lang": "da",
+        "default_theme": "light",
+        "features": {
+            "captcha": False,
+        },
+        "footer": {
+            "text": _get_setting("footer_text", "Jarvis v.1 @ 2026"),
+            "support_url": _get_setting("footer_support_url", "#"),
+            "contact_url": _get_setting("footer_contact_url", "#"),
+            "license_text": _get_setting("footer_license_text", "Open‑source licens"),
+            "license_url": _get_setting("footer_license_url", "#"),
+        },
     }
 
 
@@ -2341,7 +2357,7 @@ async def v1_captcha():
 
 @app.get("/status")
 async def status():
-    return {"online": True}
+    return {"ok": True, "online": True, "version": "1.0.0"}
 
 
 @app.post("/api/tickets")
@@ -2914,11 +2930,6 @@ def favicon():
     return FileResponse(str(UI_DIR / "static" / "favicon.svg"))
 
 
-@app.get("/app")
-def app_page():
-    return RedirectResponse(url="/ui/app.html")
-
-
 @app.get("/login")
 async def login_page():
     return FileResponse(LOGIN_PATH)
@@ -2944,7 +2955,20 @@ async def app_page(request: Request):
     token = request.cookies.get("jarvis_token")
     if not token or not get_user_by_token(token):
         return RedirectResponse(url="/login")
-    return FileResponse(APP_PATH)
+    try:
+        html_content = APP_HTML.read_text(encoding="utf-8").replace("{{BUILD_ID}}", BUILD_ID)
+        return HTMLResponse(content=html_content)
+    except FileNotFoundError:
+        _req_logger.error(f"App HTML file not found: {APP_HTML}")
+        return Response(status_code=500, content=f"App HTML file not found: {APP_HTML}", media_type="text/plain")
+
+
+@app.head("/app")
+async def app_page_head(request: Request):
+    token = request.cookies.get("jarvis_token")
+    if not token or not get_user_by_token(token):
+        return RedirectResponse(url="/login")
+    return Response(status_code=200, headers={"content-type": "text/html; charset=utf-8"})
 
 
 @app.get("/admin")

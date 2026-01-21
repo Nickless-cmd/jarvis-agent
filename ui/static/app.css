@@ -241,12 +241,6 @@ header.topbar {
 .event-pill .event-refs .event-ref:hover {
   text-decoration: underline;
 }
-  border: none;
-  background: transparent;
-  color: var(--text);
-  cursor: pointer;
-  font-size: 14px;
-}
 .brand { display: flex; align-items: center; gap: 12px; }
 .build-id {
   font-size: 11px;

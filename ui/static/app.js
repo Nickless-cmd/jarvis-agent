@@ -1611,7 +1611,7 @@ async function loadQuotaBar() {
 async function loadStatus() {
   if (!jarvisDot) return;
   try {
-    const res = await fetch("/status");
+    const res = await fetch("/status", { credentials: "include" });
     if (!res.ok) {
       setOnlineStatus(false);
       return;

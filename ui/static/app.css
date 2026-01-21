@@ -540,7 +540,7 @@ body.sidebar-collapsed .session-initial {
   font-size: 11px;
   border-radius: 10px;
 }
-textarea#prompt {
+.composer textarea#prompt {
   min-height: 44px;
   max-height: 160px;
   border: none;
@@ -549,7 +549,7 @@ textarea#prompt {
   resize: none;
   overflow: hidden;
 }
-textarea#prompt:focus { outline: none; }
+.composer textarea#prompt:focus { outline: none; }
 button#sendBtn {
   width: auto;
   padding: 10px 16px;
@@ -714,14 +714,6 @@ button#sendBtn:hover {
   margin-top: 8px;
   background: #0a0f1a;
 }
-input, select, textarea {
-  background: #0b1220;
-  color: var(--text);
-  border: 1px solid var(--border);
-}
-.top-actions select {
-  min-width: 140px;
-}
 .top-actions {
   display: flex;
   align-items: center;
@@ -736,12 +728,20 @@ input, select, textarea {
   font-size: 12px;
 }
 .top-actions select,
-.search-wrap input {
+.search-wrap input,
+.lang-select,
+.theme-select,
+.response-mode-select {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 10px;
   height: 34px;
+  padding: 6px 10px;
+  appearance: none;
 }
-.mode-label select {
-  height: 34px;
-}
+.top-actions select { min-width: 140px; }
+.mode-label select { height: 34px; }
 .greeting-banner {
   text-align: center;
   color: var(--muted);
@@ -1077,6 +1077,22 @@ button.secondary {
   background: #1f2937;
   color: var(--text);
 }
+.composer input,
+.composer select,
+.composer textarea,
+.session-prompt-row input,
+.sidebar input#sessionSearch,
+.note-create input,
+.note-create textarea,
+.search-wrap input,
+.admin-shell input,
+.admin-shell select,
+.admin-shell textarea {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
 .quota-btn {
   padding: 6px 10px;
   font-size: 12px;
@@ -1137,7 +1153,11 @@ button.secondary {
   width: 8px;
   height: 8px;
 }
-.hidden { display: none; }
+.hidden { display: none !important; }
+input[type="file"].hidden,
+input[type="file"].hidden::file-selector-button {
+  display: none !important;
+}
 .composer-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 8px; }
 .composer-row {
   max-width: 1120px;

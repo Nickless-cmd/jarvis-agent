@@ -967,21 +967,28 @@ function nowTime(value) {
 function renderMessageBody(text, options = {}) {
   const fragment = document.createDocumentFragment();
   
-  if (options.markdown && typeof marked !== 'undefined') {
-    // Use marked.js for full markdown rendering
-    const html = marked.parse(text);
-    const tempDiv = document.createElement('div');
-    tempDiv.innerHTML = html;
-    while (tempDiv.firstChild) {
-      fragment.appendChild(tempDiv.firstChild);
+  let useMarkdown = options.markdown && typeof marked !== 'undefined';
+  if (useMarkdown) {
+    try {
+      // Use marked.js for full markdown rendering
+      const html = marked.parse(text);
+      const tempDiv = document.createElement('div');
+      tempDiv.innerHTML = html;
+      while (tempDiv.firstChild) {
+        fragment.appendChild(tempDiv.firstChild);
+      }
+    } catch (err) {
+      console.warn('Markdown parsing failed, falling back to plain text', err);
+      useMarkdown = false;
     }
-  } else {
-    // Plain text with line breaks
-    const lines = text.split('\n');
-    lines.forEach(line => {
-      if (line.trim()) {
+  }
+  if (!useMarkdown) {
+    // Improved plain text rendering with paragraph breaks
+    const paragraphs = text.split(/\n\n+/);
+    paragraphs.forEach(para => {
+      if (para.trim()) {
         const p = document.createElement('p');
-        p.textContent = line;
+        p.innerHTML = para.trim().replace(/\n/g, '<br>');
         fragment.appendChild(p);
       }
     });

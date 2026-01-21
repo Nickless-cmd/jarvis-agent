@@ -101,6 +101,7 @@ from jarvis.db import get_conn
 from jarvis import tools, tts
 from jarvis.agent_policy.language import _should_translate_vision_response
 from jarvis.agent_core.orchestrator import TurnResult, coerce_to_turn_result
+from jarvis.agent_core.tool_registry import call_tool
 from jarvis.agent_policy.vision_guard import (
     _describe_image_ollama,
     _looks_like_guess,
@@ -1404,7 +1405,7 @@ def _run_agent_core_fallback(
                 reply = cached_summary
                 add_memory("assistant", reply, user_id=user_id)
                 return TurnResult(reply_text=reply, meta={"tool": None, "tool_used": False})
-            article = tools.read_article(url)
+            article = call_tool("read_article", {"url": url}, user_id, session_id)
             if article.get("error") or not article.get("text"):
                 _debug(f"📰 read-request: article fetch failed: {article.get('error')}")
                 reply = "Jeg kan ikke hente artiklen lige nu."
@@ -1451,7 +1452,7 @@ def _run_agent_core_fallback(
         pending_process = _load_state(get_process_state(session_id))
         pending_pid = pending_process.get("pid") if isinstance(pending_process, dict) else None
         if pending_pid and _process_confirm_intent(prompt):
-            tool_result = tools.kill_process(int(pending_pid))
+            tool_result = call_tool("kill_process", {"pid": int(pending_pid)}, user_id, session_id)
             set_process_state(session_id, "")
             reply = "Proces afsluttet." if tool_result.get("ok") else "Jeg kunne ikke afslutte processen."
             add_memory("assistant", reply, user_id=user_id)
@@ -1518,8 +1519,8 @@ def _run_agent_core_fallback(
                 )
             weather_reply = ux_error("weather_city_missing", ui_lang)
         else:
-            weather_now = tools.weather_now(weather_city)
-            weather_forecast = tools.weather_forecast(weather_city)
+            weather_now = call_tool("weather_now", {"city": weather_city}, user_id, session_id)
+            weather_forecast = call_tool("weather_forecast", {"city": weather_city}, user_id, session_id)
             today_text = tools.format_weather_today(weather_now)
             tomorrow_text = tools.format_weather_tomorrow(weather_forecast)
             multi_text = tools.format_weather_5days(weather_forecast)
@@ -1559,7 +1560,7 @@ def _run_agent_core_fallback(
 
         query = _extract_news_query(prompt)
         category = "technology" if _is_tech_query(query) else None
-        news_result = tools.news_combined(query, category=category)
+        news_result = call_tool("news_search", {"query": query}, user_id, session_id)
         items = news_result.get("items", []) if isinstance(news_result, dict) else []
         if len(items) < 3:
             site_hint = (
@@ -1654,8 +1655,8 @@ def _run_agent_core_fallback(
             reply = "Jeg mangler en by eller et postnummer. Hvis du ønsker det, kan jeg bruge din profilby."
             add_memory("assistant", reply, user_id=user_id)
             return TurnResult(reply_text=reply, meta={"tool": "weather", "tool_used": False})
-        now = tools.weather_now(city)
-        forecast = tools.weather_forecast(city)
+        now = call_tool("weather_now", {"city": city}, user_id, session_id)
+        forecast = call_tool("weather_forecast", {"city": city}, user_id, session_id)
         tool_result = {
             "now": now,
             "forecast": forecast,
@@ -1675,19 +1676,22 @@ def _run_agent_core_fallback(
     elif tool == "news":
         query = _extract_news_query(prompt)
         category = "technology" if _is_tech_query(query) else None
-        tool_result = tools.news_combined(query, category=category)
+        tool_result = call_tool("news_search", {"query": query}, user_id, session_id)
     elif tool == "search":
         query = _extract_cv_query(prompt) if cv_intent else _extract_search_query(prompt)
-        tool_result = tools.search_combined(query, max_items=5)
+        tool_result = call_tool("search_combined", {"query": query, "max_items": 5}, user_id, session_id)
     elif tool == "currency":
-        tool_result = tools.currency_convert("EUR","DKK")
+        tool_result = call_tool("currency_convert", {"frm": "EUR", "to": "DKK"}, user_id, session_id)
     elif tool == "time":
-        tool_result = tools.time_now()
+        tool_result = call_tool("time_now", {}, user_id, session_id)
     elif tool == "system":
-        tool_result = tools.system_info()
+        tool_result = call_tool("system_info", {}, user_id, session_id)
     elif tool == "ping":
         host = _extract_host(prompt)
-        tool_result = tools.ping_host(host) if host else {"error": "missing_host"}
+        if host:
+            tool_result = call_tool("ping_host", {"host": host}, user_id, session_id)
+        else:
+            tool_result = {"error": "missing_host"}
     elif tool == "process":
         action = _process_action(prompt)
         if action == "kill":
@@ -1704,9 +1708,9 @@ def _run_agent_core_fallback(
                 add_memory("assistant", reply, user_id=user_id)
                 return TurnResult(reply_text=reply, meta={"tool": "process", "tool_used": False})
         elif action == "find":
-            tool_result = tools.find_process(prompt)
+            tool_result = call_tool("find_process", {"query": prompt}, user_id, session_id)
         else:
-            tool_result = tools.list_processes(10)
+            tool_result = call_tool("list_processes", {"limit": 10}, user_id, session_id)
 
     failure = _tool_failed(tool, tool_result)
     if failure:
@@ -1805,7 +1809,7 @@ def _run_agent_core_fallback(
             url = item.get("url")
             summary = ""
             if url:
-                article = tools.read_article(url)
+                article = call_tool("read_article", {"url": url}, user_id, session_id)
                 text = (article or {}).get("text") or ""
                 summary = _summarize_text(text, sentences=sentence_count)
                 if not summary:

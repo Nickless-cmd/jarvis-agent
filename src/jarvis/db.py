@@ -201,6 +201,21 @@ def _ensure_db():
         )
         conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS tool_audit (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                user_id INTEGER,
+                session_id TEXT,
+                tool_name TEXT NOT NULL,
+                args_redacted TEXT,
+                success INTEGER NOT NULL,
+                latency_ms REAL,
+                FOREIGN KEY(user_id) REFERENCES users(id)
+            )
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS download_tokens (
                 token TEXT PRIMARY KEY,
                 user_id INTEGER NOT NULL,
@@ -259,6 +274,21 @@ def _ensure_db():
         _ensure_column(conn, "events", "body", "TEXT")
         _ensure_column(conn, "events", "meta_json", "TEXT")
         _ensure_column(conn, "events", "read", "INTEGER DEFAULT 0")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS tool_audit (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                user_id INTEGER NOT NULL,
+                session_id TEXT,
+                tool_name TEXT NOT NULL,
+                args_redacted TEXT NOT NULL,
+                success INTEGER NOT NULL,
+                latency_ms REAL NOT NULL,
+                FOREIGN KEY(user_id) REFERENCES users(id)
+            )
+            """
+        )
         _ensure_setting(conn, "footer_text", "Jarvis v.1 - 2026")
         _ensure_setting(conn, "footer_support_url", "#")
         _ensure_setting(conn, "footer_contact_url", "#")

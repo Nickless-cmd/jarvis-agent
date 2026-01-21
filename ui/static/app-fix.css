@@ -30,12 +30,61 @@ header.topbar { white-space: nowrap; }
 .top-controls .control-btn { height: 34px; width: 34px; border-radius: 8px; }
 
 /* Status row above composer */
-.status-row { display:flex; align-items:center; gap:12px; padding:8px 20px 8px 0; background: transparent; border-bottom: 1px solid var(--border); width: 100%; margin: 0; }
+.status-row { display:flex; align-items:center; gap:12px; padding:8px var(--content-pad, 24px) 8px 0; background: transparent; border-bottom: 1px solid var(--border); width: 100%; margin: 0; }
+
+/* Chat feed spacing to prevent overlap with status row */
+.chat-feed { 
+  margin-bottom: 20px; 
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  max-height: 60vh;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 16px;
+}
+
+/* Ensure chat messages container doesn't have fixed height when chat-feed is scrollable */
+#chat {
+  height: auto;
+  min-height: 100%;
+}
 
 /* Composer container - ChatGPT style */
-.composer-wrap { position: sticky; bottom: 0; background: var(--panel); padding: 10px 20px 10px 0; display: flex; align-items: center; gap: 8px; width: 100%; }
-.composer-input { display: flex; align-items: flex-end; gap: 8px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 24px; background: var(--panel); }
-.composer-input textarea { flex: 1; border: none; background: transparent; color: var(--text); font-size: 16px; line-height: 1.4; resize: none; overflow: hidden; min-height: 40px; outline: none; }
+.composer-wrap { 
+  background: var(--panel); 
+  padding: 20px var(--content-pad, 24px) 30px 0; 
+  display: flex; 
+  align-items: flex-start; 
+  gap: 8px; 
+  width: 100%; 
+  margin-top: 20px;
+}
+.composer-input { 
+  display: flex; 
+  align-items: flex-end; 
+  gap: 8px; 
+  padding: 12px 16px; 
+  border: 1px solid var(--border); 
+  border-radius: 24px; 
+  background: var(--panel); 
+  flex: 1;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+.composer-input textarea { 
+  flex: 1; 
+  border: none; 
+  background: transparent; 
+  color: var(--text); 
+  font-size: 16px; 
+  line-height: 1.4; 
+  resize: none; 
+  overflow: hidden; 
+  min-height: 20px; 
+  max-height: 200px;
+  outline: none; 
+  transition: height 0.2s ease;
+}
 .composer-input .composer-btn { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; border: 1px solid var(--border); background: var(--panel); color: var(--text); border-radius: 6px; cursor: pointer; font-size: 16px; }
 .composer-input .composer-btn:hover { background: rgba(255,255,255,0.1); }
 .composer-input .send-btn { background: var(--accent); color: white; border-color: var(--accent); }

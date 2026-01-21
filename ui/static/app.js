@@ -36,6 +36,11 @@ function isNearBottom(container) {
   return container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
 }
 
+function scrollChatToBottom() {
+  const feed = getChatFeed();
+  if (feed) feed.scrollTop = feed.scrollHeight;
+}
+
 // Safe element getters (called when needed, not at script load)
 function getChat() { return gid("chat"); }
 function getStreamToggle() { return gid("streamToggle"); }
@@ -1146,10 +1151,7 @@ function renderChatMessage(msg) {
   const greetingBanner = getGreetingBanner();
   if (greetingBanner) greetingBanner.style.display = "none";
   hasMessages = true;
-  const feed = getChatFeed();
-  if (feed && isNearBottom(feed)) {
-    feed.scrollTop = feed.scrollHeight;
-  }
+  scrollChatToBottom();
   return element;
 }
 
@@ -1165,6 +1167,7 @@ function addWeatherCard(payload) {
   card.appendChild(title);
   card.appendChild(body);
   chat.appendChild(card);
+  scrollChatToBottom();
 }
 
 function formatPublished(value) {
@@ -1258,6 +1261,7 @@ function appendNewsList(messageEl, payload) {
   if (body) {
     body.appendChild(list);
   }
+  scrollChatToBottom();
 }
 
 function addArticleCard(payload) {
@@ -2142,8 +2146,7 @@ async function sendMessage(textOverride = null) {
           streamingText += delta;
           // Update display with plain text during streaming
           body.textContent = streamingText;
-          const chat = getChat();
-          if (chat) chat.scrollTop = chat.scrollHeight;
+          scrollChatToBottom();
           hadDelta = true;
         }
       } catch (err) {
@@ -2505,10 +2508,23 @@ document.addEventListener("click", (e) => {
 
 const promptInput = getPromptInput();
 if (promptInput) {
-  promptInput.addEventListener("input", () => {
+  const adjustHeight = () => {
     promptInput.style.height = "auto";
-    promptInput.style.height = `${promptInput.scrollHeight}px`;
+    const scrollHeight = promptInput.scrollHeight;
+    const newHeight = Math.min(Math.max(scrollHeight, 20), 200); // Min 20px, max 200px
+    promptInput.style.height = `${newHeight}px`;
+  };
+  
+  promptInput.addEventListener("input", adjustHeight);
+  
+  // Also adjust on focus/blur to handle empty state
+  promptInput.addEventListener("focus", adjustHeight);
+  promptInput.addEventListener("blur", () => {
+    if (!promptInput.value.trim()) {
+      promptInput.style.height = "20px";
+    }
   });
+  
   promptInput.addEventListener("input", () => {
     const greetingBanner = getGreetingBanner();
     if (!greetingBanner) return;

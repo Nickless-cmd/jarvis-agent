@@ -26,6 +26,7 @@ header.topbar { display: flex; align-items: center; padding: 12px 20px; white-sp
 .build-id { margin-left: 2px; opacity:0.85; font-size: 0.85rem; }
 #topBanner { }
 .top-actions { display: flex; align-items: center; flex-shrink: 0; margin-left: auto; justify-content: flex-end; }
+.search-wrap input { max-width: 200px; }
 
 /* Status row and tools placement (ensure tools sit under status and above composer) */
 .status-row { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 12px; border-top:1px solid rgba(255,255,255,0.02); border-bottom: none; background:transparent }
@@ -42,6 +43,7 @@ header.topbar { display: flex; align-items: center; padding: 12px 20px; white-sp
 .composer-row { margin-top: 8px; }
 .tools-inputs { display: flex; flex-wrap: wrap; gap: 8px; }
 .tools-inputs label { display: flex; align-items: center; gap: 4px; font-size: 0.9rem; cursor: pointer; }
+.rail-btn { background: var(--panel); border: 1px solid var(--border); border-radius: 4px; padding: 4px 6px; color: var(--text); }
 
 /* Right sidebar corrections */
 .rightbar { padding:12px; display:flex; flex-direction:column; gap:12px; border-left:1px solid var(--border); min-height:0; position:sticky; top: calc(var(--bar-height) + 12px); background: transparent }

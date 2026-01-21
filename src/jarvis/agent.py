@@ -115,6 +115,12 @@ from jarvis.agent_policy.vision_guard import (
 from jarvis.agent_policy.freshness import inject_time_context, is_time_sensitive
 from jarvis.agent_format.ux_copy import ux_error, ux_notice
 from jarvis.agent_core.conversation_state import ConversationState, should_show_resume_hint
+from jarvis.agent_core.project_memory import (
+    add_milestone as pm_add_milestone,
+    add_decision as pm_add_decision,
+    add_roadmap_item as pm_add_roadmap_item,
+    summarize_project_state as pm_summarize,
+)
 from jarvis.user_preferences import get_user_preferences, set_user_preferences, build_persona_directive, parse_preference_command
 
 import jarvis.agent as agent
@@ -636,6 +642,57 @@ def _first_name(profile: dict | None, fallback: str) -> str:
         if name:
             return name.split()[0]
     return fallback
+
+def _project_memory_command(prompt: str, ui_lang: str | None = None):
+    """Handle project memory commands."""
+    p = prompt.strip()
+    low = p.lower()
+    lang_en = (ui_lang or "").lower().startswith("en")
+    success_msg = "Noted." if lang_en else "Noteret."
+    secret_msg = "That looks sensitive; I did not store it." if lang_en else "Det ligner følsomme oplysninger; jeg gemte det ikke."
+
+    def _reply(text: str):
+        return TurnResult(reply_text=text, meta={"tool": None, "tool_used": False})
+
+    if low.startswith("tilføj milestone:") or low.startswith("add milestone:"):
+        text = p.split(":", 1)[1].strip()
+        ok = pm_add_milestone(text)
+        return _reply(success_msg if ok else secret_msg)
+    if low.startswith("husk denne beslutning:") or low.startswith("remember this decision:"):
+        text = p.split(":", 1)[1].strip()
+        ok = pm_add_decision(text)
+        return _reply(success_msg if ok else secret_msg)
+    if low.startswith("tilføj roadmap:") or low.startswith("add roadmap:"):
+        text = p.split(":", 1)[1].strip()
+        ok = pm_add_roadmap_item(text)
+        return _reply(success_msg if ok else secret_msg)
+    if "status på projektet" in low or "project status" in low:
+        bullets = pm_summarize()
+        if not bullets:
+            return _reply("Ingen projektstatus gemt." if not lang_en else "No project status stored.")
+        header = "Projektstatus:" if not lang_en else "Project status:"
+        return _reply(header + "\n" + "\n".join(f"• {b}" for b in bullets))
+    if "hvad mangler vi" in low or "what is missing" in low or "hvad mangler der" in low:
+        bullets = pm_summarize()
+        header = "Vi mangler:" if not lang_en else "Open items:"
+        return _reply(header + ("\n" + "\n".join(f"• {b}" for b in bullets) if bullets else ""))
+    return None
+
+def _project_context_block(prompt: str, ui_lang: str | None = None) -> str | None:
+    """Return a short project context block when prompt is repo/dev related."""
+    p = prompt.lower()
+    dev_markers = [
+        "kode", "repo", "pull request", "commit", "test", "pytest", "fejl", "bug",
+        "jarvis", "orchestrator", "skill", "module", "modul", "refactor", "build", "pipeline",
+        "ci", "cd", "log", "stacktrace", "traceback",
+    ]
+    if not any(m in p for m in dev_markers):
+        return None
+    bullets = pm_summarize()
+    if not bullets:
+        return None
+    header = "Project context" if (ui_lang or "").lower().startswith("en") else "Projektkontekst"
+    return header + ":\n" + "\n".join(f"- {b}" for b in bullets)
 
 
 def _get_system_prompt() -> str:
@@ -1483,6 +1540,14 @@ def _run_agent_core_fallback(
             add_memory("assistant", reply, user_id=user_id)
             return TurnResult(reply_text=reply, meta={"tool": requested_tool, "tool_used": False})
 
+    # Project memory commands
+    pm_cmd = _project_memory_command(prompt, ui_lang)
+    if pm_cmd:
+        add_memory("assistant", pm_cmd.reply_text, user_id=user_id)
+        if session_id:
+            add_message(session_id, "assistant", pm_cmd.reply_text)
+        return pm_cmd
+
     if session_id:
         pending_process = _load_state(get_process_state(session_id))
         pending_pid = pending_process.get("pid") if isinstance(pending_process, dict) else None
@@ -2075,8 +2140,12 @@ def _run_agent_core_fallback(
     effective_name = user_prefs.get("preferred_name") or display_name
     name_hint = f"Brugerens navn er {effective_name}."
     time_context = inject_time_context(ui_lang)
+    project_context = _project_context_block(prompt, ui_lang)
     
-    messages = [{"role": "system", "content": f"{sys_prompt}\n{name_hint}\n{mode_hint}\n{time_context}"}]
+    sys_content_parts = [sys_prompt, name_hint, mode_hint, time_context]
+    if project_context:
+        sys_content_parts.append(project_context)
+    messages = [{"role": "system", "content": "\n".join(sys_content_parts)}]
     if mem:
         messages.append({"role": "assistant", "content": "\n".join(mem)})
     messages.extend(_format_history(session_hist))

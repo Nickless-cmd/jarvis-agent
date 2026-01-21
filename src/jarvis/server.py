@@ -87,6 +87,12 @@ from jarvis.watchers.test_watcher import run_pytest_and_notify
 
 app = FastAPI()
 
+ROOT = Path(__file__).resolve().parents[2]
+UI_DIR = ROOT / "ui"
+
+app.mount("/ui/static", StaticFiles(directory=str(UI_DIR / "static")), name="ui-static")
+app.mount("/ui", StaticFiles(directory=str(UI_DIR), html=True), name="ui")
+
 ensure_demo_user()
 start_repo_watcher_if_enabled()
 
@@ -114,16 +120,15 @@ _req_logger.setLevel(logging.INFO)
 _last_log_cleanup = 0.0
 _TEST_MODE = os.getenv("JARVIS_TEST_MODE", "0") == "1"
 
-UI_DIR = os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(__file__)), "..", "ui"))
-LOGIN_PATH = os.path.join(UI_DIR, "login.html")
-REGISTER_PATH = os.path.join(UI_DIR, "registere.html")
-ADMIN_LOGIN_PATH = os.path.join(UI_DIR, "admin_login.html")
-APP_PATH = os.path.join(UI_DIR, "app.html")
-ADMIN_PATH = os.path.join(UI_DIR, "admin.html")
-ACCOUNT_PATH = os.path.join(UI_DIR, "account.html")
-DOCS_PATH = os.path.join(UI_DIR, "docs.html")
-TICKETS_PATH = os.path.join(UI_DIR, "tickets.html")
-MAINTENANCE_PATH = os.path.join(UI_DIR, "maintenance.html")
+LOGIN_PATH = UI_DIR / "login.html"
+REGISTER_PATH = UI_DIR / "registere.html"
+ADMIN_LOGIN_PATH = UI_DIR / "admin_login.html"
+APP_PATH = UI_DIR / "app.html"
+ADMIN_PATH = UI_DIR / "admin.html"
+ACCOUNT_PATH = UI_DIR / "account.html"
+DOCS_PATH = UI_DIR / "docs.html"
+TICKETS_PATH = UI_DIR / "tickets.html"
+MAINTENANCE_PATH = UI_DIR / "maintenance.html"
 
 app.mount("/static", StaticFiles(directory=os.path.join(UI_DIR, "static")), name="static")
 
@@ -2869,6 +2874,16 @@ async def admin_log_delete(
 @app.get("/")
 async def ui():
     return RedirectResponse(url="/login")
+
+
+@app.get("/favicon.ico")
+def favicon():
+    return FileResponse(str(UI_DIR / "static" / "favicon.svg"))
+
+
+@app.get("/app")
+def app_page():
+    return RedirectResponse(url="/ui/app.html")
 
 
 @app.get("/login")

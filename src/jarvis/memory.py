@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 import numpy as np
 import requests
+from jarvis.agent_core.cache import TTLCache
 
 try:
     import faiss  # type: ignore
@@ -84,6 +85,8 @@ class MemoryStore:
 
 
 _stores: dict[str, MemoryStore] = {}
+_search_cache = TTLCache(default_ttl=float(os.getenv("MEMORY_CACHE_TTL", "60") or 60))
+_last_cache_status: str | None = None
 
 
 def _hash_embed(text: str, dim: int = DIM):
@@ -194,6 +197,7 @@ def purge_user_memory(user_id: str) -> None:
     index_file = os.path.join(DATA_DIR, f"{safe_id}.faiss")
     data_file = os.path.join(DATA_DIR, f"{safe_id}.json")
     _stores.pop(user_id, None)
+    _search_cache.clear()
     for path in (index_file, data_file):
         try:
             if os.path.exists(path):
@@ -207,6 +211,7 @@ def add_memory(role: str, text: str, user_id: str = "default") -> None:
     if len(text) < 20:
         return
     store = _get_store(user_id)
+    _search_cache.clear()
     try:
         vec = _encode(entry)
         _ensure_index_dim(store, vec.size)
@@ -219,6 +224,14 @@ def add_memory(role: str, text: str, user_id: str = "default") -> None:
 
 
 def search_memory(query: str, k: int = 3, user_id: str | None = None) -> list[str]:
+    global _last_cache_status
+    cache_key = (user_id or "default", query, k)
+    cached = _search_cache.get(cache_key)
+    if cached is not None:
+        _last_cache_status = "hit"
+        return cached
+    _last_cache_status = "miss"
+
     store = _get_store(user_id)
     if store.index.ntotal == 0:
         return []
@@ -230,7 +243,14 @@ def search_memory(query: str, k: int = 3, user_id: str | None = None) -> list[st
         if limit <= 0:
             return []
         _, ids = store.index.search(qmat, limit)
-        return [store.memories[i] for i in ids[0] if i < len(store.memories)]
+        hits = [store.memories[i] for i in ids[0] if i < len(store.memories)]
+        _search_cache.set(cache_key, hits)
+        return hits
     except Exception as exc:
         print(f"⚠ Embedding search skipped: {exc!r}")
         return []
+
+
+def get_last_cache_status() -> str | None:
+    """Return last search_memory cache status."""
+    return _last_cache_status

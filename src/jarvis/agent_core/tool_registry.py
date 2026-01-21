@@ -2,6 +2,7 @@
 Safe tool registry with allowlist and audit logging.
 """
 
+import copy
 import json
 import os
 import time
@@ -10,6 +11,7 @@ from typing import Any, Dict, Callable, Optional
 from datetime import datetime, timezone
 
 from jarvis.db import get_conn
+from jarvis.agent_core.cache import TTLCache
 
 
 @dataclass
@@ -24,6 +26,18 @@ class ToolSpec:
 # Global registry
 _tool_registry: Dict[str, tuple[ToolSpec, Callable]] = {}
 _allowlist: set[str] = set()
+_tool_cache = TTLCache(default_ttl=60)
+
+# Cache TTLs per tool (seconds)
+TOOL_CACHE_TTLS: Dict[str, int] = {
+    "weather_now": 600,
+    "weather_forecast": 600,
+    "news_search": 300,
+    "search_combined": 300,
+    "read_article": 300,
+    "system_info": 30,
+    "currency_convert": 600,
+}
 
 
 def _load_allowlist() -> set[str]:
@@ -80,6 +94,15 @@ def get_spec(name: str) -> ToolSpec | None:
     return entry[0] if entry else None
 
 
+def _freeze_args(args: Dict[str, Any]) -> str:
+    """Create a stable, hashable representation of args."""
+    try:
+        return json.dumps(args, sort_keys=True, separators=(",", ":"))
+    except TypeError:
+        # Fallback for non-serializable args
+        return repr(sorted(args.items()))
+
+
 def _redact_args(args: Dict[str, Any]) -> Dict[str, Any]:
     """Redact sensitive fields from args."""
     redacted = {}
@@ -124,6 +147,15 @@ def _audit_tool_call(
         print(f"Failed to write audit log: {e}")
 
 
+def _record_cache_metric(entry: Dict[str, Any]) -> None:
+    """Send cache hit/miss info to orchestrator metrics if available."""
+    try:
+        from jarvis.agent_core.orchestrator import set_last_metric  # local import to avoid cycles
+        set_last_metric("tool_cache", entry)
+    except Exception:
+        pass
+
+
 def call_tool(name: str, args: Dict[str, Any], user_id: int, session_id: Optional[str] = None) -> Any:
     """
     Call a tool safely through the registry.
@@ -153,12 +185,24 @@ def call_tool(name: str, args: Dict[str, Any], user_id: int, session_id: Optiona
         raise ValueError(f"Tool '{name}' is not registered")
     
     spec, fn = _tool_registry[name]
-    
+
+    ttl = TOOL_CACHE_TTLS.get(name, 0)
+    cache_key = None
+    if ttl and args is not None:
+        cache_key = (name, _freeze_args(args))
+        cached = _tool_cache.get(cache_key)
+        if cached is not None:
+            _record_cache_metric({"tool": name, "cache": "hit"})
+            return cached
+    _record_cache_metric({"tool": name, "cache": "miss"})
+
     # Call tool and measure latency
     start_time = time.time()
     try:
         result = fn(**args)
         success = True
+        if cache_key:
+            _tool_cache.set(cache_key, result, ttl=ttl)
     except Exception as e:
         result = {"error": str(e)}
         success = False
@@ -175,6 +219,7 @@ def _reset_registry_for_tests() -> None:
     """Clear registry and allowlist (tests only)."""
     _tool_registry.clear()
     _allowlist.clear()
+    _tool_cache.clear()
 
 
 # Initialize allowlist on import

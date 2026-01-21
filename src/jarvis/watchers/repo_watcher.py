@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Dict, Iterable, Set
 
 from jarvis.notifications.store import add_event
+from jarvis.agent_core.cache import mark_code_index_stale
 from jarvis.code_rag.index import build_index, DEFAULT_INDEX_DIR, DEFAULT_REPO_ROOT
 
 RELEVANT_EXT = {".py", ".md", ".txt", ".sh", ".toml", ".yml", ".yaml", ".ini"}
@@ -88,6 +89,7 @@ class PollingRepoWatcher:
             return
         paths_preview = ", ".join(sorted(p.as_posix() for p in list(changed)[:3]))
         count = len(changed)
+        mark_code_index_stale()
         add_event(
             self.user_id,
             type="code_changed",

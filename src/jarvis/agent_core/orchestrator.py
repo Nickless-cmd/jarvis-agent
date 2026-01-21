@@ -142,6 +142,11 @@ def handle_turn(
 
     start = time.time()
     mem = search_memory(prompt, user_id=user_id)
+    try:
+        from jarvis.memory import get_last_cache_status
+        timings["memory_cache"] = get_last_cache_status()
+    except Exception:
+        pass
     timings["memory_ms"] = (time.time() - start) * 1000
     memory_used_flag = bool(mem)
     session_hist = get_recent_messages(session_id, limit=8) if session_id else []

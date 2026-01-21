@@ -716,7 +716,17 @@ def _handle_perf_status(user_id: str, session_id: Optional[str], ui_lang: str) -
     try:
         # Get recent performance metrics
         metrics = get_recent_performance(user_id, session_id, limit=1)
+        from jarvis.agent_core.orchestrator import get_last_metrics
+        last_turn = get_last_metrics() or {}
         status = format_performance_status(metrics, ui_lang)
+        timings = (last_turn.get("timings") or {}) if last_turn else {}
+        if timings:
+            cache_line = timings.get("memory_cache")
+            if cache_line:
+                status += f"\nCache: memory {cache_line}"
+            tool_cache = last_turn.get("tool_cache")
+            if tool_cache:
+                status += f"\nCache: {tool_cache}"
         return TurnResult(reply_text=status, meta={"tool": "perf_status", "tool_used": True})
     except Exception as e:
         error_msg = f"Fejl ved hentning af performance data: {e}" if ui_lang.startswith("da") else f"Error retrieving performance data: {e}"

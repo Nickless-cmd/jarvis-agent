@@ -13,6 +13,47 @@
 /* utility hidden class (use !important to avoid accidental overrides) */
 .hidden { display: none !important; }
 
+/* Base form controls styling (global) — keep simple, non-invasive defaults */
+input:not([type=file]),
+select,
+textarea {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 8px 10px;
+  border-radius: 10px;
+  outline: none;
+}
+
+/* Keep file inputs hidden by default (UI uses custom upload buttons) */
+input[type="file"] { display: none !important; }
+
+/* Ensure overall app layout does not depend on JS (stable grid) */
+.app-shell {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  height: 100vh;
+  min-height: 100vh;
+}
+
+/* chat pane must be able to scroll inside grid/flex containers */
+.chat-pane {
+  min-height: 0;
+  overflow: auto;
+}
+
+/* Ensure main shell and primary containers allow shrinking inside the overall grid */
+.shell, main, .chat-pane {
+  min-height: 0;
+}
+
+/* hide non-critical dropdowns until JS marks UI ready, but keep prompt and input visible */
+body:not(.ui-ready) .notifications-dropdown { display: none !important; }
+
+/* Unknown/neutral status styling */
+.pill.unknown { background: #9ca3af; color: white; }
+.jarvis-dot.unknown { background: #9ca3af; }
+
 /* Topbar control styling: scope inputs/selects/textareas to topbar to avoid global overrides */
 header.topbar input,
 header.topbar select,

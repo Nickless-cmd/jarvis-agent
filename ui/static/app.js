@@ -1571,6 +1571,32 @@ function updateToolDots() {
   return;
 }
 
+// Safe wrapper for UI init steps — ensures one failing async task doesn't abort startup
+async function safe(fn, label) {
+  try {
+    if (typeof fn === "function") await fn();
+  } catch (err) {
+    console.warn("UI init failed:", label, err);
+  }
+}
+
+// Lightweight alias to load settings/public data (keeps previous behaviour)
+async function loadSettings() {
+  if (typeof loadRightPanels === "function") {
+    await loadRightPanels();
+  } else {
+    try {
+      const res = await fetch('/settings/public');
+      if (!res.ok) return;
+      const data = await res.json();
+      window.__updatesLog = (data.updates_log || data.updates_auto || []).join('\n');
+      window.__commandsList = data.commands || [];
+    } catch (err) {
+      // ignore
+    }
+  }
+}
+
 function updateStreamChip() {
   if (!streamDot) return;
   const on = streamToggle && streamToggle.checked;
@@ -1613,30 +1639,38 @@ async function loadStatus() {
   try {
     const res = await fetch("/status", { credentials: "include" });
     if (!res.ok) {
-      setOnlineStatus(false);
+      // treat non-ok as unknown rather than outright offline
+      setOnlineStatus(null);
       return;
     }
     const data = await res.json().catch(() => ({}));
     setOnlineStatus(data.online !== false);
   } catch (err) {
-    setOnlineStatus(false);
+    console.warn("loadStatus failed", err);
+    setOnlineStatus(null);
   }
 }
 
 function setOnlineStatus(isOnline) {
+  // Support three-state: true (online), false (offline), null (unknown)
+  const lang = typeof getUiLang === "function" ? getUiLang() : "da";
   if (jarvisDot) {
-    if (isOnline) jarvisDot.classList.add("online");
-    else jarvisDot.classList.remove("online");
+    jarvisDot.classList.remove("online", "offline", "unknown");
+    if (isOnline === true) jarvisDot.classList.add("online");
+    else if (isOnline === false) jarvisDot.classList.add("offline");
+    else jarvisDot.classList.add("unknown");
   }
   if (onlinePill) {
-    if (isOnline) {
+    onlinePill.classList.remove("online", "offline", "unknown");
+    if (isOnline === true) {
       onlinePill.classList.add("online");
-      onlinePill.classList.remove("offline");
       onlinePill.textContent = "Online";
-    } else {
+    } else if (isOnline === false) {
       onlinePill.classList.add("offline");
-      onlinePill.classList.remove("online");
       onlinePill.textContent = "Offline";
+    } else {
+      onlinePill.classList.add("unknown");
+      onlinePill.textContent = lang === "en" ? "Unknown" : "Ukendt";
     }
   }
 }
@@ -2487,32 +2521,58 @@ function startNotificationPolling() {
   setInterval(loadNotifications, 30000); // Poll every 30 seconds
 }
 
-loadSessions();
-loadModel();
-loadFooter();
-loadBrand();
-loadProfile();
-loadQuotaBar();
-loadExpiryNotice();
-loadNotes();
-loadFiles();
-loadStatus();
-loadRightPanels();
-loadRightNotes();
-loadRightLogs();
-startEventPolling();
-startNotificationPolling();
-setInterval(loadStatus, 30000);
-setInterval(loadFiles, 15000);
-setInterval(loadRightPanels, 60000);
-setInterval(loadRightNotes, 60000);
-setInterval(loadRightLogs, 60000);
-setInterval(loadRightTickets, 15000);
-setInterval(() => renderRightPanels(window.__updatesLog || "", window.__commandsList || []), 1000);
-setStatus("Klar");
-updateToolDots();
-updateStreamChip();
-updateToolsSummary();
-if (typeof initCookieBanner === "function") {
-  initCookieBanner();
+// Initialize UI in a safe, deterministic order. Any single failure will be logged
+// but will not abort the rest of the startup.
+async function initUI() {
+  await safe(loadBrand, "loadBrand");
+  await safe(loadSettings, "loadSettings");
+  await safe(loadQuotaBar, "loadQuotaBar");
+  await safe(loadSessions, "loadSessions");
+  await safe(loadStatus, "loadStatus");
+
+  // Non-critical but useful steps
+  await safe(loadModel, "loadModel");
+  await safe(loadFooter, "loadFooter");
+  await safe(loadProfile, "loadProfile");
+  await safe(loadExpiryNotice, "loadExpiryNotice");
+  await safe(loadNotes, "loadNotes");
+  await safe(loadFiles, "loadFiles");
+  await safe(loadRightNotes, "loadRightNotes");
+  await safe(loadRightLogs, "loadRightLogs");
+
+  // Start polling and background tasks — wrapped to avoid throw-through
+  try {
+    startEventPolling();
+  } catch (err) {
+    console.warn("startEventPolling failed", err);
+  }
+  try {
+    startNotificationPolling();
+  } catch (err) {
+    console.warn("startNotificationPolling failed", err);
+  }
+
+  // periodic refreshers
+  setInterval(loadStatus, 30000);
+  setInterval(loadFiles, 15000);
+  setInterval(loadRightPanels, 60000);
+  setInterval(loadRightNotes, 60000);
+  setInterval(loadRightLogs, 60000);
+  setInterval(loadRightTickets, 15000);
+  setInterval(() => renderRightPanels(window.__updatesLog || "", window.__commandsList || []), 1000);
+
+  // Final UI touches
+  try { setStatus("Klar"); } catch (err) {}
+  try { updateToolDots(); } catch (err) {}
+  try { updateStreamChip(); } catch (err) {}
+  try { updateToolsSummary(); } catch (err) {}
+  if (typeof initCookieBanner === "function") {
+    try { initCookieBanner(); } catch (err) { console.warn("initCookieBanner failed", err); }
+  }
+
+  // Mark UI as ready (used by CSS to reveal non-essential UI parts)
+  document.body.classList.add("ui-ready");
+  console.log("UI ready");
 }
+
+document.addEventListener("DOMContentLoaded", initUI);

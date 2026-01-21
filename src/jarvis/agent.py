@@ -115,6 +115,7 @@ from jarvis.agent_policy.vision_guard import (
 from jarvis.agent_policy.freshness import inject_time_context, is_time_sensitive
 from jarvis.agent_format.ux_copy import ux_error, ux_notice
 from jarvis.agent_core.conversation_state import ConversationState, should_show_resume_hint
+from jarvis.user_preferences import get_user_preferences, set_user_preferences, build_persona_directive, parse_preference_command
 
 import jarvis.agent as agent
 print("JARVIS agent loaded from:", agent.__file__)
@@ -1218,6 +1219,39 @@ def _run_agent_core_fallback(
             if session_id:
                 set_conversation_state(session_id, conversation_state.to_json())
         mode = get_mode(session_id) if session_id else "balanced"
+    
+    # Handle user preference commands
+    pref_updates = parse_preference_command(prompt, ui_lang or "da")
+    if pref_updates:
+        set_user_preferences(user_id, pref_updates)
+        # Return confirmation message
+        if "preferred_name" in pref_updates:
+            name = pref_updates["preferred_name"]
+            msg = f"Jeg kalder dig nu {name}." if (ui_lang or "da").startswith("da") else f"I'll call you {name} now."
+        elif "preferred_language" in pref_updates:
+            lang = pref_updates["preferred_language"]
+            lang_name = "dansk" if lang == "da" else "English"
+            msg = f"Jeg svarer nu på {lang_name}." if lang == "da" else f"I'll answer in {lang_name} now."
+        elif "tone" in pref_updates:
+            tone = pref_updates["tone"]
+            if tone == "friendly":
+                msg = "Jeg bliver mere venlig." if (ui_lang or "da").startswith("da") else "I'll be more friendly."
+            elif tone == "technical":
+                msg = "Jeg bliver mere teknisk." if (ui_lang or "da").startswith("da") else "I'll be more technical."
+            else:
+                msg = "Jeg vender tilbage til neutral tone." if (ui_lang or "da").startswith("da") else "I'll return to neutral tone."
+        elif "verbosity" in pref_updates:
+            verbosity = pref_updates["verbosity"]
+            if verbosity == "short":
+                msg = "Jeg holder det kort." if (ui_lang or "da").startswith("da") else "I'll keep it short."
+            elif verbosity == "detailed":
+                msg = "Jeg bliver mere detaljeret." if (ui_lang or "da").startswith("da") else "I'll be more detailed."
+            else:
+                msg = "Jeg vender tilbage til normal længde." if (ui_lang or "da").startswith("da") else "I'll return to normal length."
+        else:
+            msg = "Præferencer opdateret." if (ui_lang or "da").startswith("da") else "Preferences updated."
+        return TurnResult(reply_text=msg, meta={"tool": None, "tool_used": False})
+    
     cv_state_active = _load_state(get_cv_state(session_id)) if session_id else None
     forced_tool = None
     resume_prompt = None
@@ -2030,8 +2064,18 @@ def _run_agent_core_fallback(
         override = get_custom_prompt(session_id)
         if override:
             sys_prompt = override
-    name_hint = f"Brugerens navn er {display_name}."
+    
+    # Add user persona directive
+    user_prefs = get_user_preferences(user_id)
+    persona_directive = build_persona_directive(user_prefs, ui_lang or "da")
+    if persona_directive:
+        sys_prompt = f"{sys_prompt}\n{persona_directive}"
+    
+    # Use preferred name if set
+    effective_name = user_prefs.get("preferred_name") or display_name
+    name_hint = f"Brugerens navn er {effective_name}."
     time_context = inject_time_context(ui_lang)
+    
     messages = [{"role": "system", "content": f"{sys_prompt}\n{name_hint}\n{mode_hint}\n{time_context}"}]
     if mem:
         messages.append({"role": "assistant", "content": "\n".join(mem)})

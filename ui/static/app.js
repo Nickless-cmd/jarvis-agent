@@ -1562,6 +1562,12 @@ function updateToolsSummary() {
     chip.className = `chip ${on ? "on" : "off"}`;
     chip.textContent = tool.label;
     chip.dataset.tool = tool.id;
+    chip.addEventListener("click", () => {
+      if (checkbox) {
+        checkbox.checked = !checkbox.checked;
+        updateToolsSummary();
+      }
+    });
     toolsSummary.appendChild(chip);
   });
 }

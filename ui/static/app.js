@@ -403,37 +403,40 @@ function renderRightPanels(updatesLog = "", commands = []) {
 }
 
 async function loadRightPanels() {
-  const res = await fetch("/settings/public");
-  if (!res.ok) return;
-  const data = await res.json();
-  const notifWrap = document.getElementById("notifWrap");
-  if (notifWrap) {
-    if (data.notify_enabled) {
-      notifWrap.classList.remove("hidden");
-    } else {
-      notifWrap.classList.add("hidden");
+  try {
+    const data = await safeFetchJson("/settings/public", {}, {});
+    if (!data) return;
+    const notifWrap = document.getElementById("notifWrap");
+    if (notifWrap) {
+      if (data.notify_enabled) {
+        notifWrap.classList.remove("hidden");
+      } else {
+        notifWrap.classList.add("hidden");
+      }
     }
-  }
-  const list = (data.updates_log || "").trim() ? data.updates_log : (data.updates_auto || []).join("\n");
-  window.__updatesLog = list || "";
-  window.__commandsList = data.commands || [];
-  renderRightPanels(window.__updatesLog, window.__commandsList);
-  const rightNotesPanel = document.getElementById("rightNotesPanel");
-  const rightTicketsPanel = document.getElementById("rightTicketsPanel");
-  if (isAdminUser) {
-    if (rightNotesPanel) rightNotesPanel.classList.add("hidden");
-    if (rightTicketsPanel) rightTicketsPanel.classList.remove("hidden");
-  } else {
-    if (rightTicketsPanel) rightTicketsPanel.classList.add("hidden");
-    if (rightNotesPanel) rightNotesPanel.classList.remove("hidden");
+    const list = (data.updates_log || "").trim()
+      ? data.updates_log
+      : (data.updates_auto || []).join("\n");
+    window.__updatesLog = list || "";
+    window.__commandsList = data.commands || [];
+    renderRightPanels(window.__updatesLog, window.__commandsList);
+    const rightNotesPanel = document.getElementById("rightNotesPanel");
+    const rightTicketsPanel = document.getElementById("rightTicketsPanel");
+    if (isAdminUser) {
+      if (rightNotesPanel) rightNotesPanel.classList.add("hidden");
+      if (rightTicketsPanel) rightTicketsPanel.classList.remove("hidden");
+    } else {
+      if (rightTicketsPanel) rightTicketsPanel.classList.add("hidden");
+      if (rightNotesPanel) rightNotesPanel.classList.remove("hidden");
+    }
+  } catch (err) {
+    console.warn("loadRightPanels failed", err);
   }
 }
 
 async function loadRightNotes() {
   if (isAdminUser) return;
-  const res = await apiFetch("/notes", { method: "GET" });
-  if (!res) return;
-  const data = await res.json();
+  const data = await safeApiFetchJson("/notes", { method: "GET" }, {});
   const rightNotesBody = document.getElementById("rightNotesBody");
   if (!rightNotesBody) return;
   const lang = getUiLang();
@@ -456,17 +459,22 @@ async function loadRightTickets() {
   const rightTicketsTitle = document.getElementById("rightTicketsTitle");
   const rightTicketsPanel = document.getElementById("rightTicketsPanel");
   if (!rightTicketsBody || !rightTicketsPanel) return;
-  const res = await apiFetch("/admin/tickets", { method: "GET" });
-  if (!res || !res.ok) {
+  let all = [];
+  try {
+    const data = await safeApiFetchJson("/admin/tickets", { method: "GET" }, {});
+    if (!data) {
+      rightTicketsBody.innerHTML = `<div class="muted">${getUiLang() === "en" ? "No ticket data." : "Ingen ticket-data."}</div>`;
+      return;
+    }
+    all = data.tickets || [];
+    const activeCount = all.filter((t) => t.status !== "closed" && t.status !== "fixed").length;
+    if (rightTicketsTitle) {
+      rightTicketsTitle.textContent =
+        getUiLang() === "en" ? `Tickets (${activeCount} active)` : `Tickets (${activeCount} aktive)`;
+    }
+  } catch (err) {
+    console.warn("loadRightTickets failed", err);
     rightTicketsBody.innerHTML = `<div class="muted">${getUiLang() === "en" ? "No ticket data." : "Ingen ticket-data."}</div>`;
-    return;
-  }
-  const data = await res.json();
-  const all = data.tickets || [];
-  const activeCount = all.filter((t) => t.status !== "closed" && t.status !== "fixed").length;
-  if (rightTicketsTitle) {
-    rightTicketsTitle.textContent =
-      getUiLang() === "en" ? `Tickets (${activeCount} active)` : `Tickets (${activeCount} aktive)`;
   }
   const list = all.slice(0, 5);
   if (!list.length) {
@@ -486,25 +494,25 @@ async function loadRightTickets() {
 
 async function loadRightLogs() {
   if (!isAdminUser) return;
-  const res = await apiFetch("/admin/logs", { method: "GET" });
-  if (!res) return;
-  const data = await res.json();
-  const files = data.files || [];
-  const statusPanel = document.getElementById("statusPanel");
-  if (!statusPanel) return;
-  const lang = getUiLang();
-  if (!files.length) {
-    statusPanel.innerHTML = `<div class="muted">${lang === "en" ? "No logs yet." : "Ingen logs endnu."}</div>`;
-    return;
+  try {
+    const data = await safeApiFetchJson("/admin/logs", { method: "GET" }, {});
+    const files = data.files || [];
+    const statusPanel = document.getElementById("statusPanel");
+    if (!statusPanel) return;
+    const lang = getUiLang();
+    if (!files.length) {
+      statusPanel.innerHTML = `<div class="muted">${lang === "en" ? "No logs yet." : "Ingen logs endnu."}</div>`;
+      return;
+    }
+    const latest = files[0]?.name;
+    if (!latest) return;
+    const payload = await safeApiFetchJson(`/admin/logs/${latest}`, { method: "GET" }, {});
+    const content = (payload.content || "").trim();
+    const lines = content.split("\n").slice(-12).join("\n");
+    statusPanel.innerHTML = `<pre>${lines || (lang === "en" ? "No logs yet." : "Ingen logs endnu.")}</pre>`;
+  } catch (err) {
+    console.warn("loadRightLogs failed", err);
   }
-  const latest = files[0]?.name;
-  if (!latest) return;
-  const resLog = await apiFetch(`/admin/logs/${latest}`, { method: "GET" });
-  if (!resLog) return;
-  const payload = await resLog.json();
-  const content = (payload.content || "").trim();
-  const lines = content.split("\n").slice(-12).join("\n");
-  statusPanel.innerHTML = `<pre>${lines || (lang === "en" ? "No logs yet." : "Ingen logs endnu.")}</pre>`;
 }
 
 function updatePromptPlaceholder() {
@@ -907,9 +915,7 @@ async function uploadFile(file) {
 
 async function loadNotes() {
   if (!notesList) return;
-  const res = await apiFetch("/notes", { method: "GET" });
-  if (!res) return;
-  const data = await res.json();
+  const data = await safeApiFetchJson("/notes", { method: "GET" }, {});
   const items = data.notes || [];
   notesList.innerHTML = "";
   if (!items.length) {
@@ -959,9 +965,7 @@ async function createNoteQuick() {
 
 async function loadFiles() {
   if (!filesList) return;
-  const res = await apiFetch("/files", { method: "GET" });
-  if (!res) return;
-  const data = await res.json();
+  const data = await safeApiFetchJson("/files", { method: "GET" }, {});
   const items = data.files || [];
   filesList.innerHTML = "";
   if (!items.length) {
@@ -1696,6 +1700,37 @@ function updateToolsSummary() {
 
 function updateToolDots() {
   return;
+}
+
+async function safeApiFetch(url, opts = {}) {
+  try {
+    return await apiFetch(url, opts);
+  } catch (err) {
+    console.warn("safeApiFetch failed:", url, err);
+    return null;
+  }
+}
+
+async function safeApiFetchJson(url, opts = {}, fallback = {}) {
+  const res = await safeApiFetch(url, opts);
+  if (!res) return fallback;
+  try {
+    return await res.json();
+  } catch (err) {
+    console.warn("safeApiFetchJson failed:", url, err);
+    return fallback;
+  }
+}
+
+async function safeFetchJson(url, opts = {}, fallback = {}) {
+  try {
+    const res = await fetch(url, opts);
+    if (!res || !res.ok) return fallback;
+    return await res.json();
+  } catch (err) {
+    console.warn("safeFetchJson failed:", url, err);
+    return fallback;
+  }
 }
 
 // Safe wrapper for UI init steps — ensures one failing async task doesn't abort startup
@@ -2657,10 +2692,9 @@ document.addEventListener("keydown", (e) => {
 async function loadNotifications() {
   if (!getToken()) return;
   const url = "/v1/notifications" + (notificationsLastId ? `?since_id=${notificationsLastId}` : "");
-  const res = await apiFetch(url, { method: "GET" });
-  if (!res) return;
+  const data = await safeApiFetchJson(url, { method: "GET" }, null);
+  if (!data) return;
   try {
-    const data = await res.json();
     const notifications = data.notifications || [];
     notificationsCache = [...notificationsCache, ...notifications];
     if (notifications.length > 0) {
@@ -2674,10 +2708,9 @@ async function loadNotifications() {
 }
 
 async function updateNotificationsBadge() {
+  const data = await safeApiFetchJson("/v1/notifications/unread_count", { method: "GET" }, null);
+  if (!data) return;
   try {
-    const res = await apiFetch("/v1/notifications/unread_count", { method: "GET" });
-    if (!res) return;
-    const data = await res.json();
     const unreadCount = data.count || 0;
     if (notificationsBadge) {
       notificationsBadge.textContent = unreadCount > 0 ? unreadCount : "";

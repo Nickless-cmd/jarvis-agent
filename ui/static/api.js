@@ -23,11 +23,16 @@ async function apiFetch(path, options = {}) {
   if (!headers.has("Authorization")) {
     headers.set("Authorization", "Bearer devkey");
   }
-  const res = await fetch(path, { ...options, headers });
-  if (res.status === 401 || res.status === 403) {
-    clearToken();
-    window.location.href = "/login";
+  try {
+    const res = await fetch(path, { ...options, headers });
+    if (res.status === 401 || res.status === 403) {
+      clearToken();
+      window.location.href = "/login";
+      return null;
+    }
+    return res;
+  } catch (err) {
+    console.warn("apiFetch failed:", path, err);
     return null;
   }
-  return res;
 }

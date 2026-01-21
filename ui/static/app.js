@@ -1019,7 +1019,11 @@ function renderMessageBody(text, options = {}) {
 
 function createMessageElement(role, content, meta = {}) {
   const wrapper = document.createElement("div");
-  wrapper.className = `msg ${role === 'user' ? 'msg-user' : 'msg-assistant'}`;
+  let className = 'msg';
+  if (role === 'user') className += ' msg-user';
+  else if (role === 'assistant') className += ' msg-assistant';
+  else className += ' msg-system';
+  wrapper.className = className;
 
   const header = document.createElement("div");
   header.className = "msg-header";

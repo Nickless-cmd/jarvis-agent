@@ -4,83 +4,123 @@ if (typeof requireAuth === "function") {
   window.location.href = "/login";
 }
 
-const chat = document.getElementById("chat");
-const streamToggle = document.getElementById("streamToggle");
-const chatStatus = document.getElementById("chatStatus");
-const sessionStatus = document.getElementById("sessionStatus");
-const modeSelect = document.getElementById("modeSelect");
-const responseModeSelect = document.getElementById("responseModeSelect");
-const modelSelect = document.getElementById("modelSelect");
-const sessionList = document.getElementById("sessionList");
-const sessionSearch = document.getElementById("sessionSearch");
-const statusBadge = document.getElementById("statusBadge");
-const statusInline = document.getElementById("chatStatusInline");
-const footerText = document.getElementById("footerText");
-const footerSupport = document.getElementById("footerSupport");
-const footerContact = document.getElementById("footerContact");
-const footerLicense = document.getElementById("footerLicense");
+// Safe DOM access helpers
+function qs(selector, context = document) {
+  return context.querySelector(selector);
+}
+
+function qsa(selector, context = document) {
+  return Array.from(context.querySelectorAll(selector));
+}
+
+function gid(id) {
+  return document.getElementById(id);
+}
+
+function safeSetText(el, text) {
+  if (el) el.textContent = text;
+}
+
+function toggleHidden(el, hidden = null) {
+  if (!el) return;
+  if (hidden === null) {
+    el.classList.toggle('hidden');
+  } else {
+    el.classList.toggle('hidden', hidden);
+  }
+}
+
+function isNearBottom(container) {
+  if (!container) return true;
+  const threshold = 100; // pixels from bottom
+  return container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
+}
+
+// Safe element getters (called when needed, not at script load)
+function getChat() { return gid("chat"); }
+function getStreamToggle() { return gid("streamToggle"); }
+function getChatStatus() { return gid("chatStatus"); }
+function getSessionStatus() { return gid("sessionStatus"); }
+function getModeSelect() { return gid("modeSelect"); }
+function getResponseModeSelect() { return gid("responseModeSelect"); }
+function getModelSelect() { return gid("modelSelect"); }
+function getSessionList() { return gid("sessionList"); }
+function getSessionSearch() { return gid("sessionSearch"); }
+function getStatusBadge() { return gid("statusBadge"); }
+function getStatusInline() { return gid("chatStatusInline"); }
+function getFooterText() { return gid("footerText"); }
+function getFooterSupport() { return gid("footerSupport"); }
+function getFooterContact() { return gid("footerContact"); }
+function getFooterLicense() { return gid("footerLicense"); }
+function getToolsSummary() { return gid("toolsSummary"); }
+function getJarvisDot() { return gid("jarvisDot"); }
+function getQuotaRequestBtn() { return gid("quotaRequestBtn"); }
+function getQuotaNotice() { return gid("quotaNotice"); }
+function getStreamChip() { return gid("streamChip"); }
+function getStreamDot() { return gid("streamDot"); }
+function getPersonaChip() { return gid("personaChip"); }
+function getQuotaFill() { return gid("quotaFill"); }
+function getQuotaText() { return gid("quotaText"); }
+function getGlobalSearch() { return gid("globalSearch"); }
+function getGlobalSearchResults() { return gid("globalSearchResults"); }
+function getTopBanner() { return gid("topBanner"); }
+function getBannerTrack() { return gid("bannerTrack"); }
+function getExpiryNotice() { return gid("expiryNotice"); }
+function getUploadInput() { return gid("uploadInput"); }
+function getUploadBtn() { return gid("uploadBtn"); }
+function getUploadSidebarBtn() { return gid("uploadSidebarBtn"); }
+function getImageUploadBtn() { return gid("imageUploadBtn"); }
+function getImageUploadInput() { return gid("imageUploadInput"); }
+function getNotesList() { return gid("notesList"); }
+function getFilesList() { return gid("filesList"); }
+function getNoteTitleInput() { return gid("noteTitleInput"); }
+function getNoteContentInput() { return gid("noteContentInput"); }
+function getNoteCreateBtn() { return gid("noteCreateBtn"); }
+function getQuotaBar() { return gid("quotaBar"); }
+function getNotesPanel() { return gid("notesPanel"); }
+function getFilesPanel() { return gid("filesPanel"); }
+function getNoteDueInput() { return gid("noteDueInput"); }
+function getNoteRemindToggle() { return gid("noteRemindToggle"); }
+function getBrandTop() { return gid("brandTop"); }
+function getBrandCore() { return gid("brandCore"); }
+function getBrandShort() { return gid("brandShort"); }
+function getNewChatInline() { return gid("newChatInline"); }
+function getSessionPromptRow() { return gid("sessionPromptRow"); }
+function getSessionPromptInput() { return gid("sessionPromptInput"); }
+function getSessionPromptSave() { return gid("sessionPromptSave"); }
+function getSessionPromptClear() { return gid("sessionPromptClear"); }
+function getSuggestions() { return gid("suggestions"); }
+function getNoteToggleBtn() { return gid("noteToggleBtn"); }
+function getNoteCreateWrap() { return gid("noteCreateWrap"); }
+function getGreetingBanner() { return gid("greetingBanner"); }
+function getOnlinePill() { return gid("onlinePill"); }
+function getModeLabel() { return gid("modeLabel"); }
+function getFilesToggleBtn() { return gid("filesToggleBtn"); }
+function getFilesListWrap() { return gid("filesListWrap"); }
+function getMicBtn() { return gid("micBtn"); }
+function getLangSelect() { return gid("langSelect"); }
+function getThemeSelect() { return gid("themeSelect"); }
+function getChatPane() { return qs(".chat-pane"); }
+function getModeChip() { return gid("modeChip"); }
+function getModeChipLabel() { return gid("modeChipLabel"); }
+function getEventsList() { return gid("eventsList"); }
+function getNotificationsBtn() { return gid("notificationsBtn"); }
+function getNotificationsBadge() { return gid("notificationsBadge"); }
+function getNotificationsDropdown() { return gid("notificationsDropdown"); }
+function getNotificationsList() { return gid("notificationsList"); }
+function getNotificationsMarkAllRead() { return gid("notificationsMarkAllRead"); }
+function getToolsBtn() { return gid("toolsBtn"); }
+function getToolsDropdown() { return gid("toolsDropdown"); }
+function getPromptInput() { return gid("prompt"); }
+function getSendBtn() { return gid("sendBtn"); }
+function getStatusRow() { return qs(".status-row"); }
+function getChatFeed() { return qs(".main-column .chat-feed"); }
+function getDocsBtn() { return gid("docsBtn"); }
+function getTicketsBtn() { return gid("ticketsBtn"); }
+function getCollapseBtn() { return gid("collapseBtn"); }
+
 const LAST_SESSION_KEY = "jarvisLastSessionId";
 const LAST_SESSION_COOKIE = "jarvis_last_session";
-const toolsSummary = document.getElementById("toolsSummary");
-const jarvisDot = document.getElementById("jarvisDot");
-const quotaRequestBtn = document.getElementById("quotaRequestBtn");
-const quotaNotice = document.getElementById("quotaNotice");
-const streamChip = document.getElementById("streamChip");
-const streamDot = document.getElementById("streamDot");
-const personaChip = document.getElementById("personaChip");
-const quotaFill = document.getElementById("quotaFill");
-const quotaText = document.getElementById("quotaText");
-const globalSearch = document.getElementById("globalSearch");
-const globalSearchResults = document.getElementById("globalSearchResults");
-const topBanner = document.getElementById("topBanner");
-const bannerTrack = document.getElementById("bannerTrack");
-let lastEventId = null;
-const expiryNotice = document.getElementById("expiryNotice");
-const uploadInput = document.getElementById("uploadInput");
-const uploadBtn = document.getElementById("uploadBtn");
-const uploadSidebarBtn = document.getElementById("uploadSidebarBtn");
-const imageUploadBtn = document.getElementById("imageUploadBtn");
-const imageUploadInput = document.getElementById("imageUploadInput");
-const notesList = document.getElementById("notesList");
-const filesList = document.getElementById("filesList");
-const noteTitleInput = document.getElementById("noteTitleInput");
-const noteContentInput = document.getElementById("noteContentInput");
-const noteCreateBtn = document.getElementById("noteCreateBtn");
-const quotaBar = document.getElementById("quotaBar");
-const notesPanel = document.getElementById("notesPanel");
-const filesPanel = document.getElementById("filesPanel");
-const noteDueInput = document.getElementById("noteDueInput");
-const noteRemindToggle = document.getElementById("noteRemindToggle");
-const brandTop = document.getElementById("brandTop");
-const brandCore = document.getElementById("brandCore");
-const brandShort = document.getElementById("brandShort");
-const newChatInline = document.getElementById("newChatInline");
-const sessionPromptRow = document.getElementById("sessionPromptRow");
-const sessionPromptInput = document.getElementById("sessionPromptInput");
-const sessionPromptSave = document.getElementById("sessionPromptSave");
-const sessionPromptClear = document.getElementById("sessionPromptClear");
-const suggestions = document.getElementById("suggestions");
-const noteToggleBtn = document.getElementById("noteToggleBtn");
-const noteCreateWrap = document.getElementById("noteCreateWrap");
-const greetingBanner = document.getElementById("greetingBanner");
-const onlinePill = document.getElementById("onlinePill");
-const modeLabel = document.getElementById("modeLabel");
-const filesToggleBtn = document.getElementById("filesToggleBtn");
-const filesListWrap = document.getElementById("filesListWrap");
-const micBtn = document.getElementById("micBtn");
-const langSelect = document.getElementById("langSelect");
-const themeSelect = document.getElementById("themeSelect");
-const chatPane = document.querySelector(".chat-pane");
-const modeChip = document.getElementById("modeChip");
-const modeChipLabel = document.getElementById("modeChipLabel");
-const eventsList = document.getElementById("eventsList");
-const notificationsBtn = document.getElementById("notificationsBtn");
-const notificationsBadge = document.getElementById("notificationsBadge");
-const notificationsDropdown = document.getElementById("notificationsDropdown");
-const notificationsList = document.getElementById("notificationsList");
-const notificationsMarkAllRead = document.getElementById("notificationsMarkAllRead");
-const toolsBtn = document.getElementById("toolsBtn");
-const toolsDropdown = document.getElementById("toolsDropdown");
 
 let currentSessionId = null;
 let sessionsCache = [];
@@ -100,6 +140,8 @@ let maintenanceEnabled = false;
 let maintenanceMessage = "";
 let notificationsCache = [];
 let notificationsLastId = null;
+let lastEventId = null;
+const NOTIFY_ENABLED = false; // temporary: disable notifications without removing code
 
 function storeCurrentSession() {
   if (currentSessionId) {
@@ -194,6 +236,7 @@ const I18N = {
 };
 
 function getUiLang() {
+  const langSelect = getLangSelect();
   if (langSelect?.value) return langSelect.value;
   return sessionStorage.getItem("jarvisLangSession") || localStorage.getItem("jarvisLang") || "da";
 }
@@ -203,31 +246,41 @@ function applyUiLang(value) {
   sessionStorage.setItem("jarvisLangSession", lang);
   localStorage.removeItem("jarvisLang");
   document.documentElement.lang = lang;
-  if (langSelect) langSelect.value = lang;
   const dict = I18N[lang];
+  const globalSearch = getGlobalSearch();
   if (globalSearch) globalSearch.placeholder = dict.searchPlaceholder;
+  const sessionSearch = getSessionSearch();
   if (sessionSearch) {
     sessionSearch.placeholder = lang === "en" ? "Search chats..." : "Søg chats...";
   }
+  const newChatInline = getNewChatInline();
   if (newChatInline) newChatInline.textContent = dict.newChat;
+  const noteToggleBtn = getNoteToggleBtn();
   if (noteToggleBtn) noteToggleBtn.textContent = dict.newNote;
+  const filesToggleBtn = getFilesToggleBtn();
   if (filesToggleBtn) filesToggleBtn.textContent = dict.showFiles;
+  const quotaBar = getQuotaBar();
   if (quotaBar) {
     const label = quotaBar.querySelector(".quota-label span");
     if (label) label.textContent = dict.quota;
   }
   // Update status badge
+  const statusBadge = getStatusBadge();
   if (statusBadge) statusBadge.textContent = dict.statusReady;
   // Update status line
+  const statusInline = getStatusInline();
   if (statusInline) statusInline.textContent = dict.statusReadyFull;
   // Update select options
+  const langSelect = getLangSelect();
   if (langSelect) {
+    langSelect.value = lang;
     const daOption = langSelect.querySelector('option[value="da"]');
     const enOption = langSelect.querySelector('option[value="en"]');
     if (daOption) daOption.textContent = dict.langDa;
     if (enOption) enOption.textContent = dict.langEn;
     langSelect.setAttribute('aria-label', dict.ariaLanguage);
   }
+  const themeSelect = getThemeSelect();
   if (themeSelect) {
     const darkOption = themeSelect.querySelector('option[value="dark"]');
     const lightOption = themeSelect.querySelector('option[value="light"]');
@@ -237,6 +290,7 @@ function applyUiLang(value) {
     if (systemOption) systemOption.textContent = dict.themeSystem;
     themeSelect.setAttribute('aria-label', dict.ariaTheme);
   }
+  const responseModeSelect = getResponseModeSelect();
   if (responseModeSelect) {
     const normalOption = responseModeSelect.querySelector('option[value="normal"]');
     const shortOption = responseModeSelect.querySelector('option[value="short"]');
@@ -346,6 +400,14 @@ async function loadRightPanels() {
   const res = await fetch("/settings/public");
   if (!res.ok) return;
   const data = await res.json();
+  const notifWrap = document.getElementById("notifWrap");
+  if (notifWrap) {
+    if (data.notify_enabled) {
+      notifWrap.classList.remove("hidden");
+    } else {
+      notifWrap.classList.add("hidden");
+    }
+  }
   const list = (data.updates_log || "").trim() ? data.updates_log : (data.updates_auto || []).join("\n");
   window.__updatesLog = list || "";
   window.__commandsList = data.commands || [];
@@ -440,11 +502,12 @@ async function loadRightLogs() {
 }
 
 function updatePromptPlaceholder() {
-  const input = document.getElementById("prompt");
+  const input = getPromptInput();
   if (!input) return;
   const lang = getUiLang();
   const label = brandCoreLabel || "Jarvis";
   input.placeholder = lang === "en" ? `Write to ${label}...` : `Skriv til ${label}...`;
+  const sessionPromptInput = getSessionPromptInput();
   if (sessionPromptInput) {
     sessionPromptInput.placeholder =
       lang === "en"
@@ -469,18 +532,22 @@ async function checkMaintenance() {
     return;
   }
   if (maintenanceEnabled && isAdminUser) {
+    const chatStatusInline = getStatusInline();
     if (chatStatusInline) {
       chatStatusInline.textContent = maintenanceMessage || "Vedligeholdelse aktiv.";
     }
+    const chatStatus = getChatStatus();
     if (chatStatus) {
       chatStatus.textContent = maintenanceMessage || "Vedligeholdelse aktiv.";
     }
+    const promptInput = getPromptInput();
     if (promptInput) promptInput.disabled = true;
-    const sendBtn = document.getElementById("sendBtn");
+    const sendBtn = getSendBtn();
     if (sendBtn) sendBtn.disabled = true;
   } else {
+    const promptInput = getPromptInput();
     if (promptInput) promptInput.disabled = false;
-    const sendBtn = document.getElementById("sendBtn");
+    const sendBtn = getSendBtn();
     if (sendBtn) sendBtn.disabled = false;
   }
 }
@@ -564,6 +631,7 @@ async function dismissEvent(eventId) {
 }
 
 async function pollEvents() {
+  if (!NOTIFY_ENABLED) return;
   if (!getToken()) return;
   const url = "/v1/events" + (lastEventId ? `?since_id=${lastEventId}` : "");
   const res = await apiFetch(url, { method: "GET" });
@@ -577,6 +645,7 @@ async function pollEvents() {
 }
 
 function startEventPolling() {
+  if (!NOTIFY_ENABLED) return;
   pollEvents();
   setInterval(pollEvents, 8000);
 }
@@ -752,7 +821,9 @@ function setStatusImmediate(text) {
   } else if (text === "Skriver…") {
     translatedText = dict.statusWriting;
   }
+  const statusBadge = getStatusBadge();
   if (statusBadge) statusBadge.textContent = translatedText;
+  const statusInline = getStatusInline();
   if (statusInline) {
     if (translatedText === dict.statusReady) {
       statusInline.textContent = dict.statusReadyFull;
@@ -909,15 +980,19 @@ async function loadFiles() {
 }
 
 function updateChatVisibility(hasSession) {
+  const chat = getChat();
   if (!chat) return;
-  const statusRow = document.querySelector(".status-row");
+  const statusRow = getStatusRow();
   if (!hasSession) {
     chat.innerHTML = "";
     hasMessages = false;
     chat.style.display = "none";
     if (statusRow) statusRow.style.display = "flex";
+    const greetingBanner = getGreetingBanner();
     if (greetingBanner) greetingBanner.style.display = "block";
+    const chatPane = getChatPane();
     if (chatPane) chatPane.classList.add("no-session");
+    const sessionPromptRow = getSessionPromptRow();
     if (sessionPromptRow) sessionPromptRow.classList.add("hidden");
     renderSuggestions();
     updateToolsSummary();
@@ -925,7 +1000,9 @@ function updateChatVisibility(hasSession) {
   }
   chat.style.display = "flex";
   if (statusRow) statusRow.style.display = "flex";
+  const chatPane = getChatPane();
   if (chatPane) chatPane.classList.remove("no-session");
+  const suggestions = getSuggestions();
   if (suggestions) suggestions.classList.add("hidden");
 }
 
@@ -1064,11 +1141,15 @@ function createMessageElement(role, content, meta = {}) {
 
 function renderChatMessage(msg) {
   const element = createMessageElement(msg.role, msg.content, { when: msg.when });
-  chat.appendChild(element);
+  const chat = getChat();
+  if (chat) chat.appendChild(element);
+  const greetingBanner = getGreetingBanner();
   if (greetingBanner) greetingBanner.style.display = "none";
   hasMessages = true;
-  const feed = document.querySelector(".main-column .chat-feed");
-  if (feed) feed.scrollTop = feed.scrollHeight;
+  const feed = getChatFeed();
+  if (feed && isNearBottom(feed)) {
+    feed.scrollTop = feed.scrollHeight;
+  }
   return element;
 }
 
@@ -1425,7 +1506,8 @@ async function deleteSession(id) {
 }
 
 async function loadSessionMessages(id) {
-  chat.innerHTML = "";
+  const chat = getChat();
+  if (chat) chat.innerHTML = "";
   currentSessionId = id;
   storeCurrentSession();
   await loadSessionPrompt();
@@ -1438,8 +1520,10 @@ async function loadSessionMessages(id) {
     renderChatMessage({ role, content: m.content, when: m.created_at });
   });
   hasMessages = (data.messages || []).length > 0;
+  const greetingBanner = getGreetingBanner();
   if (greetingBanner) greetingBanner.style.display = hasMessages ? "none" : "block";
-  chat.scrollTop = chat.scrollHeight;
+  const feed = getChatFeed();
+  if (feed) feed.scrollTop = feed.scrollHeight;
 }
 
 async function shareSession(id) {
@@ -1495,7 +1579,8 @@ async function loadModel() {
   const res = await apiFetch("/models", { method: "GET" });
   if (!res) return;
   const data = await res.json();
-  modelSelect.innerHTML = "";
+  const modelSelect = getModelSelect();
+  if (modelSelect) modelSelect.innerHTML = "";
   const models = data.models && data.models.length ? [...data.models] : [];
   try {
     const confRes = await apiFetch("/config", { method: "GET" });
@@ -1515,10 +1600,10 @@ async function loadModel() {
     const opt = document.createElement("option");
     opt.value = name;
     opt.textContent = name;
-    modelSelect.appendChild(opt);
+    if (modelSelect) modelSelect.appendChild(opt);
   });
   const saved = localStorage.getItem("jarvisModel");
-  if (saved) {
+  if (saved && modelSelect) {
     modelSelect.value = saved;
   }
 }
@@ -1544,10 +1629,10 @@ async function loadBrand() {
     const topLabel = (data.top || "Jarvis").trim();
     const coreLabel = (data.name || "Jarvis").trim();
     brandCoreLabel = coreLabel || "Jarvis";
-    if (brandTop) brandTop.textContent = topLabel || "Jarvis";
-    if (brandCore) brandCore.textContent = brandCoreLabel;
-    if (brandShort) brandShort.textContent = brandCoreLabel.charAt(0).toUpperCase() || "J";
-    const statusBadge = document.getElementById("statusBadge");
+    safeSetText(getBrandTop(), topLabel || "Jarvis");
+    safeSetText(getBrandCore(), brandCoreLabel);
+    safeSetText(getBrandShort(), brandCoreLabel.charAt(0).toUpperCase() || "J");
+    const statusBadge = getStatusBadge();
     if (statusBadge) {
       setStatus(statusBadge.textContent || "Klar");
     } else {
@@ -1558,9 +1643,9 @@ async function loadBrand() {
     console.warn("loadBrand failed", err);
     // Set defaults even if fetch fails
     brandCoreLabel = "Jarvis";
-    if (brandTop) brandTop.textContent = "Jarvis";
-    if (brandCore) brandCore.textContent = "Jarvis";
-    if (brandShort) brandShort.textContent = "J";
+    safeSetText(getBrandTop(), "Jarvis");
+    safeSetText(getBrandCore(), "Jarvis");
+    safeSetText(getBrandShort(), "J");
     setStatus("Klar");
     updatePromptPlaceholder();
   }
@@ -1643,13 +1728,16 @@ async function loadSettings() {
 }
 
 function updateStreamChip() {
+  const streamDot = getStreamDot();
   if (!streamDot) return;
+  const streamToggle = getStreamToggle();
   const on = streamToggle && streamToggle.checked;
   streamDot.classList.remove("on", "off");
   streamDot.classList.add(on ? "on" : "off");
 }
 
 function showQuotaNotice(text) {
+  const quotaNotice = getQuotaNotice();
   if (!quotaNotice || !text) return;
   const pctMatch = text.match(/(\d+)%/);
   if (pctMatch) {
@@ -1729,14 +1817,18 @@ async function loadProfile() {
     localStorage.setItem("jarvisCity", data.city);
   }
   updateGreeting((data.full_name || data.username || "").split(" ")[0]);
+  const modeLabel = getModeLabel();
   if (modeLabel) modeLabel.style.display = "none";
+  const modeSelect = getModeSelect();
   if (modeSelect) {
     modeSelect.style.display = "none";
     modeSelect.disabled = true;
   }
+  const micBtn = getMicBtn();
   if (micBtn) {
     micBtn.style.display = isAdminUser ? "inline-flex" : "none";
   }
+  const modeChip = getModeChip();
   if (modeChip) {
     modeChip.classList.add("hidden");
     modeChip.style.display = "none";
@@ -1768,6 +1860,7 @@ async function loadProfile() {
 }
 
 function setupMic() {
+  const micBtn = getMicBtn();
   if (!micBtn) return;
   if (!isAdminUser) return;
   if (micReady) return;
@@ -1793,7 +1886,8 @@ function setupMic() {
   };
   micRecognizer.onend = () => {
     micActive = false;
-    micBtn.classList.remove("active");
+    const micBtn = getMicBtn();
+    if (micBtn) micBtn.classList.remove("active");
     setStatus("Klar");
   };
 
@@ -1804,7 +1898,8 @@ function setupMic() {
       return;
     }
     micActive = true;
-    micBtn.classList.add("active");
+    const micBtn = getMicBtn();
+    if (micBtn) micBtn.classList.add("active");
     setStatus("JARVIS lytter...");
     micRecognizer.start();
   });
@@ -1812,10 +1907,11 @@ function setupMic() {
 }
 
 async function sendMessage(textOverride = null) {
-  const input = document.getElementById("prompt");
+  const input = getPromptInput();
   if (!input) return;
   const text = (textOverride ?? input.value).trim();
   if (!text) return;
+  const quotaNotice = getQuotaNotice();
   if (quotaNotice) quotaNotice.classList.remove("show");
   const now = Date.now();
   if (text === lastSent.text && now - lastSent.ts < 2000) {
@@ -1832,9 +1928,11 @@ async function sendMessage(textOverride = null) {
   renderChatMessage({ role: "user", content: text });
 
   const sessionId = currentSessionId;
+  const modelSelect = getModelSelect();
+  const streamToggle = getStreamToggle();
   const payload = {
-    model: modelSelect.value || "local",
-    stream: streamToggle.checked,
+    model: (modelSelect && modelSelect.value) || "local",
+    stream: (streamToggle && streamToggle.checked) || false,
     messages: [{ role: "user", content: text }],
   };
   payload.ui_lang = getUiLang();
@@ -2044,7 +2142,8 @@ async function sendMessage(textOverride = null) {
           streamingText += delta;
           // Update display with plain text during streaming
           body.textContent = streamingText;
-          chat.scrollTop = chat.scrollHeight;
+          const chat = getChat();
+          if (chat) chat.scrollTop = chat.scrollHeight;
           hadDelta = true;
         }
       } catch (err) {
@@ -2061,12 +2160,14 @@ async function sendMessage(textOverride = null) {
 if (sessionPromptRow) {
   sessionPromptRow.classList.add("hidden");
 }
+const modeSelect = getModeSelect();
 if (modeSelect) {
   modeSelect.addEventListener("change", () => {
     localStorage.setItem("jarvisMode", modeSelect.value);
     updateModeChipLabel();
   });
 }
+const modelSelect = getModelSelect();
 if (modelSelect) {
   modelSelect.addEventListener("change", () => {
     localStorage.setItem("jarvisModel", modelSelect.value);
@@ -2194,11 +2295,21 @@ try {
   // ignore
 }
 
+const uploadBtn = getUploadBtn();
+const uploadSidebarBtn = getUploadSidebarBtn();
+const imageUploadBtn = getImageUploadBtn();
+const imageUploadInput = getImageUploadInput();
+const newChatInline = getNewChatInline();
+const toolsSummary = getToolsSummary();
+const globalSearch = getGlobalSearch();
+const globalSearchResults = getGlobalSearchResults();
+
 document.getElementById("newChatBtn").addEventListener("click", createSession);
 if (newChatInline) {
   newChatInline.addEventListener("click", createSession);
 }
 document.getElementById("sendBtn").addEventListener("click", () => sendMessage());
+const uploadInput = getUploadInput();
 if (uploadBtn && uploadInput) {
   uploadBtn.addEventListener("click", () => uploadInput.click());
 }
@@ -2248,9 +2359,6 @@ if (ticketsBtn) {
   ticketsBtn.addEventListener("click", () => {
     window.location.href = "/tickets";
   });
-}
-if (notificationsBtn) {
-  notificationsBtn.addEventListener("click", showNotificationsDropdown);
 }
 if (quotaRequestBtn) {
   quotaRequestBtn.addEventListener("click", async () => {
@@ -2365,6 +2473,7 @@ if (filesList) {
   });
 }
 
+const chatPane = getChatPane();
 if (chatPane && uploadInput) {
   chatPane.addEventListener("dragover", (e) => {
     e.preventDefault();
@@ -2394,13 +2503,14 @@ document.addEventListener("click", (e) => {
   globalSearchResults.classList.remove("open");
 });
 
-const promptInput = document.getElementById("prompt");
+const promptInput = getPromptInput();
 if (promptInput) {
   promptInput.addEventListener("input", () => {
     promptInput.style.height = "auto";
     promptInput.style.height = `${promptInput.scrollHeight}px`;
   });
   promptInput.addEventListener("input", () => {
+    const greetingBanner = getGreetingBanner();
     if (!greetingBanner) return;
     if (promptInput.value.trim().length > 0) {
       greetingBanner.style.display = "none";
@@ -2428,20 +2538,25 @@ if (toolsSummary) {
   });
 }
 
+const streamChip = getStreamChip();
 if (streamChip) {
   streamChip.addEventListener("click", () => {
+    const streamToggle = getStreamToggle();
     if (!streamToggle) return;
     streamToggle.checked = !streamToggle.checked;
     updateStreamChip();
   });
 }
+const personaChip = getPersonaChip();
 if (personaChip) {
   personaChip.addEventListener("click", () => {
+    const sessionPromptRow = getSessionPromptRow();
     if (!sessionPromptRow) return;
     sessionPromptRow.classList.toggle("hidden");
   });
 }
 
+const modeChip = getModeChip();
 if (modeChip) {
   modeChip.classList.add("hidden");
   modeChip.style.display = "none";
@@ -2449,10 +2564,12 @@ if (modeChip) {
 
 // admin/logout handled via rail buttons
 
-if (modeSelect) {
-  modeSelect.style.display = "none";
-  modeSelect.disabled = true;
+const modeSelect2 = getModeSelect();
+if (modeSelect2) {
+  modeSelect2.style.display = "none";
+  modeSelect2.disabled = true;
 }
+const langSelect = getLangSelect();
 if (langSelect) {
   const savedLang = sessionStorage.getItem("jarvisLangSession") || localStorage.getItem("jarvisLang");
   const browserLang = (navigator.language || "").toLowerCase();
@@ -2467,18 +2584,22 @@ if (themeSelect) {
   initTheme();
 }
 
+const notificationsBtn = getNotificationsBtn();
 if (notificationsBtn) {
   notificationsBtn.addEventListener("click", showNotificationsDropdown);
 }
+const notificationsMarkAllRead = getNotificationsMarkAllRead();
 if (notificationsMarkAllRead) {
   notificationsMarkAllRead.addEventListener("click", markAllNotificationsRead);
 }
 
 // Click outside to close notifications dropdown
 document.addEventListener("click", (e) => {
-  if (!notificationsDropdown || !notificationsBtn) return;
-  if (!notificationsDropdown.contains(e.target) && !notificationsBtn.contains(e.target)) {
-    notificationsDropdown.hidden = true;
+  const dropdown = getNotificationsDropdown();
+  const btn = getNotificationsBtn();
+  if (!dropdown || !btn) return;
+  if (!dropdown.contains(e.target) && !btn.contains(e.target)) {
+    dropdown.hidden = true;
   }
 });
 
@@ -2504,9 +2625,11 @@ document.addEventListener("click", (e) => {
 
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
-    if (notificationsDropdown && !notificationsDropdown.classList.contains("hidden")) {
-      notificationsDropdown.classList.add("hidden");
+    const notificationsDropdown = getNotificationsDropdown();
+    if (notificationsDropdown && !notificationsDropdown.hidden) {
+      notificationsDropdown.hidden = true;
     }
+    const toolsDropdown = getToolsDropdown();
     if (toolsDropdown && !toolsDropdown.classList.contains("hidden")) {
       toolsDropdown.classList.add("hidden");
     }
@@ -2593,19 +2716,24 @@ async function markAllNotificationsRead() {
 }
 
 function showNotificationsDropdown() {
-  if (!notificationsDropdown) return;
-  notificationsDropdown.hidden = !notificationsDropdown.hidden;
-  if (notificationsDropdown.hidden) return;
+  const dropdown = getNotificationsDropdown();
+  if (!dropdown) return;
 
-  loadNotifications();
-  clampDropdown();
+  const isHidden = dropdown.hidden;
+  dropdown.hidden = !isHidden;
+
+  if (!dropdown.hidden) {
+    loadNotifications();
+    clampDropdown();
+  }
 }
 
 function clampDropdown() {
-  if (!notificationsDropdown || notificationsDropdown.hidden) return;
-  const r = notificationsDropdown.getBoundingClientRect();
+  const dropdown = getNotificationsDropdown();
+  if (!dropdown || dropdown.hidden) return;
+  const r = dropdown.getBoundingClientRect();
   if (r.right > innerWidth - 8) {
-    notificationsDropdown.style.transform = `translateX(${-(r.right - (innerWidth - 8))}px)`;
+    dropdown.style.transform = `translateX(${-(r.right - (innerWidth - 8))}px)`;
   }
 }
 

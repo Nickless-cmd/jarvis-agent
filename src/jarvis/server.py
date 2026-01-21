@@ -277,6 +277,7 @@ class FooterSettingsRequest(BaseModel):
     banner_messages: str | None = None
     banner_enabled: bool | None = None
     public_base_url: str | None = None
+    notify_enabled: bool | None = None
 
 
 class AccountUpdateRequest(BaseModel):
@@ -2876,6 +2877,7 @@ async def admin_settings(
         "banner_enabled": settings.get("banner_enabled", "1") == "1",
         "banner_messages": "\n".join(banner_lines),
         "public_base_url": settings.get("public_base_url", ""),
+        "notify_enabled": settings.get("notify_enabled", "0") == "1",
     }
 
 
@@ -2974,6 +2976,11 @@ async def admin_update_settings(
             conn.execute(
                 "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
                 ("public_base_url", payload.public_base_url.strip()),
+            )
+        if payload.notify_enabled is not None:
+            conn.execute(
+                "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+                ("notify_enabled", "1" if payload.notify_enabled else "0"),
             )
         conn.commit()
     return {"ok": True}

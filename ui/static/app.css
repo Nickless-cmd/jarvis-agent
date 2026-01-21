@@ -586,16 +586,17 @@ body.sidebar-collapsed .session-initial {
   padding-right: 6px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 24px;
   max-width: 100%;
   width: 100%;
   margin: 0;
-  padding: 14px 14px 14px 0;
+  padding: 20px 20px 20px 0;
   background: transparent;
   border: none;
   border-radius: 0;
   scrollbar-width: none;
   max-width: 1200px;
+  max-height: 60vh;
 }
 .chat-feed::-webkit-scrollbar { display: none; }
 .composer {

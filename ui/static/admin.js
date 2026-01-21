@@ -384,6 +384,8 @@ async function loadFooterSettings() {
   if (bannerEnabledInput) bannerEnabledInput.checked = data.banner_enabled !== false;
   const bannerInput = document.getElementById("bannerMessagesInput");
   if (bannerInput) bannerInput.value = data.banner_messages || "";
+  const notifyEnabledInput = document.getElementById("notifyEnabledInput");
+  if (notifyEnabledInput) notifyEnabledInput.checked = !!data.notify_enabled;
   if (document.getElementById("googleAuthEnabledInput")) {
     document.getElementById("googleAuthEnabledInput").checked = !!data.google_auth_enabled;
   }
@@ -411,6 +413,7 @@ async function saveFooterSettings() {
     banner_enabled: document.getElementById("bannerEnabledInput")?.checked || false,
     banner_messages: document.getElementById("bannerMessagesInput")?.value || "",
     public_base_url: document.getElementById("publicBaseUrlInput")?.value || "",
+    notify_enabled: document.getElementById("notifyEnabledInput")?.checked || false,
   };
   const res = await apiFetch("/admin/settings", {
     method: "PATCH",

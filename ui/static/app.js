@@ -79,6 +79,8 @@ const notificationsBadge = document.getElementById("notificationsBadge");
 const notificationsDropdown = document.getElementById("notificationsDropdown");
 const notificationsList = document.getElementById("notificationsList");
 const notificationsMarkAllRead = document.getElementById("notificationsMarkAllRead");
+const toolsBtn = document.getElementById("toolsBtn");
+const toolsDropdown = document.getElementById("toolsDropdown");
 
 let currentSessionId = null;
 let sessionsCache = [];
@@ -296,12 +298,11 @@ function renderRightPanels(updatesLog = "", commands = []) {
     const locale = lang === "en" ? "en-GB" : "da-DK";
     const time = now.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
     const date = now.toLocaleDateString(locale, { day: "2-digit", month: "2-digit", year: "numeric" });
-    updatesClock.textContent = lang === "en" ? `⏱ ${time} • ${date}` : `⏱ ${time} • ${date}`;
+    const city = localStorage.getItem("jarvisCity") || (lang === "en" ? "City" : "By");
+    updatesClock.textContent = `${time} · ${date} · ${city}`;
   }
   if (rightbarCity) {
-    const city = localStorage.getItem("jarvisCity") || "";
-    const label = lang === "en" ? "City" : "By";
-    rightbarCity.textContent = `- ${label}: ${city || "—"}`;
+    rightbarCity.textContent = ""; // Clear the separate city span since it's now combined
   }
   if (updatesPanel) {
     const lines = (updatesLog || "")
@@ -751,12 +752,14 @@ function setStatusImmediate(text) {
   } else if (text === "Skriver…") {
     translatedText = dict.statusWriting;
   }
-  statusBadge.textContent = translatedText;
-  if (translatedText === dict.statusReady) {
-    statusInline.textContent = dict.statusReadyFull;
-    return;
+  if (statusBadge) statusBadge.textContent = translatedText;
+  if (statusInline) {
+    if (translatedText === dict.statusReady) {
+      statusInline.textContent = dict.statusReadyFull;
+    } else {
+      statusInline.textContent = translatedText.replace(/^JARVIS\b/i, brandCoreLabel);
+    }
   }
-  statusInline.textContent = translatedText.replace(/^JARVIS\b/i, brandCoreLabel);
   const lastAssistant = [...document.querySelectorAll(".msg-assistant")].pop();
   if (lastAssistant) {
     const statusEl = lastAssistant.querySelector(".msg-status");
@@ -1533,17 +1536,32 @@ async function loadFooter() {
 }
 
 async function loadBrand() {
-  const res = await fetch("/settings/brand");
-  if (!res.ok) return;
-  const data = await res.json();
-  const topLabel = (data.top || "Jarvis").trim();
-  const coreLabel = (data.name || "Jarvis").trim();
-  brandCoreLabel = coreLabel || "Jarvis";
-  if (brandTop) brandTop.textContent = topLabel || "Jarvis";
-  if (brandCore) brandCore.textContent = brandCoreLabel;
-  if (brandShort) brandShort.textContent = brandCoreLabel.charAt(0).toUpperCase() || "J";
-  setStatus(statusBadge.textContent || "Klar");
-  updatePromptPlaceholder();
+  try {
+    const res = await fetch("/settings/brand");
+    if (!res.ok) return;
+    const data = await res.json();
+    const topLabel = (data.top || "Jarvis").trim();
+    const coreLabel = (data.name || "Jarvis").trim();
+    brandCoreLabel = coreLabel || "Jarvis";
+    if (brandTop) brandTop.textContent = topLabel || "Jarvis";
+    if (brandCore) brandCore.textContent = brandCoreLabel;
+    if (brandShort) brandShort.textContent = brandCoreLabel.charAt(0).toUpperCase() || "J";
+    const statusBadge = document.getElementById("statusBadge");
+    if (statusBadge) {
+      setStatus(statusBadge.textContent || "Klar");
+    } else {
+      setStatus("Klar");
+    }
+    updatePromptPlaceholder();
+  } catch (err) {
+    console.warn("loadBrand failed", err);
+    // Set defaults even if fetch fails
+    if (brandTop) brandTop.textContent = "Jarvis";
+    if (brandCore) brandCore.textContent = "Jarvis";
+    if (brandShort) brandShort.textContent = "J";
+    setStatus("Klar");
+    updatePromptPlaceholder();
+  }
 }
 
 function updateToolsSummary() {
@@ -1607,6 +1625,15 @@ async function loadSettings() {
       const data = await res.json();
       window.__updatesLog = (data.updates_log || data.updates_auto || []).join('\n');
       window.__commandsList = data.commands || [];
+      // Handle banner
+      if (topBanner) {
+        if (data.banner && data.banner.trim()) {
+          bannerTrack.textContent = data.banner.trim();
+          topBanner.classList.remove('hidden');
+        } else {
+          topBanner.classList.add('hidden');
+        }
+      }
     } catch (err) {
       // ignore
     }
@@ -1784,6 +1811,7 @@ function setupMic() {
 
 async function sendMessage(textOverride = null) {
   const input = document.getElementById("prompt");
+  if (!input) return;
   const text = (textOverride ?? input.value).trim();
   if (!text) return;
   if (quotaNotice) quotaNotice.classList.remove("show");
@@ -2219,6 +2247,9 @@ if (ticketsBtn) {
     window.location.href = "/tickets";
   });
 }
+if (notificationsBtn) {
+  notificationsBtn.addEventListener("click", showNotificationsDropdown);
+}
 if (quotaRequestBtn) {
   quotaRequestBtn.addEventListener("click", async () => {
     const quotaRes = await apiFetch("/account/quota", { method: "GET" });
@@ -2365,9 +2396,15 @@ const promptInput = document.getElementById("prompt");
 if (promptInput) {
   const resizePrompt = () => {
     promptInput.style.height = "auto";
-    const max = 160;
-    const next = Math.min(promptInput.scrollHeight, max);
-    promptInput.style.height = `${next}px`;
+    const max = 200; // Match CSS max-height
+    const scrollHeight = promptInput.scrollHeight;
+    if (scrollHeight > max) {
+      promptInput.style.height = `${max}px`;
+      promptInput.style.overflowY = "auto";
+    } else {
+      promptInput.style.height = `${scrollHeight}px`;
+      promptInput.style.overflowY = "hidden";
+    }
   };
   promptInput.addEventListener("input", resizePrompt);
   promptInput.addEventListener("input", () => {
@@ -2445,10 +2482,43 @@ if (notificationsMarkAllRead) {
   notificationsMarkAllRead.addEventListener("click", markAllNotificationsRead);
 }
 
+// Click outside to close notifications dropdown
+document.addEventListener("click", (e) => {
+  if (!notificationsDropdown || !notificationsBtn) return;
+  if (!notificationsDropdown.contains(e.target) && !notificationsBtn.contains(e.target)) {
+    notificationsDropdown.classList.add("hidden");
+  }
+});
+
+if (toolsBtn) {
+  toolsBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (!toolsDropdown) return;
+    toolsDropdown.classList.toggle("hidden");
+  });
+}
+
 document.addEventListener("click", (e) => {
   if (!notificationsDropdown || !notificationsBtn) return;
   if (e.target === notificationsBtn || notificationsDropdown.contains(e.target)) return;
-  notificationsDropdown.classList.remove("open");
+  notificationsDropdown.classList.add("hidden");
+});
+
+document.addEventListener("click", (e) => {
+  if (!toolsDropdown || !toolsBtn) return;
+  if (e.target === toolsBtn || toolsDropdown.contains(e.target)) return;
+  toolsDropdown.classList.add("hidden");
+});
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    if (notificationsDropdown && !notificationsDropdown.classList.contains("hidden")) {
+      notificationsDropdown.classList.add("hidden");
+    }
+    if (toolsDropdown && !toolsDropdown.classList.contains("hidden")) {
+      toolsDropdown.classList.add("hidden");
+    }
+  }
 });
 
 async function loadNotifications() {
@@ -2470,11 +2540,18 @@ async function loadNotifications() {
   }
 }
 
-function updateNotificationsBadge() {
-  const unreadCount = notificationsCache.filter(n => !n.read).length;
-  if (notificationsBadge) {
-    notificationsBadge.textContent = unreadCount > 0 ? unreadCount : "";
-    notificationsBadge.style.display = unreadCount > 0 ? "inline" : "none";
+async function updateNotificationsBadge() {
+  try {
+    const res = await apiFetch("/v1/notifications/unread_count", { method: "GET" });
+    if (!res) return;
+    const data = await res.json();
+    const unreadCount = data.count || 0;
+    if (notificationsBadge) {
+      notificationsBadge.textContent = unreadCount > 0 ? unreadCount : "";
+      notificationsBadge.style.display = unreadCount > 0 ? "inline" : "none";
+    }
+  } catch (err) {
+    console.error("Failed to update notifications badge:", err);
   }
 }
 
@@ -2514,8 +2591,7 @@ async function markNotificationRead(notificationId) {
 
 async function markAllNotificationsRead() {
   try {
-    const unreadIds = notificationsCache.filter(n => !n.read).map(n => n.id);
-    await Promise.all(unreadIds.map(id => apiFetch(`/v1/notifications/${id}/read`, { method: "POST" })));
+    await apiFetch(`/v1/notifications/mark_all_read`, { method: "POST" });
     notificationsCache.forEach(n => n.read = true);
     updateNotificationsBadge();
     renderNotificationsDropdown();
@@ -2526,15 +2602,48 @@ async function markAllNotificationsRead() {
 
 function showNotificationsDropdown() {
   if (!notificationsDropdown) return;
-  notificationsDropdown.classList.toggle("open");
-  if (notificationsDropdown.classList.contains("open")) {
-    loadNotifications();
-  }
+  notificationsDropdown.classList.toggle("hidden");
+  if (notificationsDropdown.classList.contains("hidden")) return;
+
+  loadNotifications();
+  // Clamp dropdown to viewport to prevent off-screen rendering
+  setTimeout(() => {
+    if (!notificationsDropdown || notificationsDropdown.classList.contains("hidden")) return;
+    const rect = notificationsDropdown.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+
+    // Reset positioning
+    notificationsDropdown.style.left = "auto";
+    notificationsDropdown.style.right = "0";
+    notificationsDropdown.style.top = "calc(100% + 8px)";
+    notificationsDropdown.style.bottom = "auto";
+    notificationsDropdown.style.transform = "";
+
+    // Check horizontal overflow
+    if (rect.right > vw) {
+      const overflow = rect.right - vw;
+      notificationsDropdown.style.right = "0";
+      notificationsDropdown.style.transform = `translateX(${Math.min(overflow, rect.width)}px)`;
+    } else if (rect.left < 0) {
+      const overflow = -rect.left;
+      notificationsDropdown.style.left = "0";
+      notificationsDropdown.style.right = "auto";
+      notificationsDropdown.style.transform = `translateX(-${Math.min(overflow, rect.width)}px)`;
+    }
+
+    // Check vertical overflow
+    if (rect.bottom > vh) {
+      notificationsDropdown.style.top = "auto";
+      notificationsDropdown.style.bottom = "calc(100% + 8px)";
+    }
+  }, 10);
 }
 
 function startNotificationPolling() {
   loadNotifications();
-  setInterval(loadNotifications, 30000); // Poll every 30 seconds
+  setInterval(loadNotifications, 12000); // Poll every 12 seconds
+  setInterval(updateNotificationsBadge, 10000); // Poll badge every 10 seconds
 }
 
 // Initialize UI in a safe, deterministic order. Any single failure will be logged
@@ -2581,7 +2690,6 @@ async function initUI() {
   try { setStatus("Klar"); } catch (err) {}
   try { updateToolDots(); } catch (err) {}
   try { updateStreamChip(); } catch (err) {}
-  try { updateToolsSummary(); } catch (err) {}
   if (typeof initCookieBanner === "function") {
     try { initCookieBanner(); } catch (err) { console.warn("initCookieBanner failed", err); }
   }

@@ -81,6 +81,8 @@ from jarvis.notifications.store import (
     add_notification,
     list_notifications,
     mark_notification_read,
+    get_unread_notifications_count,
+    mark_all_notifications_read,
 )
 from jarvis.watchers.repo_watcher import start_repo_watcher_if_enabled
 from jarvis.watchers.test_watcher import run_pytest_and_notify
@@ -1151,6 +1153,40 @@ async def mark_notification_read_endpoint(
         return {"status": "ok"}
     else:
         raise HTTPException(404, detail="Notification not found or already read")
+
+
+@app.get("/v1/notifications/unread_count")
+async def unread_notifications_count_endpoint(
+    authorization: str | None = Header(None),
+    token: str | None = Depends(_resolve_token),
+):
+    if not _auth_or_token_ok(authorization, token):
+        raise HTTPException(401, detail="Invalid API key")
+    user = get_user_by_token(token)
+    if not user:
+        raise HTTPException(401, detail="Missing or invalid user token")
+    if user.get("is_disabled"):
+        raise HTTPException(403, detail="User is disabled")
+    _enforce_maintenance(user)
+    count = get_unread_notifications_count(user["id"])
+    return {"count": count}
+
+
+@app.post("/v1/notifications/mark_all_read")
+async def mark_all_notifications_read_endpoint(
+    authorization: str | None = Header(None),
+    token: str | None = Depends(_resolve_token),
+):
+    if not _auth_or_token_ok(authorization, token):
+        raise HTTPException(401, detail="Invalid API key")
+    user = get_user_by_token(token)
+    if not user:
+        raise HTTPException(401, detail="Missing or invalid user token")
+    if user.get("is_disabled"):
+        raise HTTPException(403, detail="User is disabled")
+    _enforce_maintenance(user)
+    mark_all_notifications_read(user["id"])
+    return {"status": "ok"}
 
 
 @app.post("/v1/dev/run-tests")
@@ -2338,6 +2374,7 @@ async def public_settings(x_ui_lang: str | None = Header(None)):
         "features": {
             "captcha": False,
         },
+        "banner": _get_setting("banner_text", ""),
         "footer": {
             "text": _get_setting("footer_text", "Jarvis v.1 @ 2026"),
             "support_url": _get_setting("footer_support_url", "#"),

@@ -9,6 +9,8 @@
   --fade: rgba(6, 10, 18, 0.9);
   --panel-gap: 10px;
   --bar-height: 56px;
+  --content-max: 1120px;
+  --content-pad: 24px;
 }
 /* utility hidden class (use !important to avoid accidental overrides) */
 .hidden { display: none !important; }
@@ -40,6 +42,22 @@ input[type="file"] { display: none !important; }
 .chat-pane {
   min-height: 0;
   overflow: auto;
+  max-width: 1200px;
+}
+
+/* Main column contract - single max-width container */
+.main-column {
+  max-width: var(--content-max);
+  margin: 0 auto;
+  padding: 0 var(--content-pad);
+}
+
+.main-column > .chat-feed,
+.main-column > .status-row,
+.main-column > .composer-wrap {
+  width: 100%;
+  margin: 0;
+  padding: 0;
 }
 
 /* Ensure main shell and primary containers allow shrinking inside the overall grid */
@@ -136,9 +154,9 @@ body {
   overflow: hidden;
 }
 header.topbar {
-  padding: 12px 24px;
+  padding: 12px 20px;
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
   gap: 12px;
   border-bottom: 1px solid var(--border);
@@ -148,6 +166,15 @@ header.topbar {
   background: var(--bg);
   min-height: var(--bar-height);
 }
+.topbar-left { justify-self: start; display:flex; align-items:center; gap:10px; }
+.topbar-center { justify-self: center; }
+.topbar-right { justify-self: end; display:flex; align-items:center; gap:10px; }
+.top-left,
+.topbar-left { justify-self: start; }
+.top-center,
+.topbar-center { justify-self: center; width: 100%; min-width: 0; }
+.top-right,
+.topbar-right { justify-self: end; display: flex; align-items: center; gap: 8px; min-width: 0; }
 .top-banner {
   justify-self: center;
   width: 100%;
@@ -241,7 +268,7 @@ header.topbar {
 .event-pill .event-refs .event-ref:hover {
   text-decoration: underline;
 }
-.brand { display: flex; align-items: center; gap: 12px; }
+.brand { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .build-id {
   font-size: 11px;
   color: var(--muted);
@@ -265,14 +292,14 @@ header.topbar {
 }
 .shell {
   display: grid;
-  grid-template-columns: minmax(245px, 320px) minmax(480px, 1fr) minmax(220px, 280px);
+  grid-template-columns: minmax(245px, 320px) minmax(480px, 1fr) clamp(220px, 18vw, 280px);
   gap: 0;
   padding: 0 8px 12px;
   margin-top: var(--panel-gap);
   height: calc(100vh - (var(--bar-height) * 2) - (var(--panel-gap) * 2));
 }
 body.sidebar-collapsed .shell {
-  grid-template-columns: 72px minmax(480px, 1fr) minmax(220px, 280px);
+  grid-template-columns: 72px minmax(480px, 1fr) clamp(220px, 18vw, 280px);
 }
 .sidebar {
   background: transparent;
@@ -338,8 +365,8 @@ body.sidebar-collapsed .sidebar-footer {
   padding-left: 2px;
 }
 .rail-btn {
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
   border-radius: 12px;
   background: var(--panel);
   border: 1px solid var(--border);
@@ -526,7 +553,7 @@ body.sidebar-collapsed .session-initial {
   align-items: center;
   height: 100%;
   min-height: 0;
-  max-width: 1120px;
+  max-width: 1200px;
   width: 100%;
   margin: 0 auto;
 }
@@ -586,13 +613,13 @@ body.sidebar-collapsed .session-initial {
 .chat-pane .suggestions,
 .chat-pane .greeting-banner,
 .chat-pane .chat-feed {
-  max-width: 1200px;
+  width: min(var(--content-max), calc(100% - 32px));
+  max-width: var(--content-max);
 }
 
 .chat-pane .status-row {
-  max-width: 1200px;
-  margin-left: auto;
-  margin-right: auto;
+  width: min(var(--content-max), calc(100% - 32px));
+  max-width: var(--content-max);
 }
 .suggestions {
   max-width: 760px;
@@ -840,10 +867,10 @@ button#sendBtn:hover {
   margin-top: 8px;
   background: #0a0f1a;
 }
-.top-actions {
+.top-controls {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   flex: 1;
   justify-content: flex-end;
 }
@@ -853,11 +880,9 @@ button#sendBtn:hover {
   gap: 6px;
   font-size: 12px;
 }
-.top-actions select,
-.search-wrap input,
-.lang-select,
-.theme-select,
-.response-mode-select {
+.top-controls input,
+.top-controls select,
+.top-controls .control-btn {
   background: var(--panel);
   color: var(--text);
   border: 1px solid var(--border);
@@ -865,9 +890,17 @@ button#sendBtn:hover {
   height: 34px;
   padding: 6px 10px;
   appearance: none;
+  font-size: 14px;
 }
-.top-actions select { min-width: 140px; }
-.mode-label select { height: 34px; }
+.top-controls input { max-width: 200px; }
+.top-controls select { min-width: 120px; }
+.top-controls .control-btn {
+  width: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
 .greeting-banner {
   text-align: center;
   color: var(--muted);
@@ -1036,39 +1069,39 @@ button#sendBtn:hover {
   min-height: 0;
 }
 .right-panel {
-  border: none;
-  border-radius: 0;
-  background: transparent;
-  padding: 10px 6px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  padding: 10px 8px;
   display: flex;
   flex-direction: column;
   gap: 8px;
   flex: 1;
   min-height: 0;
+  margin-bottom: 8px;
 }
 .right-panel + .right-panel {
-  border-top: 1px solid var(--border);
-  margin-top: 12px;
+  margin-top: 0;
 }
 .right-panel.no-border {
   border: none;
   background: transparent;
   padding: 0 4px 0;
-  margin-bottom: 0;
+  margin-bottom: 4px;
 }
 .right-panel.no-border + .right-panel {
-  margin-top: -60px;
+  margin-top: 0;
   padding-top: 0;
-  border-top: none;
 }
 .rightbar-meta {
   display: flex;
   align-items: center;
   justify-content: flex-start;
   gap: 6px;
-  padding-bottom: 0;
-  margin-bottom: 0;
+  padding-bottom: 4px;
+  margin-bottom: 4px;
   border-bottom: 1px solid var(--border);
+  font-size: 13px;
 }
 .right-panel-title {
   font-size: 12px;
@@ -1087,7 +1120,9 @@ button#sendBtn:hover {
   font-weight: 600;
 }
 .right-panel-sep {
-  display: none;
+  display: inline-block;
+  color: var(--muted);
+  padding: 0 4px;
 }
 .right-panel-body {
   font-size: 12px;
@@ -1286,7 +1321,7 @@ input[type="file"].hidden::file-selector-button {
 }
 .composer-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 8px; }
 .composer-row {
-  max-width: 1120px;
+  max-width: 1200px;
   width: 100%;
   margin: 8px auto 0;
   padding-left: 6px;
@@ -1297,36 +1332,7 @@ input[type="file"].hidden::file-selector-button {
 .admin-only.disabled {
   display: none;
 }
-.tools-summary {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--muted);
-  margin-left: 0;
-  flex-wrap: nowrap;
-  white-space: nowrap;
-  overflow-x: auto;
-}
-.tools-summary span {
-  display: inline-block;
-  margin-right: 6px;
-}
-.tools-summary .chip {
-  border: 1px solid var(--border);
-  background: #0b1220;
-  padding: 2px 8px;
-  border-radius: 999px;
-  font-size: 11px;
-}
-.tools-summary .chip.on {
-  border-color: #14532d;
-  color: #bbf7d0;
-}
-.tools-summary .chip.off {
-  border-color: #7f1d1d;
-  color: #fecaca;
-}
+.tools-summary { display: none; }
 .quota-chip {
   display: none;
   border: 1px solid #7f1d1d;
@@ -1413,27 +1419,7 @@ input[type="file"].hidden::file-selector-button {
 .status-row #chatStatusInline {
   white-space: nowrap;
 }
-.tools-summary {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 6px;
-  font-size: 11px;
-  flex: 1 1 100%;
-  margin-left: 0;
-  max-width: 100%;
-  flex-wrap: wrap;
-  white-space: normal;
-  overflow: visible;
-  padding-bottom: 0;
-  scrollbar-width: none;
-}
-.tools-summary::-webkit-scrollbar { display: none; }
-.tools-summary .chip {
-  padding: 6px 8px;
-  font-size: 11px;
-  border-radius: 12px;
-}
+.tools-summary { display: none; }
 .city-note {
   font-size: 10px;
   color: var(--muted);
@@ -1671,19 +1657,19 @@ input[type="file"].hidden::file-selector-button {
 .notifications-badge.hidden {
   display: none;
 }
+.notifications-wrap { position: relative; }
 .notifications-dropdown {
   position: absolute;
-  top: 100%;
+  top: calc(100% + 8px);
   right: 0;
-  width: 350px;
-  max-height: 400px;
+  width: 320px;
+  max-height: 60vh;
+  overflow: auto;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-  z-index: 100;
-  display: flex;
-  flex-direction: column;
+  border-radius: 12px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, .45);
+  z-index: 1000;
 }
 .notifications-header {
   padding: 12px 16px;

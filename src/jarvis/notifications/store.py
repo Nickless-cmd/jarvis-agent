@@ -135,6 +135,26 @@ def mark_notification_read(user_id: int, notification_id: int) -> bool:
     return mark_read(user_id, notification_id)
 
 
+def get_unread_notifications_count(user_id: int) -> int:
+    """Get count of unread notifications for a user."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM events WHERE user_id = ? AND read = 0",
+            (user_id,),
+        ).fetchone()
+        return row[0] if row else 0
+
+
+def mark_all_notifications_read(user_id: int) -> None:
+    """Mark all notifications as read for a user."""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE events SET read = 1 WHERE user_id = ? AND read = 0",
+            (user_id,),
+        )
+        conn.commit()
+
+
 def _ensure_table() -> None:
     """Create events table if it does not exist (idempotent)."""
     with get_conn() as conn:

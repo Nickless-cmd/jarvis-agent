@@ -75,6 +75,7 @@ from jarvis.notes import (
 )
 from jarvis.tickets import create_ticket, get_ticket_admin, add_ticket_message
 from jarvis.personality import SYSTEM_PROMPT
+from jarvis.prompts.system_prompts import SYSTEM_PROMPT_USER, SYSTEM_PROMPT_ADMIN
 from jarvis.db import get_conn
 from jarvis.auth import get_user_profile, register_user
 from jarvis.files import (
@@ -2529,7 +2530,7 @@ def _run_agent_core_fallback(
     else:
         mode_hint = "Mode normal: balanceret længde og dybde."
 
-    sys_prompt = _get_system_prompt()
+    sys_prompt = SYSTEM_PROMPT_ADMIN if is_admin_user else SYSTEM_PROMPT_USER
     if session_id:
         override = get_custom_prompt(session_id)
         if override:

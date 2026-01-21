@@ -11,55 +11,58 @@
   </head>
 <body class="app-shell">
   <header class="topbar">
-    <div class="brand">
-      <h1 id="brandTop">Jarvis</h1>
-      <span id="onlinePill" class="pill offline">Offline</span>
-      <span id="buildId" class="build-id">build: {{BUILD_ID}}</span>
-      <span id="statusBadge" class="status hidden">Klar</span>
-    </div>
-    <div class="top-actions">
-      <div class="notifications-wrap">
-        <button id="notificationsBtn" class="notifications-btn" aria-label="Notifikationer">
-          🔔
-          <span id="notificationsBadge" class="notifications-badge hidden">0</span>
-        </button>
-        <div id="notificationsDropdown" class="notifications-dropdown hidden">
-          <div class="notifications-header">
-            <h3>Notifikationer</h3>
-            <button id="notificationsMarkAllRead" class="notifications-mark-all">Markér alle som læst</button>
-          </div>
-          <div id="notificationsList" class="notifications-list">
-            <div class="notifications-empty">Ingen notifikationer endnu.</div>
-          </div>
-        </div>
+    <div class="topbar-left">
+      <div class="brand">
+        <h1 id="brandTop">Jarvis</h1>
+        <span id="onlinePill" class="pill offline">Offline</span>
+        <span id="statusBadge" class="pill">Klar</span>
+        <span class="build-id">build:{{BUILD_ID}}</span>
       </div>
-      <div class="search-wrap">
+    </div>
+    <div class="topbar-center">
+      <div id="topBanner" class="top-banner" aria-live="polite">
+        <div id="bannerTrack" class="banner-track"></div>
+      </div>
+      <div id="eventsList" class="events-list" aria-live="polite"></div>
+    </div>
+    <div class="topbar-right">
+      <div class="top-controls">
         <input id="globalSearch" placeholder="Søg i docs, tickets, chats..." />
-        <select id="langSelect" class="lang-select" aria-label="Sprog">
+        <select id="langSelect" class="control-select" aria-label="Sprog">
           <option value="da">🇩🇰 DK</option>
           <option value="en">🇬🇧 EN</option>
         </select>
-        <select id="themeSelect" class="theme-select" aria-label="Tema">
+        <select id="themeSelect" class="control-select" aria-label="Tema">
           <option value="dark">🌙 Mørk</option>
           <option value="light">☀ Lys</option>
           <option value="system">💻 System</option>
         </select>
-        <select id="responseModeSelect" class="response-mode-select" aria-label="Svar mode">
+        <select id="responseModeSelect" class="control-select" aria-label="Svar mode">
           <option value="normal">📝 Normal</option>
           <option value="short">💬 Kort</option>
           <option value="deep">🔍 Dybt</option>
         </select>
-        <div id="globalSearchResults" class="search-results"></div>
+        <select id="modelSelect" class="hidden"></select>
+        <div class="notif-wrap">
+          <button id="notificationsBtn" class="control-btn" aria-label="Notifikationer">
+            🔔
+            <span id="notificationsBadge" class="notifications-badge hidden">0</span>
+          </button>
+          <div id="notificationsDropdown" class="notifications-dropdown hidden">
+            <div class="notifications-header">
+              <h3>Notifikationer</h3>
+              <button id="notificationsMarkAllRead" class="notifications-mark-all">Markér alle som læst</button>
+            </div>
+            <div id="notificationsList" class="notifications-list">
+              <div class="notifications-empty">Ingen notifikationer endnu.</div>
+            </div>
+          </div>
+        </div>
       </div>
-      <select id="modelSelect" class="hidden"></select>
     </div>
-    <div id="topBanner" class="top-banner" aria-live="polite">
-      <div id="bannerTrack" class="banner-track"></div>
-    </div>
-    <div id="eventsList" class="events-list" aria-live="polite"></div>
   </header>
 
-  <main class="shell">
+  <main class="shell app-main">
     <aside class="sidebar">
       <div class="sidebar-header">
         <div class="rail-logo">
@@ -147,10 +150,12 @@
     </aside>
 
     <section class="chat-pane">
-      <div id="chat" class="chat-feed"></div>
-      <div id="greetingBanner" class="greeting-banner"></div>
-      <div class="status-row">
-        <div class="status-left">
+      <div class="main-column">
+        <section class="chat-feed">
+          <div id="chat" class="chat-feed-inner chat-feed"></div>
+          <div id="greetingBanner" class="greeting-banner"></div>
+        </section>
+        <section class="status-row">
           <div id="streamChip" class="chip-toggle">
             <span id="streamDot" class="tool-dot"></span>
             <span>Streaming</span>
@@ -160,21 +165,33 @@
           </div>
           <input type="checkbox" id="streamToggle" checked class="hidden" />
           <div id="chatStatusInline" class="status-line">JARVIS er klar.</div>
-          <div id="toolsSummary" class="tools-summary"></div>
-        </div>
+        </section>
+        <section class="composer-wrap">
+          <div class="composer-input">
+            <button id="toolsBtn" class="composer-btn" title="Værktøjer" aria-label="Værktøjer">+</button>
+            <textarea id="prompt" placeholder="Stil dit spørgsmål?" rows="1"></textarea>
+            <button id="micBtn" class="composer-btn" title="Tale til Jarvis" aria-label="Tale til Jarvis">🎤</button>
+            <button id="sendBtn" class="composer-btn send-btn">↑</button>
+          </div>
+          <div id="toolsDropdown" class="tools-dropdown hidden">
+            <div class="tools-grid">
+              <label><input type="checkbox" id="toolNews" checked /> Nyheder</label>
+              <label><input type="checkbox" id="toolWeather" checked /> Vejr</label>
+              <label><input type="checkbox" id="toolSearch" checked /> Web</label>
+              <label><input type="checkbox" id="toolCurrency" checked /> Valuta</label>
+              <label><input type="checkbox" id="toolImage" checked /> Billede</label>
+              <label class="admin-only"><input type="checkbox" id="toolSystem" checked /> System</label>
+              <label class="admin-only"><input type="checkbox" id="toolPing" checked /> Ping</label>
+              <label class="admin-only"><input type="checkbox" id="toolProcess" checked /> Processer</label>
+            </div>
+          </div>
+        </section>
       </div>
       <div id="sessionPromptRow" class="session-prompt-row hidden">
         <span class="session-prompt-label">Session-personlighed</span>
         <input id="sessionPromptInput" placeholder="Skriv personlighed for denne chat..." />
         <button id="sessionPromptSave" class="secondary">Gem</button>
         <button id="sessionPromptClear" class="secondary">Nulstil</button>
-      </div>
-      <div class="composer">
-        <textarea id="prompt" rows="2" placeholder="Skriv til Jarvis..."></textarea>
-        <button id="uploadBtn" class="secondary icon-btn" title="Upload fil" aria-label="Upload fil">⬆</button>
-        <button id="imageUploadBtn" class="secondary icon-btn" title="Upload billede" aria-label="Upload billede">🖼</button>
-        <button id="micBtn" class="secondary icon-btn" title="Tale til Jarvis" aria-label="Tale til Jarvis">🎤</button>
-        <button id="sendBtn">Send</button>
       </div>
       <div id="suggestions" class="suggestions hidden"></div>
       <input id="uploadInput" type="file" class="hidden" />
@@ -186,47 +203,46 @@
         <div id="devInfoFull" class="dev-info-full hidden" aria-hidden="true"></div>
       </div>
       <div class="small" id="chatStatus"></div>
-      <div class="composer-row">
-        <div class="tools-inputs">
-          <label><input type="checkbox" id="toolNews" checked /> Nyheder</label>
-          <label><input type="checkbox" id="toolWeather" checked /> Vejr</label>
-          <label><input type="checkbox" id="toolSearch" checked /> Web</label>
-          <label><input type="checkbox" id="toolCurrency" checked /> Valuta</label>
-          <label><input type="checkbox" id="toolImage" checked /> Billede</label>
-          <label><input type="checkbox" id="toolSystem" checked class="admin-only" /> System</label>
-          <label><input type="checkbox" id="toolPing" checked class="admin-only" /> Ping</label>
-          <label><input type="checkbox" id="toolProcess" checked class="admin-only" /> Processer</label>
-        </div>
-      </div>
+
     </section>
 
     <aside class="rightbar">
-      <div class="right-panel no-border">
-        <div class="rightbar-meta">
-          <div id="updatesClock" class="right-panel-clock"></div>
-          <div id="rightbarCity" class="right-panel-city"></div>
+      <div class="panel right-panel no-border">
+        <div class="panel-header">
+          <span id="updatesClock" class="right-panel-clock"></span>
+          <span class="right-panel-sep">·</span>
+          <span id="rightbarCity" class="right-panel-city"></span>
         </div>
       </div>
-      <div class="right-panel">
-        <div class="right-panel-sep"></div>
-        <div class="right-panel-title">Seneste UI‑opdateringer</div>
-        <div id="updatesPanel" class="right-panel-body"></div>
+      <div class="panel right-panel">
+        <div class="panel-header">
+          <div class="right-panel-title">Seneste UI‑opdateringer</div>
+        </div>
+        <div id="updatesPanel" class="panel-body right-panel-body"></div>
       </div>
-      <div class="right-panel">
-        <div class="right-panel-title">Nye kommandoer</div>
-        <div id="commandsPanel" class="right-panel-body"></div>
+      <div class="panel right-panel">
+        <div class="panel-header">
+          <div class="right-panel-title">Nye kommandoer</div>
+        </div>
+        <div id="commandsPanel" class="panel-body right-panel-body"></div>
       </div>
-      <div class="right-panel admin-only" id="rightTicketsPanel">
-        <div class="right-panel-title" id="rightTicketsTitle">Tickets</div>
-        <div id="rightTicketsBody" class="right-panel-body"></div>
+      <div class="panel right-panel admin-only" id="rightTicketsPanel">
+        <div class="panel-header">
+          <div class="right-panel-title" id="rightTicketsTitle">Tickets</div>
+        </div>
+        <div id="rightTicketsBody" class="panel-body right-panel-body"></div>
       </div>
-      <div class="right-panel" id="rightNotesPanel">
-        <div class="right-panel-title">Noter</div>
-        <div id="rightNotesBody" class="right-panel-body"></div>
+      <div class="panel right-panel" id="rightNotesPanel">
+        <div class="panel-header">
+          <div class="right-panel-title">Noter</div>
+        </div>
+        <div id="rightNotesBody" class="panel-body right-panel-body"></div>
       </div>
-      <div class="right-panel admin-only" id="statusPanelCard">
-        <div class="right-panel-title">Status / Logs</div>
-        <div id="statusPanel" class="right-panel-body"></div>
+      <div class="panel right-panel admin-only" id="statusPanelCard">
+        <div class="panel-header">
+          <div class="right-panel-title">Status / Logs</div>
+        </div>
+        <div id="statusPanel" class="panel-body right-panel-body"></div>
       </div>
     </aside>
   </main>

@@ -20,12 +20,12 @@ input,select,textarea{background:var(--panel);color:var(--text);border:1px solid
 .hidden{display:none !important}
 
 /* Topbar alignment fixes */
-header.topbar { display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; white-space: nowrap; }
+header.topbar { display: flex; align-items: center; padding: 12px 20px; white-space: nowrap; }
 .brand { display: flex; align-items: center; gap: 6px; flex-shrink: 0; margin-right: 40px; }
 .pill { margin-left: 4px; vertical-align: middle; }
 .build-id { margin-left: 2px; opacity:0.85; font-size: 0.85rem; }
-#topBanner { margin: 0 auto; }
-.top-actions { display: flex; align-items: center; flex-shrink: 0; margin-left: 40px; }
+#topBanner { margin-left: auto; margin-right: auto; }
+.top-actions { display: flex; align-items: center; flex-shrink: 0; margin-left: auto; }
 .search-wrap { display: flex; align-items: center; gap: 8px; }
 
 /* Status row and tools placement (ensure tools sit under status and above composer) */

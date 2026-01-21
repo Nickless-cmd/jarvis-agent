@@ -24,7 +24,7 @@ header.topbar { display: flex; align-items: center; padding: 12px 20px; white-sp
 .brand { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .pill { margin-left: 4px; vertical-align: middle; }
 .build-id { margin-left: 2px; opacity:0.85; font-size: 0.85rem; }
-#topBanner { margin-left: auto; margin-right: 0; }
+#topBanner { }
 .top-actions { display: flex; align-items: center; flex-shrink: 0; margin-left: auto; justify-content: flex-end; }
 
 /* Status row and tools placement (ensure tools sit under status and above composer) */

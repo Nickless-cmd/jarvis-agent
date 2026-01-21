@@ -915,9 +915,22 @@ button#sendBtn:hover {
   font-size: 12px;
   height: 30px;
 }
-.sidebar #newChatInline {
-  padding: 5px 8px;
-  font-size: 12px;
+.sidebar #newChatInline,
+.sidebar #noteToggleBtn,
+.sidebar #filesToggleBtn {
+  width: 100%;
+  padding: 8px 10px;
+  font-size: 13px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  text-align: left;
+}
+.sidebar #newChatInline:hover,
+.sidebar #noteToggleBtn:hover,
+.sidebar #filesToggleBtn:hover {
+  border-color: var(--accent);
 }
 .pill {
   background: var(--panel);

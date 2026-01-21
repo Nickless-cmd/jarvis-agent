@@ -1,0 +1,42 @@
+diff --git a/ui/static/app.js b/ui/static/app.js
+index 1111111..2222222 100644
+--- a/ui/static/app.js
++++ b/ui/static/app.js
+@@ -1,5 +1,6 @@
+ // ... eksisterende top of file ...
+
+ function applyUiTheme(value) {
+   const want = value === "light" || value === "system" ? value : "dark";
+   sessionStorage.setItem("jarvisThemeSession", want);
+@@
+   } else {
+     document.documentElement.setAttribute("data-theme", want);
+     document.documentElement.setAttribute("data-theme-mode", "manual");
+   }
+-  if (themeSelect) themeSelect.value = want;
++  // themeSelect was previously referenced as a free variable (ReferenceError risk)
++  const themeSelect = getThemeSelect();
++  if (themeSelect) themeSelect.value = want;
+ }
+
++// Make updateToolsSummary safe: never rely on undeclared globals
+ function updateToolsSummary() {
+-  // old: toolsSummary.textContent = ...
++  const toolsSummaryEl = getToolsSummary();
++  if (!toolsSummaryEl) return;
++  // ... behold din eksisterende logik her, men skriv til toolsSummaryEl
++  // toolsSummaryEl.textContent = computedSummary;
+ }
+
+ function initGlobalSearch() {
+   const input = getGlobalSearch();
+   if (!input) return;
+-  input.addEventListener("input", () => {
+-    globalSearchResults.classList.remove("hidden");
+-  });
++  input.addEventListener("input", () => {
++    const resultsEl = getGlobalSearchResults();
++    if (!resultsEl) return;
++    resultsEl.classList.remove("hidden");
++  });
+ }

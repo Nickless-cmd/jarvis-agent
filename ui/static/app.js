@@ -96,7 +96,7 @@ let currentUserName = "";
 let autoSessionInFlight = false;
 let maintenanceEnabled = false;
 let maintenanceMessage = "";
-lastEventId = null;
+let lastEventId = null;
 let notificationsCache = [];
 let notificationsLastId = null;
 
@@ -758,7 +758,7 @@ function setStatusImmediate(text) {
     return;
   }
   statusInline.textContent = translatedText.replace(/^JARVIS\b/i, brandCoreLabel);
-  const lastAssistant = [...document.querySelectorAll(".message.assistant")].pop();
+  const lastAssistant = [...document.querySelectorAll(".msg-assistant")].pop();
   if (lastAssistant) {
     const statusEl = lastAssistant.querySelector(".msg-status");
     if (statusEl) {
@@ -819,7 +819,7 @@ async function uploadFile(file) {
   }
   const info = data.file || {};
   const url = data.url;
-  addMessage("assistant", `Fil uploadet: ${info.original_name || "fil"} (id ${info.id}).`);
+  renderChatMessage({ role: "assistant", content: `Fil uploadet: ${info.original_name || "fil"} (id ${info.id}).` });
   if (url) {
     addFileCard({ title: info.original_name || "Fil", label: "Download fil", url });
   }
@@ -965,42 +965,32 @@ function nowTime(value) {
   return new Date().toLocaleTimeString("da-DK", { hour: "2-digit", minute: "2-digit" });
 }
 
-function renderMessageBody(body, text) {
-  body.innerHTML = "";
+function renderMessageBody(text, options = {}) {
+  const fragment = document.createDocumentFragment();
   
-  // Simple markdown renderer for assistant messages
-  if (typeof marked !== 'undefined') {
-    // Use marked.js if available
+  if (options.markdown && typeof marked !== 'undefined') {
+    // Use marked.js for full markdown rendering
     const html = marked.parse(text);
-    body.innerHTML = html;
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = html;
+    while (tempDiv.firstChild) {
+      fragment.appendChild(tempDiv.firstChild);
+    }
   } else {
-    // Fallback: basic code block detection
-    const parts = text.split(/(```[\s\S]*?```)/g);
-    parts.forEach(part => {
-      if (part.startsWith('```') && part.endsWith('```')) {
-        // Code block
-        const codeContent = part.slice(3, -3);
-        const pre = document.createElement('pre');
-        const code = document.createElement('code');
-        code.textContent = codeContent;
-        pre.appendChild(code);
-        body.appendChild(pre);
-      } else {
-        // Regular text with line breaks
-        const lines = part.split('\n');
-        lines.forEach(line => {
-          if (line.trim()) {
-            const p = document.createElement('p');
-            p.textContent = line;
-            body.appendChild(p);
-          }
-        });
+    // Plain text with line breaks
+    const lines = text.split('\n');
+    lines.forEach(line => {
+      if (line.trim()) {
+        const p = document.createElement('p');
+        p.textContent = line;
+        fragment.appendChild(p);
       }
     });
   }
   
   // Add copy buttons to code blocks
-  body.querySelectorAll('pre code').forEach(codeBlock => {
+  const codeBlocks = fragment.querySelectorAll('pre code');
+  codeBlocks.forEach(codeBlock => {
     const pre = codeBlock.parentElement;
     const copyBtn = document.createElement('button');
     copyBtn.className = 'copy-btn';
@@ -1024,18 +1014,22 @@ function renderMessageBody(body, text) {
     copyBtn.style.fontSize = '12px';
     pre.appendChild(copyBtn);
   });
+  
+  return fragment;
 }
 
-function addMessage(role, text, when) {
+function createMessageElement(role, content, meta = {}) {
   const wrapper = document.createElement("div");
-  wrapper.className = `message ${role}`;
+  wrapper.className = `msg ${role === 'user' ? 'msg-user' : 'msg-assistant'}`;
 
   const header = document.createElement("div");
   header.className = "msg-header";
   const name = document.createElement("span");
+  name.className = "msg-author";
   name.textContent = role === "user" ? "Dig" : "Jarvis";
   const time = document.createElement("span");
-  time.textContent = nowTime(when);
+  time.className = "msg-time";
+  time.textContent = meta.when ? nowTime(meta.when) : nowTime();
   if (role === "assistant") {
     const status = document.createElement("span");
     status.className = "msg-status";
@@ -1047,15 +1041,21 @@ function addMessage(role, text, when) {
 
   const body = document.createElement("div");
   body.className = "msg-body";
-  renderMessageBody(body, text);
+  const bodyContent = renderMessageBody(content, { markdown: role === 'assistant' });
+  body.appendChild(bodyContent);
 
   wrapper.appendChild(header);
   wrapper.appendChild(body);
-  chat.appendChild(wrapper);
+  return wrapper;
+}
+
+function renderChatMessage(msg) {
+  const element = createMessageElement(msg.role, msg.content, { when: msg.when });
+  chat.appendChild(element);
   if (greetingBanner) greetingBanner.style.display = "none";
   hasMessages = true;
   chat.scrollTop = chat.scrollHeight;
-  return wrapper;
+  return element;
 }
 
 function addWeatherCard(payload) {
@@ -1421,7 +1421,7 @@ async function loadSessionMessages(id) {
   const data = await res.json();
   (data.messages || []).forEach((m) => {
     const role = m.role === "user" ? "user" : "assistant";
-    addMessage(role, m.content, m.created_at);
+    renderChatMessage({ role, content: m.content, when: m.created_at });
   });
   hasMessages = (data.messages || []).length > 0;
   if (greetingBanner) greetingBanner.style.display = hasMessages ? "none" : "block";
@@ -1749,7 +1749,7 @@ async function sendMessage(textOverride = null) {
   }
   input.value = "";
   setStatus("JARVIS tænker...");
-  addMessage("user", text);
+  renderChatMessage({ role: "user", content: text });
 
   const sessionId = currentSessionId;
   const payload = {
@@ -1812,7 +1812,7 @@ async function sendMessage(textOverride = null) {
     if (!content.trim()) {
       setStatus("JARVIS svarer tomt — prøv igen.");
     }
-    const assistantMsg = addMessage("assistant", content, data.server_time);
+    const assistantMsg = renderChatMessage({ role: "assistant", content, when: data.server_time });
     if (data?.data?.type === "news") {
       appendNewsList(assistantMsg, data.data);
     }
@@ -1836,13 +1836,16 @@ async function sendMessage(textOverride = null) {
   });
   if (!res) return;
 
-  const assistantMsg = addMessage("assistant", "", null);
+  const assistantMsg = renderChatMessage({ role: "assistant", content: "" });
   let pendingNews = null;
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
   let currentEvent = "message";
   let hadDelta = false;
+  const body = assistantMsg.querySelector(".msg-body");
+  let streamingText = "";
+  
   while (true) {
     const { value, done } = await reader.read();
     if (done) break;
@@ -1859,9 +1862,11 @@ async function sendMessage(textOverride = null) {
       if (dataLine === "[DONE]") {
         chatStatus.textContent = "";
         setStatus("Klar");
-        const body = assistantMsg.querySelector(".msg-body");
+        // Finalize with markdown rendering
         if (body) {
-          renderMessageBody(body, body.textContent || "");
+          body.innerHTML = "";
+          const bodyContent = renderMessageBody(streamingText, { markdown: true });
+          body.appendChild(bodyContent);
         }
         if (pendingNews) {
           appendNewsList(assistantMsg, pendingNews);
@@ -1956,8 +1961,9 @@ async function sendMessage(textOverride = null) {
         const chunk = JSON.parse(dataLine);
         const delta = chunk.choices?.[0]?.delta?.content || "";
         if (delta) {
-          const body = assistantMsg.querySelector(".msg-body");
-          body.textContent += delta;
+          streamingText += delta;
+          // Update display with plain text during streaming
+          body.textContent = streamingText;
           chat.scrollTop = chat.scrollHeight;
           hadDelta = true;
         }

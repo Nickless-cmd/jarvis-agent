@@ -47,9 +47,12 @@ input[type="file"] { display: none !important; }
 
 /* Main column contract - single max-width container */
 .main-column {
-  max-width: var(--content-max);
+  max-width: var(--content-max, 1120px);
   margin: 0 auto;
-  padding: 0 var(--content-pad);
+  padding: 0 var(--content-pad, 16px);
+  display: flex;
+  flex-direction: column;
+  gap: 0;
 }
 
 .main-column > .chat-feed,
@@ -158,7 +161,7 @@ header.topbar {
   display: grid;
   grid-template-columns: auto 1fr auto;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   border-bottom: 1px solid var(--border);
   position: sticky;
   top: 0;
@@ -166,9 +169,9 @@ header.topbar {
   background: var(--bg);
   min-height: var(--bar-height);
 }
-.topbar-left { justify-self: start; display:flex; align-items:center; gap:10px; }
+.topbar-left { justify-self: start; display:flex; align-items:center; gap:8px; }
 .topbar-center { justify-self: center; }
-.topbar-right { justify-self: end; display:flex; align-items:center; gap:10px; }
+.topbar-right { justify-self: end; display:flex; align-items:center; gap:8px; }
 .top-left,
 .topbar-left { justify-self: start; }
 .top-center,
@@ -1660,16 +1663,17 @@ input[type="file"].hidden::file-selector-button {
 .notif-wrap { position: relative; }
 .notifications-dropdown {
   position: absolute;
-  top: calc(100% + 8px);
   right: 0;
-  width: 320px;
+  top: calc(100% + 6px);
+  min-width: 280px;
+  max-width: 360px;
   max-height: 60vh;
-  overflow: auto;
+  overflow-y: auto;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 12px;
-  box-shadow: 0 12px 30px rgba(0, 0, 0, .45);
-  z-index: 1000;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.45);
+  z-index: 2000;
 }
 .notifications-header {
   padding: 12px 16px;

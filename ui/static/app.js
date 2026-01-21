@@ -1067,7 +1067,8 @@ function renderChatMessage(msg) {
   chat.appendChild(element);
   if (greetingBanner) greetingBanner.style.display = "none";
   hasMessages = true;
-  chat.scrollTop = chat.scrollHeight;
+  const feed = document.querySelector(".main-column .chat-feed");
+  if (feed) feed.scrollTop = feed.scrollHeight;
   return element;
 }
 
@@ -2395,19 +2396,10 @@ document.addEventListener("click", (e) => {
 
 const promptInput = document.getElementById("prompt");
 if (promptInput) {
-  const resizePrompt = () => {
+  promptInput.addEventListener("input", () => {
     promptInput.style.height = "auto";
-    const max = 200; // Match CSS max-height
-    const scrollHeight = promptInput.scrollHeight;
-    if (scrollHeight > max) {
-      promptInput.style.height = `${max}px`;
-      promptInput.style.overflowY = "auto";
-    } else {
-      promptInput.style.height = `${scrollHeight}px`;
-      promptInput.style.overflowY = "hidden";
-    }
-  };
-  promptInput.addEventListener("input", resizePrompt);
+    promptInput.style.height = `${promptInput.scrollHeight}px`;
+  });
   promptInput.addEventListener("input", () => {
     if (!greetingBanner) return;
     if (promptInput.value.trim().length > 0) {
@@ -2422,7 +2414,6 @@ if (promptInput) {
       greetingBanner.style.display = "block";
     }
   });
-  resizePrompt();
 }
 
 if (toolsSummary) {
@@ -2487,7 +2478,7 @@ if (notificationsMarkAllRead) {
 document.addEventListener("click", (e) => {
   if (!notificationsDropdown || !notificationsBtn) return;
   if (!notificationsDropdown.contains(e.target) && !notificationsBtn.contains(e.target)) {
-    notificationsDropdown.classList.add("hidden");
+    notificationsDropdown.hidden = true;
   }
 });
 
@@ -2603,42 +2594,19 @@ async function markAllNotificationsRead() {
 
 function showNotificationsDropdown() {
   if (!notificationsDropdown) return;
-  notificationsDropdown.classList.toggle("hidden");
-  if (notificationsDropdown.classList.contains("hidden")) return;
+  notificationsDropdown.hidden = !notificationsDropdown.hidden;
+  if (notificationsDropdown.hidden) return;
 
   loadNotifications();
-  // Clamp dropdown to viewport to prevent off-screen rendering
-  setTimeout(() => {
-    if (!notificationsDropdown || notificationsDropdown.classList.contains("hidden")) return;
-    const rect = notificationsDropdown.getBoundingClientRect();
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
+  clampDropdown();
+}
 
-    // Reset positioning
-    notificationsDropdown.style.left = "auto";
-    notificationsDropdown.style.right = "0";
-    notificationsDropdown.style.top = "calc(100% + 8px)";
-    notificationsDropdown.style.bottom = "auto";
-    notificationsDropdown.style.transform = "";
-
-    // Check horizontal overflow
-    if (rect.right > vw) {
-      const overflow = rect.right - vw;
-      notificationsDropdown.style.right = "0";
-      notificationsDropdown.style.transform = `translateX(${Math.min(overflow, rect.width)}px)`;
-    } else if (rect.left < 0) {
-      const overflow = -rect.left;
-      notificationsDropdown.style.left = "0";
-      notificationsDropdown.style.right = "auto";
-      notificationsDropdown.style.transform = `translateX(-${Math.min(overflow, rect.width)}px)`;
-    }
-
-    // Check vertical overflow
-    if (rect.bottom > vh) {
-      notificationsDropdown.style.top = "auto";
-      notificationsDropdown.style.bottom = "calc(100% + 8px)";
-    }
-  }, 10);
+function clampDropdown() {
+  if (!notificationsDropdown || notificationsDropdown.hidden) return;
+  const r = notificationsDropdown.getBoundingClientRect();
+  if (r.right > innerWidth - 8) {
+    notificationsDropdown.style.transform = `translateX(${-(r.right - (innerWidth - 8))}px)`;
+  }
 }
 
 function startNotificationPolling() {

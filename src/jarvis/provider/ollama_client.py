@@ -65,4 +65,11 @@ def ollama_request(
         "trace_id": trace_id,
         "where": url,
     }
+    logger.error(
+        "ollama_request failed after retries (trace_id=%s, url=%s, model=%s, type=%s)",
+        trace_id,
+        url,
+        payload.get("model"),
+        error_type,
+    )
     return {"ok": False, "data": None, "error": error_obj, "trace_id": trace_id, "latency_ms": latency_ms}

@@ -1,5 +1,5 @@
 """
-Safe tool registry with allowlist and audit logging.
+Safe tool registry with allowlist, audit logging, and robust execution.
 """
 
 import copy
@@ -14,6 +14,10 @@ from jarvis.db import get_conn
 from jarvis.agent_core.cache import TTLCache
 import traceback
 import uuid
+import logging
+import concurrent.futures
+import threading
+import math
 
 
 @dataclass
@@ -40,6 +44,170 @@ TOOL_CACHE_TTLS: Dict[str, int] = {
     "system_info": 30,
     "currency_convert": 600,
 }
+
+TOOL_TIMEOUTS: Dict[str, float] = {
+    "news_search": 30.0,
+    "web_search": 30.0,
+    "search_combined": 30.0,
+    "read_article": 30.0,
+    "system_info": 15.0,
+    "ping_host": 15.0,
+}
+
+log = logging.getLogger(__name__)
+
+
+@dataclass
+class ToolResult:
+    """Standardized result object for tool execution."""
+    tool_name: str
+    ok: bool
+    started_at: float
+    ended_at: float
+    duration_ms: float
+    input_summary: Dict[str, Any]
+    output: Any | None
+    error: Optional[Dict[str, Any]]
+    trace_id: str
+
+
+class ToolRunner:
+    """Execute registered tools with timeout, retries, and audit logging."""
+
+    def __init__(self) -> None:
+        self.default_timeout = float(os.getenv("JARVIS_TOOL_TIMEOUT_DEFAULT", "30.0"))
+        self.default_retries = int(os.getenv("JARVIS_TOOL_RETRIES", "0"))
+        self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=8, thread_name_prefix="tool-runner")
+        self._lock = threading.Lock()
+
+    def _enforce_allowlist(self, name: str, trace_id: str) -> Optional[ToolResult]:
+        if not _allowlist:
+            _load_allowlist()
+        if name not in _allowlist:
+            return ToolResult(
+                tool_name=name,
+                ok=False,
+                started_at=time.time(),
+                ended_at=time.time(),
+                duration_ms=0.0,
+                input_summary={},
+                output=None,
+                error={
+                    "type": "ToolError",
+                    "message": f"Tool '{name}' is not in allowlist",
+                    "trace_id": trace_id,
+                    "where": name,
+                },
+                trace_id=trace_id,
+            )
+        if name not in _tool_registry:
+            return ToolResult(
+                tool_name=name,
+                ok=False,
+                started_at=time.time(),
+                ended_at=time.time(),
+                duration_ms=0.0,
+                input_summary={},
+                output=None,
+                error={
+                    "type": "ToolError",
+                    "message": f"Tool '{name}' is not registered",
+                    "trace_id": trace_id,
+                    "where": name,
+                },
+                trace_id=trace_id,
+            )
+        return None
+
+    def _run_once(self, fn: Callable, args: Dict[str, Any], timeout: float) -> Any:
+        future = self._executor.submit(fn, **args)
+        return future.result(timeout=timeout)
+
+    def run(
+        self,
+        name: str,
+        args: Dict[str, Any],
+        user_id: int,
+        session_id: Optional[str] = None,
+        timeout: Optional[float] = None,
+        retries: Optional[int] = None,
+    ) -> ToolResult:
+        trace_id = uuid.uuid4().hex[:8]
+        allowlist_res = self._enforce_allowlist(name, trace_id)
+        if allowlist_res:
+            return allowlist_res
+
+        spec, fn = _tool_registry[name]
+        ttl = TOOL_CACHE_TTLS.get(name, 0)
+        cache_key = None
+        if ttl and args is not None:
+            cache_key = (name, _freeze_args(args))
+            cached = _tool_cache.get(cache_key)
+            if cached is not None:
+                _record_cache_metric({"tool": name, "cache": "hit"})
+                return cached
+        _record_cache_metric({"tool": name, "cache": "miss"})
+
+        t_start = time.time()
+        success = False
+        result: Any | None = None
+        error_obj: Dict[str, Any] | None = None
+        timeout_val = timeout if timeout is not None else TOOL_TIMEOUTS.get(name, self.default_timeout)
+        retries_val = retries if retries is not None else self.default_retries
+
+        attempt = 0
+        while attempt <= retries_val:
+            attempt_start = time.time()
+            try:
+                result = self._run_once(fn, args or {}, timeout=timeout_val)
+                success = True
+                break
+            except concurrent.futures.TimeoutError:
+                error_obj = {
+                    "type": "TimeoutError",
+                    "message": f"Tool '{name}' timed out after {timeout_val:.1f}s",
+                    "trace_id": trace_id,
+                    "where": name,
+                }
+                log.warning("Tool %s timeout (trace_id=%s, timeout=%.2fs)", name, trace_id, timeout_val)
+            except Exception as e:  # noqa: BLE001
+                error_obj = {
+                    "type": e.__class__.__name__,
+                    "message": str(e),
+                    "trace_id": trace_id,
+                    "where": name,
+                }
+                log.exception("Tool %s failed (trace_id=%s)", name, trace_id)
+            finally:
+                latency_ms = (time.time() - attempt_start) * 1000
+                _audit_tool_call(user_id, session_id, name, args or {}, success, latency_ms)
+            if success:
+                break
+            attempt += 1
+            if attempt <= retries_val:
+                backoff = 0.2 * math.pow(2, attempt - 1)
+                time.sleep(backoff)
+
+        ended_at = time.time()
+        duration_ms = (ended_at - t_start) * 1000
+        input_summary = _redact_args(args or {})
+        tool_result = ToolResult(
+            tool_name=name,
+            ok=success,
+            started_at=t_start,
+            ended_at=ended_at,
+            duration_ms=duration_ms,
+            input_summary=input_summary,
+            output=result if success else None,
+            error=error_obj,
+            trace_id=trace_id,
+        )
+        if success and cache_key:
+            _tool_cache.set(cache_key, tool_result, ttl=ttl)
+        return tool_result
+
+
+_runner = ToolRunner()
 
 
 def _load_allowlist() -> set[str]:
@@ -158,88 +326,35 @@ def _record_cache_metric(entry: Dict[str, Any]) -> None:
         pass
 
 
-def _make_envelope(ok: bool, data: Any, error: Optional[Dict[str, Any]], trace_id: str, tool_name: str) -> Dict[str, Any]:
-    envelope = {"ok": ok, "data": data, "error": error, "trace_id": trace_id, "tool": tool_name}
+def _make_envelope(result: ToolResult) -> Dict[str, Any]:
+    envelope = {
+        "ok": result.ok,
+        "data": result.output,
+        "error": result.error,
+        "trace_id": result.trace_id,
+        "tool": result.tool_name,
+        "duration_ms": result.duration_ms,
+    }
     # Backwards compatibility: surface dict data at top-level so existing callers using .get("items") still work.
-    if ok and isinstance(data, dict):
-        envelope.update(data)
+    if result.ok and isinstance(result.output, dict):
+        envelope.update(result.output)
     return envelope
 
 
-def call_tool(name: str, args: Dict[str, Any], user_id: int, session_id: Optional[str] = None) -> Dict[str, Any]:
+def call_tool(
+    name: str,
+    args: Dict[str, Any],
+    user_id: int,
+    session_id: Optional[str] = None,
+    timeout: Optional[float] = None,
+    retries: Optional[int] = None,
+) -> Dict[str, Any]:
     """
     Call a tool safely through the registry.
-    
-    Args:
-        name: Tool name
-        args: Tool arguments
-        user_id: User ID for audit
-        session_id: Session ID for audit
-        
-    Returns:
-        Envelope containing ok/data/error/trace_id
+    Returns an envelope containing ok/data/error/trace_id.
     """
-    trace_id = uuid.uuid4().hex[:8]
-    # Load allowlist if not loaded
-    if not _allowlist:
-        _load_allowlist()
-    
-    # Check if tool is allowed
-    if name not in _allowlist:
-        return _make_envelope(False, None, {
-            "type": "ToolError",
-            "message": f"Tool '{name}' is not in allowlist",
-            "trace_id": trace_id,
-            "where": name,
-        }, trace_id, name)
-    
-    # Check if tool is registered
-    if name not in _tool_registry:
-        return _make_envelope(False, None, {
-            "type": "ToolError",
-            "message": f"Tool '{name}' is not registered",
-            "trace_id": trace_id,
-            "where": name,
-        }, trace_id, name)
-    
-    spec, fn = _tool_registry[name]
-
-    ttl = TOOL_CACHE_TTLS.get(name, 0)
-    cache_key = None
-    if ttl and args is not None:
-        cache_key = (name, _freeze_args(args))
-        cached = _tool_cache.get(cache_key)
-        if cached is not None:
-            _record_cache_metric({"tool": name, "cache": "hit"})
-            return cached
-    _record_cache_metric({"tool": name, "cache": "miss"})
-
-    # Call tool and measure latency
-    start_time = time.time()
-    success = False
-    result = None
-    error_obj = None
-    try:
-        result = fn(**args)
-        success = True
-        if cache_key:
-            _tool_cache.set(cache_key, _make_envelope(True, result, None, trace_id, name), ttl=ttl)
-    except Exception as e:
-        err_type = e.__class__.__name__
-        error_obj = {
-            "type": err_type,
-            "message": str(e),
-            "trace_id": trace_id,
-            "where": name,
-        }
-        success = False
-        traceback.print_exc()
-    finally:
-        latency_ms = (time.time() - start_time) * 1000
-        _audit_tool_call(user_id, session_id, name, args, success, latency_ms)
-    if success:
-        return _make_envelope(True, result, None, trace_id, name)
-    return _make_envelope(False, None, error_obj, trace_id, name)
+    tool_result = _runner.run(name, args or {}, user_id, session_id=session_id, timeout=timeout, retries=retries)
+    return _make_envelope(tool_result)
 
 
 def safe_tool_call(tool_name: str, fn: Callable, *args, **kwargs) -> dict:
@@ -250,7 +365,6 @@ def safe_tool_call(tool_name: str, fn: Callable, *args, **kwargs) -> dict:
         {"ok": bool, "data": any|None, "error": {type,message,trace_id,where}|None}
     """
     trace_id = uuid.uuid4().hex[:8]
-    logger = None  # Assuming logger is available, but for now we'll use print or skip
     try:
         result = fn(*args, **kwargs)
         return {"ok": True, "data": result, "error": None}
@@ -262,8 +376,7 @@ def safe_tool_call(tool_name: str, fn: Callable, *args, **kwargs) -> dict:
             "where": tool_name,
         }
         # Log the exception with trace_id and tool_name
-        print(f"Tool '{tool_name}' failed (trace_id: {trace_id}): {e}")
-        traceback.print_exc()
+        log.exception("Tool '%s' failed (trace_id=%s)", tool_name, trace_id)
         return {"ok": False, "data": None, "error": error_info}
 
 
@@ -272,6 +385,8 @@ def _reset_registry_for_tests() -> None:
     _tool_registry.clear()
     _allowlist.clear()
     _tool_cache.clear()
+    global _runner
+    _runner = ToolRunner()
 
 
 # Initialize allowlist on import

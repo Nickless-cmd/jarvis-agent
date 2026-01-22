@@ -737,7 +737,7 @@ def _describe_image_ollama(b64: str, is_admin: bool, ui_lang: str | None) -> tup
 
     def _try_generate(payload, timeout):
         from jarvis.provider.ollama_client import ollama_request
-        resp = ollama_request(url, payload, connect_timeout=5.0, read_timeout=timeout, retries=2)
+        resp = ollama_request(url, payload, connect_timeout=2.0, read_timeout=timeout, retries=2)
         if not resp.get("ok"):
             err = resp.get("error") or {}
             return None, f"Ollama kunne ikke nås: {err.get('message','ukendt fejl')} (id: {err.get('trace_id','-')})"

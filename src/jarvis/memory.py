@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass
 
 import numpy as np
-import requests
+from jarvis.provider.ollama_client import ollama_request
 from jarvis.agent_core.cache import TTLCache
 
 try:
@@ -134,15 +134,23 @@ def _encode(text: str):
     if backend == "ollama":
         url = os.getenv("OLLAMA_EMBED_URL", "http://127.0.0.1:11434/api/embeddings")
         model = os.getenv("OLLAMA_EMBED_MODEL", "nomic-embed-text")
-        try:
-            res = requests.post(url, json={"model": model, "prompt": text}, timeout=20)
-            data = res.json()
+        resp = ollama_request(
+            url,
+            {"model": model, "prompt": text},
+            connect_timeout=3.0,
+            read_timeout=30.0,
+            retries=2,
+        )
+        if resp.get("ok"):
+            data = resp.get("data") or {}
             vec = data.get("embedding")
             if not vec:
                 raise RuntimeError("Missing embedding from Ollama")
             return _to_vec(vec)
-        except Exception as exc:
-            raise RuntimeError(f"Ollama embeddings fejlede: {exc}") from exc
+        error = resp.get("error") or {}
+        raise RuntimeError(
+            f"Ollama embeddings failed ({error.get('type')}): {error.get('message')} [trace_id={error.get('trace_id')}]"
+        )
     return _to_vec(embedder.encode([text])[0])
 
 

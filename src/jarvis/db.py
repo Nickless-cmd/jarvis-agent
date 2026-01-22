@@ -70,6 +70,7 @@ def _ensure_db():
                 last_city TEXT,
                 mode TEXT,
                 created_at TEXT NOT NULL,
+                updated_at TEXT,
                 FOREIGN KEY(user_id) REFERENCES users(id)
             )
             """
@@ -77,6 +78,7 @@ def _ensure_db():
         _ensure_column(conn, "sessions", "last_city", "TEXT")
         _ensure_column(conn, "sessions", "mode", "TEXT")
         _ensure_column(conn, "sessions", "custom_prompt", "TEXT")
+        _ensure_column(conn, "sessions", "updated_at", "TEXT")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS messages (

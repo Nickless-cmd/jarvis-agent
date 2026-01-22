@@ -139,3 +139,53 @@ def test_should_use_wiki():
 
     # Default False
     assert not should_use_wiki("Hello world")
+
+
+def test_admin_endpoints_require_auth():
+    """Test that admin endpoints require proper auth."""
+    from jarvis import server
+    client = TestClient(server.app)
+    
+    # Public endpoint should work without auth
+    resp = client.get("/status")
+    assert resp.status_code == 200
+    
+    # Admin endpoint without auth should fail
+    resp = client.get("/admin/users")
+    assert resp.status_code == 401
+    data = resp.json()
+    assert data["detail"]["ok"] is False
+    assert data["detail"]["error"]["type"] == "AuthRequired"
+    
+    # Admin endpoint with Bearer devkey should work
+    resp = client.get("/admin/users", headers={"Authorization": "Bearer devkey"})
+    assert resp.status_code == 200
+    assert "users" in resp.json()
+    
+    # Admin endpoint with invalid Bearer should fail
+    resp = client.get("/admin/users", headers={"Authorization": "Bearer invalid"})
+    assert resp.status_code == 401
+
+
+def test_user_endpoints_work_with_cookie():
+    """Test that user endpoints work with cookie auth."""
+    from jarvis import server
+    client = TestClient(server.app)
+    
+    # Register and login to get token
+    try:
+        register_user("bob", "secret", email="bob@example.com")
+    except sqlite3.IntegrityError:
+        pass
+    
+    login = login_user("bob", "secret")
+    token = login["token"]
+    
+    # User endpoint with cookie should work
+    resp = client.get("/sessions", cookies={"jarvis_token": token})
+    assert resp.status_code == 200
+    assert "sessions" in resp.json()
+    
+    # Without cookie should fail
+    resp = client.get("/sessions")
+    assert resp.status_code == 401

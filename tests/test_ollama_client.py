@@ -63,8 +63,15 @@ def test_ollama_request_json_error_classified():
 
 def test_ollama_request_all_retries_fail():
     """Test that when all retries fail, ok=False and error is returned."""
-    with patch('requests.post', side_effect=requests.exceptions.ConnectionError("Fail")):
+    calls = {"n": 0}
+
+    def _boom(*args, **kwargs):
+        calls["n"] += 1
+        raise requests.exceptions.ConnectionError("Fail")
+
+    with patch('requests.post', side_effect=_boom):
         result = ollama_request("http://test", {"test": "data"}, retries=2)
         assert result["ok"] is False
         assert result["error"]["type"] == "ProviderConnectionError"
         assert result["trace_id"]
+        assert calls["n"] == 3

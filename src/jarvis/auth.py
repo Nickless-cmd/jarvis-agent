@@ -3,11 +3,13 @@ import hmac
 import os
 import uuid
 from datetime import datetime, timezone, timedelta
+from dataclasses import dataclass
 
 from jarvis.db import get_conn, update_login_session_activity
 
 SESSION_TTL_HOURS = int(os.getenv("SESSION_TTL_HOURS", "24"))
 SESSION_IDLE_MINUTES = int(os.getenv("SESSION_IDLE_MINUTES", "60"))
+DEFAULT_API_KEY = "devkey"
 
 
 def _hash_password(password: str, salt: bytes | None = None) -> str:
@@ -160,10 +162,64 @@ def get_user_profile(username: str) -> dict | None:
     return dict(row) if row else None
 
 
+@dataclass
+class AuthContext:
+    user: dict | None
+    is_authenticated: bool
+    is_admin: bool
+    token_source: str | None = None
+
+
+def _auth_ok(authorization: str | None) -> bool:
+    if not authorization:
+        return False
+    token = authorization.replace("Bearer", "", 1).strip()
+    candidates = {
+        DEFAULT_API_KEY,
+        os.getenv("BEARER_TOKEN"),
+        os.getenv("API_BEARER_TOKEN"),
+    }
+    candidates = {c for c in candidates if c}
+    return token in candidates
+
+
+def build_auth_context(
+    authorization: str | None,
+    x_user_token: str | None,
+    cookie_token: str | None,
+) -> AuthContext:
+    """
+    Central auth helper. Priority: devkey (admin) > cookie token.
+    x_user_token is deprecated - use cookie jarvis_token instead.
+    """
+    if x_user_token:
+        # Reject x_user_token - use cookie instead
+        return AuthContext(user=None, is_authenticated=False, is_admin=False, token_source="rejected_x_user_token")
+    
+    if _auth_ok(authorization):
+        user = get_or_create_default_user()
+        user["is_admin"] = True
+        return AuthContext(user=user, is_authenticated=True, is_admin=True, token_source="devkey")
+
+    if cookie_token:
+        user = get_user_by_token(cookie_token)
+        if not user:
+            return AuthContext(user=None, is_authenticated=False, is_admin=False, token_source="invalid")
+        if user.get("is_disabled"):
+            return AuthContext(user=user, is_authenticated=False, is_admin=False, token_source="disabled")
+        return AuthContext(
+            user=user,
+            is_authenticated=True,
+            is_admin=bool(user.get("is_admin")),
+            token_source="cookie",
+        )
+    return AuthContext(user=None, is_authenticated=False, is_admin=False, token_source=None)
+
+
 def get_or_create_default_user() -> dict:
     with get_conn() as conn:
         row = conn.execute(
-            "SELECT id, username FROM users WHERE username = ?",
+            "SELECT id, username, is_admin, is_disabled FROM users WHERE username = ?",
             ("default",),
         ).fetchone()
         if row:

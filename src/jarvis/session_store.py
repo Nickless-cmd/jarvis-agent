@@ -4,13 +4,20 @@ from datetime import datetime, timezone
 from jarvis.db import get_conn
 
 
+DEFAULT_SESSION_PREFIX = "session-default"
+
+
+def _default_session_id(user_id: int) -> str:
+    return f"{DEFAULT_SESSION_PREFIX}-{user_id}"
+
+
 def create_session(user_id: int, name: str | None = None) -> str:
     session_id = uuid.uuid4().hex
     now = datetime.now(timezone.utc).isoformat()
     with get_conn() as conn:
         conn.execute(
-            "INSERT INTO sessions (id, user_id, name, last_city, mode, created_at) VALUES (?,?,?,?,?,?)",
-            (session_id, user_id, name, None, "balanced", now),
+            "INSERT INTO sessions (id, user_id, name, last_city, mode, created_at, updated_at) VALUES (?,?,?,?,?,?,?)",
+            (session_id, user_id, name, None, "balanced", now, now),
         )
         conn.commit()
     return session_id
@@ -27,18 +34,29 @@ def ensure_session(session_id: str, user_id: int, name: str | None = None) -> st
 
         now = datetime.now(timezone.utc).isoformat()
         conn.execute(
-            "INSERT INTO sessions (id, user_id, name, last_city, mode, created_at) VALUES (?,?,?,?,?,?)",
-            (session_id, user_id, name, None, "balanced", now),
+            "INSERT INTO sessions (id, user_id, name, last_city, mode, created_at, updated_at) VALUES (?,?,?,?,?,?,?)",
+            (session_id, user_id, name, None, "balanced", now, now),
         )
         conn.commit()
         return session_id
 
 
+def ensure_default_session(user_id: int, name: str | None = None) -> str:
+    """
+    Deterministic, idempotent session for a user when no session_id is provided.
+    Prevents duplicate sessions on concurrent requests.
+    """
+    default_id = _default_session_id(user_id)
+    return ensure_session(default_id, user_id, name=name or "Default")
+
+
 def list_sessions(user_id: int) -> list[dict]:
     with get_conn() as conn:
         rows = conn.execute(
-            "SELECT s.id, s.name, s.last_city, s.mode, s.created_at, "
-            "(SELECT MAX(created_at) FROM messages m WHERE m.session_id = s.id) AS last_message_at "
+            "SELECT s.id, s.name, s.last_city, s.mode, s.created_at, s.updated_at, "
+            "(SELECT MAX(created_at) FROM messages m WHERE m.session_id = s.id) AS last_message_at, "
+            "(SELECT COUNT(*) FROM messages m WHERE m.session_id = s.id) AS message_count, "
+            "(SELECT content FROM messages m WHERE m.session_id = s.id ORDER BY id DESC LIMIT 1) AS last_message_preview "
             "FROM sessions s WHERE user_id = ? ORDER BY s.created_at DESC",
             (user_id,),
         ).fetchall()
@@ -46,10 +64,11 @@ def list_sessions(user_id: int) -> list[dict]:
 
 
 def rename_session(session_id: str, user_id: int, name: str) -> None:
+    now = datetime.now(timezone.utc).isoformat()
     with get_conn() as conn:
         conn.execute(
-            "UPDATE sessions SET name = ? WHERE id = ? AND user_id = ?",
-            (name, session_id, user_id),
+            "UPDATE sessions SET name = ?, updated_at = ? WHERE id = ? AND user_id = ?",
+            (name, now, session_id, user_id),
         )
         conn.commit()
 
@@ -78,6 +97,10 @@ def add_message(session_id: str, role: str, content: str) -> None:
         conn.execute(
             "INSERT INTO messages (session_id, role, content, content_bytes, created_at) VALUES (?,?,?,?,?)",
             (session_id, role, content, content_bytes, now),
+        )
+        conn.execute(
+            "UPDATE sessions SET updated_at = ? WHERE id = ?",
+            (now, session_id),
         )
         conn.commit()
 
@@ -113,10 +136,11 @@ def get_last_city(session_id: str) -> str | None:
 
 
 def set_last_city(session_id: str, city: str) -> None:
+    now = datetime.now(timezone.utc).isoformat()
     with get_conn() as conn:
         conn.execute(
-            "UPDATE sessions SET last_city = ? WHERE id = ?",
-            (city, session_id),
+            "UPDATE sessions SET last_city = ?, updated_at = ? WHERE id = ?",
+            (city, now, session_id),
         )
         conn.commit()
 
@@ -133,10 +157,11 @@ def get_mode(session_id: str) -> str:
 
 
 def set_mode(session_id: str, mode: str) -> None:
+    now = datetime.now(timezone.utc).isoformat()
     with get_conn() as conn:
         conn.execute(
-            "UPDATE sessions SET mode = ? WHERE id = ?",
-            (mode, session_id),
+            "UPDATE sessions SET mode = ?, updated_at = ? WHERE id = ?",
+            (mode, now, session_id),
         )
         conn.commit()
 
@@ -153,10 +178,11 @@ def get_custom_prompt(session_id: str) -> str | None:
 
 
 def set_custom_prompt(session_id: str, prompt: str | None) -> None:
+    now = datetime.now(timezone.utc).isoformat()
     with get_conn() as conn:
         conn.execute(
-            "UPDATE sessions SET custom_prompt = ? WHERE id = ?",
-            (prompt, session_id),
+            "UPDATE sessions SET custom_prompt = ?, updated_at = ? WHERE id = ?",
+            (prompt, now, session_id),
         )
         conn.commit()
 

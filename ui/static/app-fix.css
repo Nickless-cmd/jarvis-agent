@@ -2,6 +2,12 @@
 :root{
   --muted: #9ca3af;
 }
+.app-main {
+  /* Allow main content to size naturally within grid layout */
+  height: auto;
+  min-height: 0;
+  /* Remove overflow hidden to allow footer visibility */
+}
 .topbar{background:var(--panel);box-shadow:0 1px 0 rgba(0,0,0,0.04);z-index:2}
 .pill{display:inline-flex;align-items:center;justify-content:center;padding:4px 10px;border-radius:999px;font-weight:600;font-size:0.9rem;border:1px solid rgba(0,0,0,0.06);min-width:76px;color:var(--text);background:rgba(255,255,255,0.02)}
 .pill.online{background:rgba(34,197,94,0.12);color:rgb(16,185,129);border-color:rgba(34,197,94,0.18)}
@@ -11,7 +17,7 @@
 .jarvis-dot.unknown{background:var(--muted);}
 
 /* Ensure chat pane can place a friendly placeholder when empty */
-.chat-pane{position:relative}
+.chat-pane{position:relative; overflow: visible;}
 .chat-pane:empty::before{content:"Start en ny samtale";position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:1.05rem;pointer-events:none}
 
 /* Make inputs more visible until JS runs */
@@ -43,66 +49,266 @@ header.topbar {
 .top-controls select { width: 80px; height: 34px; padding: 4px 20px 4px 8px; font-size: 13px; appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='m6 8 4 4 4-4'/%3e%3c/svg%3e"); background-position: right 4px center; background-repeat: no-repeat; background-size: 14px; border-radius: 8px; }
 .top-controls .control-btn { height: 34px; width: 34px; border-radius: 8px; }
 
-/* Status row above composer */
-.status-row { display:flex; align-items:center; gap:12px; padding:8px 0; background: transparent; border-bottom: 1px solid var(--border); width: 100%; margin: 0; }
+/* Footer styling */
+.app-footer {
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+  padding: 12px 24px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.footer-links {
+  display: flex;
+  gap: 16px;
+}
+
+.footer-links a {
+  color: var(--muted);
+  text-decoration: none;
+  transition: color 0.2s ease;
+}
+
+.footer-links a:hover {
+  color: var(--text);
+}
+.status-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  background: transparent;
+  border: none;
+  width: 100%;
+  margin: 0;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.status-row > * {
+  pointer-events: auto;
+}
+
+.chip-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 16px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.chip-toggle:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.chip-toggle.streaming-enabled {
+  background: rgba(34, 197, 94, 0.1);
+  border-color: rgba(34, 197, 94, 0.3);
+  color: rgb(16, 185, 129);
+}
+
+.chip-toggle.streaming-disabled {
+  background: rgba(239, 68, 68, 0.08);
+  border-color: rgba(239, 68, 68, 0.2);
+  color: rgb(239, 68, 68);
+}
+
+.tool-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--muted);
+  transition: background-color 0.2s ease;
+}
+
+.chip-toggle.streaming-enabled .tool-dot {
+  background: rgb(16, 185, 129);
+  box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.2);
+}
+
+.chip-toggle.streaming-disabled .tool-dot {
+  background: rgb(239, 68, 68);
+  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.2);
+}
+
+/* Persona popover */
+.persona-popover {
+  position: fixed;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  z-index: 1000;
+  min-width: 280px;
+  display: none;
+}
+
+.persona-popover.show {
+  display: block;
+}
+
+.persona-popover textarea {
+  width: 100%;
+  min-height: 80px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  padding: 8px 12px;
+  font-size: 14px;
+  line-height: 1.4;
+  resize: vertical;
+  outline: none;
+}
+
+.persona-popover textarea:focus {
+  border-color: var(--accent);
+}
+
+.persona-popover .persona-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  justify-content: flex-end;
+}
+
+.persona-popover button {
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.2s ease;
+}
+
+.persona-popover button:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.persona-popover button.primary {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
+.persona-popover button.primary:hover {
+  opacity: 0.9;
+}
 
 /* Chat feed spacing to prevent overlap with status row */
 .chat-feed { 
-  margin-bottom: 20px; 
+  margin: 0; 
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  max-height: 60vh;
-  border-bottom: 1px solid var(--border);
-  padding-bottom: 16px;
+  max-height: none;
+  background: transparent;
+  border: none;
+  padding: 0 0 8px 0;
 }
 
 /* Ensure chat messages container doesn't have fixed height when chat-feed is scrollable */
 #chat {
   height: auto;
-  min-height: 100%;
+  max-height: none;
+  overflow: visible;
+}
+
+/* Ensure main-column takes full available height */
+.main-column {
+  height: auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  /* Remove position relative to avoid layout issues */
 }
 
 /* Composer container - ChatGPT style */
-.composer-wrap { 
-  background: var(--panel); 
-  padding: 20px 0 30px 0; 
-  display: flex; 
-  align-items: flex-start; 
-  gap: 8px; 
-  width: 100%; 
-  margin-top: 20px;
+.composer-wrap {
+  background: var(--bg);
+  padding: 4px 0 8px 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  margin: 0;
+  position: sticky;
+  bottom: 0;
+  z-index: 20;
+  border-top: 1px solid var(--border);
 }
-.composer-input { 
-  display: flex; 
-  align-items: flex-end; 
-  gap: 8px; 
-  padding: 12px 16px; 
-  border: 1px solid var(--border); 
-  border-radius: 24px; 
-  background: var(--panel); 
+.composer-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  background: var(--panel);
   flex: 1;
   max-width: 1200px;
   margin: 0 auto;
+  position: relative;
 }
-.composer-input textarea { 
-  flex: 1; 
-  border: none; 
-  background: transparent; 
-  color: var(--text); 
-  font-size: 16px; 
-  line-height: 1.4; 
-  resize: none; 
-  overflow: hidden; 
-  min-height: 20px; 
+.composer-input textarea {
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 16px;
+  line-height: 1.4;
+  resize: none;
+  overflow: hidden;
+  min-height: 20px;
   max-height: 200px;
-  outline: none; 
+  outline: none;
   transition: height 0.2s ease;
+  padding: 0;
+  margin: 0;
 }
-.composer-input .composer-btn { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; border: 1px solid var(--border); background: var(--panel); color: var(--text); border-radius: 6px; cursor: pointer; font-size: 16px; }
-.composer-input .composer-btn:hover { background: rgba(255,255,255,0.1); }
-.composer-input .send-btn { background: var(--accent); color: white; border-color: var(--accent); }
-.composer-input .send-btn:hover { background: var(--accent); opacity: 0.8; }
+.composer-input .composer-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 16px;
+  flex-shrink: 0;
+  transition: all 0.2s ease;
+}
+.composer-input .composer-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+.composer-input .send-btn {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+.composer-input .send-btn:hover {
+  background: var(--accent);
+  opacity: 0.9;
+}
 .tools-btn-wrap { position: relative; }
 .tools-dropdown { position: absolute; bottom: 100%; left: 0; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); z-index: 100; min-width: 200px; }
 .tools-dropdown:not(.hidden) { display: block; }
@@ -147,8 +353,7 @@ header.topbar {
 /* Reduce rightbar width */
 .shell { grid-template-columns: minmax(245px, 320px) minmax(480px, 1fr) minmax(240px, 280px); }
 
-/* Footer layout fix */
-.app-footer { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 20px; border-top:1px solid var(--border); background:var(--panel); color:var(--muted); position:relative }
+/* Footer layout fix - REMOVED: duplicate rule, using the properly formatted one above */
 
 /* Ensure sidebar and rightbar don't overlap main in narrow screens */
 @media (max-width: 980px) {

@@ -38,7 +38,9 @@ function isNearBottom(container) {
 
 function scrollChatToBottom() {
   const feed = getChatFeed();
-  if (feed) feed.scrollTop = feed.scrollHeight;
+  if (feed) {
+    feed.scrollTop = feed.scrollHeight;
+  }
 }
 
 // Safe element getters (called when needed, not at script load)
@@ -123,6 +125,9 @@ function getChatFeed() { return qs(".main-column .chat-feed"); }
 function getDocsBtn() { return gid("docsBtn"); }
 function getTicketsBtn() { return gid("ticketsBtn"); }
 function getCollapseBtn() { return gid("collapseBtn"); }
+function getStreamChip() { return gid("streamChip"); }
+function getStreamDot() { return gid("streamDot"); }
+function getPersonaChip() { return gid("personaChip"); }
 
 const LAST_SESSION_KEY = "jarvisLastSessionId";
 const LAST_SESSION_COOKIE = "jarvis_last_session";
@@ -143,6 +148,20 @@ let currentUserName = "";
 let autoSessionInFlight = false;
 let maintenanceEnabled = false;
 let maintenanceMessage = "";
+
+// Global UI element references
+let noteToggleBtn = null;
+let noteCreateBtn = null;
+let noteCreateWrap = null;
+let filesToggleBtn = null;
+let filesListWrap = null;
+let filesList = null;
+let notesList = null;
+let eventsList = null;
+let sessionPromptSave = null;
+let sessionPromptInput = null;
+let sessionPromptClear = null;
+let noteContentInput = null;
 let notificationsCache = [];
 let notificationsLastId = null;
 let lastEventId = null;
@@ -260,9 +279,9 @@ function applyUiLang(value) {
   }
   const newChatInline = getNewChatInline();
   if (newChatInline) newChatInline.textContent = dict.newChat;
-  const noteToggleBtn = getNoteToggleBtn();
+  noteToggleBtn = getNoteToggleBtn();
   if (noteToggleBtn) noteToggleBtn.textContent = dict.newNote;
-  const filesToggleBtn = getFilesToggleBtn();
+  filesToggleBtn = getFilesToggleBtn();
   if (filesToggleBtn) filesToggleBtn.textContent = dict.showFiles;
   const quotaBar = getQuotaBar();
   if (quotaBar) {
@@ -507,7 +526,7 @@ function updatePromptPlaceholder() {
   const lang = getUiLang();
   const label = brandCoreLabel || "Jarvis";
   input.placeholder = lang === "en" ? `Write to ${label}...` : `Skriv til ${label}...`;
-  const sessionPromptInput = getSessionPromptInput();
+  sessionPromptInput = getSessionPromptInput();
   if (sessionPromptInput) {
     sessionPromptInput.placeholder =
       lang === "en"
@@ -824,18 +843,19 @@ function setStatusImmediate(text) {
   const statusBadge = getStatusBadge();
   if (statusBadge) statusBadge.textContent = translatedText;
   const statusInline = getStatusInline();
+  const nameLabel = brandCoreLabel || "Jarvis";
   if (statusInline) {
-    if (translatedText === dict.statusReady) {
-      statusInline.textContent = dict.statusReadyFull;
-    } else {
-      statusInline.textContent = translatedText.replace(/^JARVIS\b/i, brandCoreLabel);
-    }
+    const line =
+      translatedText === dict.statusReady || translatedText === dict.statusReadyFull
+        ? `${nameLabel} — ${dict.statusReady}`
+        : `${nameLabel} — ${translatedText}`;
+    statusInline.textContent = line;
   }
   const lastAssistant = [...document.querySelectorAll(".msg-assistant")].pop();
   if (lastAssistant) {
     const statusEl = lastAssistant.querySelector(".msg-status");
     if (statusEl) {
-      statusEl.textContent = `— ${translatedText.replace(/^JARVIS\s*/i, "")}`;
+      statusEl.textContent = `${nameLabel} — ${translatedText}`;
     }
   }
 }
@@ -1133,19 +1153,19 @@ function createMessageElement(role, content, meta = {}) {
 
   wrapper.appendChild(header);
   wrapper.appendChild(body);
+  // Removed tooltip for chat messages
+  
   return wrapper;
 }
 
 function renderChatMessage(msg) {
-  const feed = getChatFeed();
-  const shouldScroll = isNearBottom(feed);
   const element = createMessageElement(msg.role, msg.content, { when: msg.when });
   const chat = getChat();
   if (chat) chat.appendChild(element);
   const greetingBanner = getGreetingBanner();
   if (greetingBanner) greetingBanner.style.display = "none";
   hasMessages = true;
-  if (shouldScroll) scrollChatToBottom();
+  scrollChatToBottom();
   return element;
 }
 
@@ -1310,7 +1330,13 @@ async function loadSessions() {
   if (!res) return;
   setOnlineStatus(true);
   const data = await res.json();
-  sessionsCache = data.sessions || [];
+  // Deduplicate sessions by id to prevent duplicates
+  const seen = new Set();
+  sessionsCache = (data.sessions || []).filter(s => {
+    if (seen.has(s.id)) return false;
+    seen.add(s.id);
+    return true;
+  });
   renderSessionList();
   const stored = getLastSession();
   if (!currentSessionId && stored && sessionsCache.find((s) => s.id === stored)) {
@@ -1340,7 +1366,7 @@ async function saveSessionPrompt(value) {
 function renderSessionList() {
   const filter = (sessionSearch.value || "").toLowerCase();
   sessionList.innerHTML = "";
-  const items = sessionsCache.filter((s) => (s.name || s.id).toLowerCase().includes(filter));
+  const items = sessionsCache.filter((s) => (s.name || s.id).toLowerCase().includes(filter) && s.id !== currentSessionId);
   const today = new Date();
   const todayKey = today.toDateString();
   const yesterdayKey = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1).toDateString();
@@ -1444,10 +1470,24 @@ function showTooltip(target) {
   tip.textContent = text;
   tip.style.display = "block";
   const rect = target.getBoundingClientRect();
-  const top = rect.top + window.scrollY - 34;
-  const left = rect.left + window.scrollX + 6;
-  tip.style.top = `${Math.max(10, top)}px`;
-  tip.style.left = `${Math.max(10, left)}px`;
+  const tipRect = tip.getBoundingClientRect();
+  let top = rect.top + window.scrollY - tipRect.height - 10; // Above the target
+  let left = rect.left + window.scrollX + 6;
+  
+  // If tooltip would go above viewport or too close to footer, show it below
+  const footer = document.querySelector('.app-footer');
+  const footerTop = footer ? footer.getBoundingClientRect().top + window.scrollY : window.innerHeight + window.scrollY;
+  
+  if (top < 10 || (top + tipRect.height) > (footerTop - 20)) {
+    top = rect.bottom + window.scrollY + 10;
+  }
+  
+  // Keep tooltip within viewport bounds
+  top = Math.max(10, Math.min(top, window.innerHeight + window.scrollY - tipRect.height - 10));
+  left = Math.max(10, Math.min(left, window.innerWidth + window.scrollX - tipRect.width - 10));
+  
+  tip.style.top = `${top}px`;
+  tip.style.left = `${left}px`;
 }
 
 function hideTooltip() {
@@ -1559,9 +1599,24 @@ sessionList.addEventListener("mouseover", (e) => {
 
 sessionList.addEventListener("mousemove", (e) => {
   if (!tooltipEl || tooltipEl.style.display === "none") return;
-  const offset = 14;
-  tooltipEl.style.top = `${e.clientY + offset}px`;
-  tooltipEl.style.left = `${e.clientX + offset}px`;
+  const tipRect = tooltipEl.getBoundingClientRect();
+  let top = e.clientY + window.scrollY - tipRect.height - 10; // Above cursor
+  let left = e.clientX + window.scrollX + 14;
+  
+  // If tooltip would go above viewport or too close to footer, show it below
+  const footer = document.querySelector('.app-footer');
+  const footerTop = footer ? footer.getBoundingClientRect().top + window.scrollY : window.innerHeight + window.scrollY;
+  
+  if (top < 10 || (top + tipRect.height) > (footerTop - 20)) {
+    top = e.clientY + window.scrollY + 20;
+  }
+  
+  // Keep tooltip within viewport bounds
+  top = Math.max(10, Math.min(top, window.innerHeight + window.scrollY - tipRect.height - 10));
+  left = Math.max(10, Math.min(left, window.innerWidth + window.scrollX - tipRect.width - 10));
+  
+  tooltipEl.style.top = `${top}px`;
+  tooltipEl.style.left = `${left}px`;
 });
 
 if (sessionList) {
@@ -2431,7 +2486,29 @@ document.getElementById("prompt").addEventListener("keydown", (e) => {
   }
 });
 
-if (noteCreateBtn) {
+// Composer textarea autosize
+const promptTextarea = getPromptInput();
+if (promptTextarea) {
+  // Auto-resize textarea
+  function autoResizeTextarea() {
+    if (!promptTextarea) return;
+    promptTextarea.style.height = 'auto';
+    promptTextarea.style.height = Math.min(promptTextarea.scrollHeight, 200) + 'px';
+  }
+
+  promptTextarea.addEventListener('input', autoResizeTextarea);
+  promptTextarea.addEventListener('focus', autoResizeTextarea);
+  promptTextarea.addEventListener('blur', () => {
+    if (!promptTextarea.value.trim()) {
+      promptTextarea.style.height = '20px';
+    }
+  });
+
+  // Initial resize
+  autoResizeTextarea();
+}
+
+if (typeof noteCreateBtn !== "undefined" && noteCreateBtn) {
   noteCreateBtn.addEventListener("click", createNoteQuick);
 }
 if (noteToggleBtn && noteCreateWrap) {
@@ -2676,6 +2753,104 @@ document.addEventListener("keydown", (e) => {
     if (toolsDropdown && !toolsDropdown.classList.contains("hidden")) {
       toolsDropdown.classList.add("hidden");
     }
+    // Close persona popover
+    const personaPopover = document.querySelector('.persona-popover');
+    if (personaPopover) {
+      personaPopover.classList.remove('show');
+    }
+  }
+});
+
+// Stream chip functionality
+function updateStreamChip() {
+  const streamChip = getStreamChip();
+  const streamToggle = getStreamToggle();
+  if (!streamChip || !streamToggle) return;
+
+  const isEnabled = streamToggle.checked;
+  streamChip.classList.toggle('streaming-enabled', isEnabled);
+  streamChip.classList.toggle('streaming-disabled', !isEnabled);
+}
+
+const streamToggle = getStreamToggle();
+if (streamToggle) {
+  streamToggle.addEventListener('change', updateStreamChip);
+  // Initial update
+  updateStreamChip();
+}
+
+// Add click handler for stream chip
+const streamChipElement = getStreamChip();
+if (streamChipElement) {
+  streamChipElement.addEventListener('click', () => {
+    const streamToggle = getStreamToggle();
+    if (streamToggle) {
+      streamToggle.checked = !streamToggle.checked;
+      updateStreamChip();
+    }
+  });
+}
+
+// Persona popover functionality
+let personaPopover = null;
+
+function createPersonaPopover() {
+  if (personaPopover) return personaPopover;
+
+  personaPopover = document.createElement('div');
+  personaPopover.className = 'persona-popover';
+  personaPopover.innerHTML = `
+    <div style="margin-bottom: 8px; font-weight: 500;">Tilpas personlighed</div>
+    <textarea placeholder="Beskriv JARVIS' personlighed for denne session..."></textarea>
+    <div class="persona-actions">
+      <button class="cancel">Annuller</button>
+      <button class="primary save">Gem</button>
+    </div>
+  `;
+
+  const textarea = personaPopover.querySelector('textarea');
+  const cancelBtn = personaPopover.querySelector('.cancel');
+  const saveBtn = personaPopover.querySelector('.save');
+
+  // Load saved persona
+  const savedPersona = localStorage.getItem('jarvisPersona') || '';
+  textarea.value = savedPersona;
+
+  cancelBtn.addEventListener('click', () => {
+    personaPopover.classList.remove('show');
+  });
+
+  saveBtn.addEventListener('click', () => {
+    const persona = textarea.value.trim();
+    localStorage.setItem('jarvisPersona', persona);
+    personaPopover.classList.remove('show');
+    // Could send to backend here if needed
+  });
+
+  document.body.appendChild(personaPopover);
+  return personaPopover;
+}
+
+const personaChipElement = getPersonaChip();
+if (personaChipElement) {
+  personaChipElement.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const popover = createPersonaPopover();
+    
+    // Position the popover above the chip
+    const chipRect = personaChipElement.getBoundingClientRect();
+    popover.style.left = (chipRect.left + chipRect.width / 2) + 'px';
+    popover.style.top = (chipRect.top - 10) + 'px';
+    popover.style.transform = 'translateX(-50%) translateY(-100%)';
+    
+    popover.classList.toggle('show');
+  });
+}
+
+// Close popover when clicking outside
+document.addEventListener('click', (e) => {
+  if (personaPopover && !personaChipElement?.contains(e.target) && !personaPopover.contains(e.target)) {
+    personaPopover.classList.remove('show');
   }
 });
 
@@ -2785,6 +2960,17 @@ async function initUI() {
   await safe(loadSessions, "loadSessions");
   await safe(loadStatus, "loadStatus");
 
+  // Initialize global UI element references
+  noteCreateBtn = getNoteCreateBtn();
+  noteCreateWrap = gid("noteCreateWrap");
+  filesListWrap = gid("filesListWrap");
+  filesList = getFilesList();
+  notesList = getNotesList();
+  eventsList = getEventsList();
+  sessionPromptSave = getSessionPromptSave();
+  sessionPromptClear = getSessionPromptClear();
+  noteContentInput = getNoteContentInput();
+
   // Non-critical but useful steps
   await safe(loadModel, "loadModel");
   await safe(loadFooter, "loadFooter");
@@ -2826,6 +3012,8 @@ async function initUI() {
 
   // Mark UI as ready (used by CSS to reveal non-essential UI parts)
   document.body.classList.add("ui-ready");
+  // Removed tooltip support for chat messages
+  
   console.log("UI ready");
 }
 

@@ -585,13 +585,17 @@ def _stream_error_event(message: str, error_type: str, trace_id: str | None = No
     return f"event: error\ndata: {json.dumps(payload)}\n\n"
 
 
-def _stream_chunks(
+def _stream_text_events(
     text: str,
     model: str,
     stream_id: str,
     trace_id: str | None = None,
     session_id: str | None = None,
 ):
+    """
+    Emit EventBus events for streaming text and yield SSE data.
+    This is the canonical way to stream text responses via EventBus.
+    """
     created = int(time.time())
     started_at = time.time()
     text_buffer: list[str] = []
@@ -671,6 +675,20 @@ def _stream_chunks(
         })
     except Exception:
         pass
+
+
+def _stream_chunks(
+    text: str,
+    model: str,
+    stream_id: str,
+    trace_id: str | None = None,
+    session_id: str | None = None,
+):
+    """
+    DEPRECATED: Use _stream_text_events instead.
+    This function is kept for backward compatibility but should not be used for new code.
+    """
+    return _stream_text_events(text, model, stream_id, trace_id, session_id)
 
 
 def _status_event(state: str, tool: str | None = None, trace_id: str | None = None, session_id: str | None = None):
@@ -2377,6 +2395,8 @@ async def chat(
             quota_warning = _quota_warning(user["id"], session_id, used_mb, limit_mb, credits_mb)
 
     if stream:
+        # EventBus-based streaming: agent emits events, server consumes them
+        # This is the canonical streaming implementation - EventBus is the single source
         async def generator():
             from jarvis.events import subscribe_async
             
@@ -2451,8 +2471,9 @@ async def chat(
                         if quota_warning:
                             text_stream = f"{quota_warning}\n\n{text_stream}"
                         
-                        # Run _stream_chunks to emit events (consume yields but don't use them)
-                        await asyncio.to_thread(lambda: list(_stream_chunks(
+                        # Emit EventBus events for streaming (canonical approach)
+                        # Agent execution only emits events via EventBus - no direct streaming
+                        await asyncio.to_thread(lambda: list(_stream_text_events(
                             text_stream,
                             model,
                             stream_id=stream_id,

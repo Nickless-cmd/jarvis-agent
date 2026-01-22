@@ -113,7 +113,7 @@ from jarvis.notifications.store import (
 from jarvis.watchers.repo_watcher import start_repo_watcher_if_enabled
 from jarvis.watchers.test_watcher import run_pytest_and_notify
 from jarvis.event_store import get_event_store
-from jarvis.events import subscribe, publish
+from jarvis.events import subscribe, publish, subscribe_all
 
 ROOT = Path(__file__).resolve().parents[2]
 UI_DIR = ROOT / "ui"
@@ -585,9 +585,27 @@ def _stream_error_event(message: str, error_type: str, trace_id: str | None = No
     return f"event: error\ndata: {json.dumps(payload)}\n\n"
 
 
-def _stream_chunks(text: str, model: str, trace_id: str | None = None, session_id: str | None = None):
-    stream_id = f"chatcmpl-{uuid.uuid4().hex}"
+def _stream_chunks(
+    text: str,
+    model: str,
+    stream_id: str,
+    trace_id: str | None = None,
+    session_id: str | None = None,
+):
     created = int(time.time())
+    started_at = time.time()
+    text_buffer: list[str] = []
+
+    # Emit agent.stream.start
+    try:
+        publish("agent.stream.start", {
+            "session_id": session_id,
+            "message_id": stream_id,
+            "trace_id": trace_id,
+            "started_at": started_at,
+        })
+    except Exception:
+        pass
 
     head = {
         "id": stream_id,
@@ -600,10 +618,14 @@ def _stream_chunks(text: str, model: str, trace_id: str | None = None, session_i
     }
     yield f"data: {json.dumps(head)}\n\n"
 
+    sequence = 0
     for part in _chunk_text(text):
-        # Emit agent.token event
+        text_buffer.append(part)
+        # Emit agent.stream.delta event
         try:
-            publish("agent.token", {
+            publish("agent.stream.delta", {
+                "message_id": stream_id,
+                "sequence": sequence,
                 "token": part,
                 "role": "assistant",
                 "trace_id": trace_id,
@@ -622,6 +644,7 @@ def _stream_chunks(text: str, model: str, trace_id: str | None = None, session_i
             "choices": [{"index": 0, "delta": {"content": part}, "finish_reason": None}],
         }
         yield f"data: {json.dumps(data)}\n\n"
+        sequence += 1
 
     tail = {
         "id": stream_id,
@@ -634,6 +657,20 @@ def _stream_chunks(text: str, model: str, trace_id: str | None = None, session_i
     }
     yield f"data: {json.dumps(tail)}\n\n"
     yield "data: [DONE]\n\n"
+
+    # Emit agent.stream.final
+    try:
+        duration_ms = int((time.time() - started_at) * 1000)
+        publish("agent.stream.final", {
+            "session_id": session_id,
+            "message_id": stream_id,
+            "trace_id": trace_id,
+            "text": "".join(text_buffer),
+            "duration_ms": duration_ms,
+            "parts": sequence,
+        })
+    except Exception:
+        pass
 
 
 def _status_event(state: str, tool: str | None = None, trace_id: str | None = None, session_id: str | None = None):
@@ -1258,6 +1295,62 @@ async def list_events_endpoint(
     event_store = get_event_store()
     result = event_store.get_events(after=after, limit=limit)
     return result
+
+
+@app.get("/v1/events/stream")
+async def stream_events_endpoint(
+    request: Request,
+    since_id: Optional[int] = Query(None, description="Stream events after this ID"),
+    topics: Optional[str] = Query(None, description="Comma-separated list of event types to filter by"),
+    session_id: Optional[str] = Query(None, description="Filter events by session_id"),
+    authorization: str | None = Header(None),
+    token: str | None = Depends(_resolve_token),
+):
+    if not _auth_or_token_ok(authorization, token):
+        raise HTTPException(401, detail="Invalid API key")
+    user = get_user_by_token(token)
+    if not user:
+        raise HTTPException(401, detail="Missing or invalid user token")
+    if user.get("is_disabled"):
+        raise HTTPException(403, detail="User is disabled")
+    _enforce_maintenance(user)
+
+    # Parse topics filter
+    topic_filter = None
+    if topics:
+        topic_filter = set(t.strip() for t in topics.split(",") if t.strip())
+
+    event_store = get_event_store()
+    last_id = since_id or 0
+
+    async def event_generator():
+        nonlocal last_id
+        try:
+            # Send an initial heartbeat so clients don't block forever on connect
+            yield ": heartbeat\n\n"
+            while True:
+                if await request.is_disconnected():
+                    break
+                new_events = event_store.get_events(after=last_id, limit=1000)["events"]
+                for ev in new_events:
+                    if topic_filter and ev["type"] not in topic_filter:
+                        continue
+                    if session_id and ev.get("session_id") and ev.get("session_id") != session_id:
+                        continue
+                    last_id = max(last_id, ev["id"])
+                    yield f"event: {ev['type']}\ndata: {json.dumps(ev)}\nid: {ev['id']}\n\n"
+                await asyncio.sleep(1.0)
+        finally:
+            return
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-store",
+            "Connection": "keep-alive",
+        },
+    )
 
 
 @app.get("/v1/prompts")
@@ -2083,7 +2176,8 @@ async def chat(
             add_message(session_id, "assistant", reply)
         if stream:
             def sensitive_gen():
-                for chunk in _stream_chunks(reply, model, session_id=session_id):
+                stream_id = f"chatcmpl-{uuid.uuid4().hex}"
+                for chunk in _stream_chunks(reply, model, stream_id=stream_id, session_id=session_id):
                     yield chunk
                 yield "data: [DONE]\n\n"
             return StreamingResponse(sensitive_gen(), media_type="text/event-stream")
@@ -2158,7 +2252,8 @@ async def chat(
                 add_message(session_id, "assistant", reply)
             if stream:
                 def prompt_gen():
-                    for chunk in _stream_chunks(reply, model, session_id=session_id):
+                    stream_id = f"chatcmpl-{uuid.uuid4().hex}"
+                    for chunk in _stream_chunks(reply, model, stream_id=stream_id, session_id=session_id):
                         yield chunk
                     yield "data: [DONE]\n\n"
                 return StreamingResponse(prompt_gen(), media_type="text/event-stream")
@@ -2195,7 +2290,8 @@ async def chat(
                 add_message(session_id, "assistant", reply)
             if stream:
                 def banner_gen():
-                    for chunk in _stream_chunks(reply, model, session_id=session_id):
+                    stream_id = f"chatcmpl-{uuid.uuid4().hex}"
+                    for chunk in _stream_chunks(reply, model, stream_id=stream_id, session_id=session_id):
                         yield chunk
                     yield "data: [DONE]\n\n"
                 return StreamingResponse(banner_gen(), media_type="text/event-stream")
@@ -2251,7 +2347,8 @@ async def chat(
                         "event: meta\n"
                         f"data: {json.dumps({'meta': {'quota_warning': quota_warning}})}\n\n"
                     )
-                    for chunk in _stream_chunks(reply, model, session_id=session_id):
+                    stream_id = f"chatcmpl-{uuid.uuid4().hex}"
+                    for chunk in _stream_chunks(reply, model, stream_id=stream_id, session_id=session_id):
                         yield chunk
                     yield "data: [DONE]\n\n"
                 return StreamingResponse(quota_gen(), media_type="text/event-stream")
@@ -2282,6 +2379,7 @@ async def chat(
     if stream:
         async def generator():
             trace_id = uuid.uuid4().hex
+            stream_id = f"chatcmpl-{uuid.uuid4().hex}"
             deadline = time.monotonic() + MAX_STREAM_SECONDS
             done_sent = False
             agent_start_time = time.time()
@@ -2296,7 +2394,7 @@ async def chat(
                     })
                 except Exception:
                     pass  # EventBus unavailable, continue
-                
+
                 yield _status_event("thinking", trace_id=trace_id, session_id=session_id)
                 tool_hint = choose_tool(prompt, allowed_tools=allowed_tools)
                 if tool_hint in {"news", "search", "weather", "currency"}:
@@ -2313,6 +2411,15 @@ async def chat(
                     )
                 except asyncio.CancelledError:
                     _req_logger.info("Streaming run_agent cancelled trace=%s", trace_id)
+                    try:
+                        publish("agent.stream.error", {
+                            "session_id": session_id,
+                            "message_id": stream_id,
+                            "trace_id": trace_id,
+                            "error": "Cancelled",
+                        })
+                    except Exception:
+                        pass
                     return
                 except Exception as exc:
                     _req_logger.exception("Streaming run_agent failed trace=%s", trace_id)
@@ -2322,6 +2429,15 @@ async def chat(
                             "trace_id": trace_id,
                             "error_type": exc.__class__.__name__,
                             "error_message": str(exc),
+                        })
+                    except Exception:
+                        pass
+                    try:
+                        publish("agent.stream.error", {
+                            "session_id": session_id,
+                            "message_id": stream_id,
+                            "trace_id": trace_id,
+                            "error": str(exc),
                         })
                     except Exception:
                         pass
@@ -2348,11 +2464,39 @@ async def chat(
                     text_stream = f"{expiry_warning}\n\n{text_stream}"
                 if quota_warning:
                     text_stream = f"{quota_warning}\n\n{text_stream}"
-                for chunk in _stream_chunks(text_stream, model, trace_id=trace_id, session_id=session_id):
+                for chunk in _stream_chunks(
+                    text_stream,
+                    model,
+                    stream_id=stream_id,
+                    trace_id=trace_id,
+                    session_id=session_id,
+                ):
                     # early termination on timeout/disconnect
                     if await req.is_disconnected():
+                        # Emit agent.stream.error event for disconnect
+                        try:
+                            publish("agent.stream.error", {
+                                "message_id": stream_id,
+                                "session_id": session_id,
+                                "trace_id": trace_id,
+                                "error_type": "ClientDisconnected",
+                                "error_message": "Client disconnected during streaming",
+                            })
+                        except Exception:
+                            pass  # EventBus unavailable, continue
                         return
                     if time.monotonic() > deadline:
+                        # Emit agent.stream.error event for timeout
+                        try:
+                            publish("agent.stream.error", {
+                                "message_id": stream_id,
+                                "session_id": session_id,
+                                "trace_id": trace_id,
+                                "error_type": "Timeout",
+                                "error_message": "Streaming timeout",
+                            })
+                        except Exception:
+                            pass  # EventBus unavailable, continue
                         yield _stream_error_event(
                             "Streaming timeout. Please retry.",
                             "Timeout",
@@ -2364,7 +2508,16 @@ async def chat(
                     if chunk.endswith("[DONE]\n\n"):
                         done_sent = True
                     yield chunk
+                
                 yield _status_event("idle", trace_id=trace_id, session_id=session_id)
+                try:
+                    publish("agent.done", {
+                        "session_id": session_id,
+                        "trace_id": trace_id,
+                        "duration_ms": int((time.time() - agent_start_time) * 1000),
+                    })
+                except Exception:
+                    pass
                 rendered_text_stream = result.get("rendered_text")
                 payload_data_stream = result.get("data")
                 payload_meta_stream = result.get("meta")

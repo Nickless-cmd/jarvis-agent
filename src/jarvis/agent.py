@@ -135,6 +135,7 @@ from jarvis.provider.ollama_client import ollama_request
 from jarvis.user_preferences import get_user_preferences, set_user_preferences, build_persona_directive, parse_preference_command
 from jarvis.personality import SYSTEM_PROMPT
 from jarvis.context_builder import get_context_builder
+from jarvis.session_state import get_session_state_manager, SessionState
 
 import jarvis.agent as agent
 print("JARVIS agent loaded from:", agent.__file__)
@@ -1582,9 +1583,14 @@ def _run_agent_core_fallback(
     
     # Initialize agent step tracing
     agent_steps = []
+    # Get or create session state (with switch/reset handling)
+    state_manager = get_session_state_manager()
+    session_state = state_manager.get_for_request(session_id) if session_id else SessionState()
+
     if preloaded:
         mem = preloaded["mem"]
         session_hist = preloaded["session_hist"]
+        # Use preloaded values but sync with session state
         profile = preloaded["profile"]
         display_name = preloaded["display_name"]
         user_id_int = preloaded["user_id_int"]
@@ -1611,56 +1617,54 @@ def _run_agent_core_fallback(
         
         session_hist = get_recent_messages(session_id, limit=8) if session_id else []
         _debug(f"🧭 run_agent: user={user_id} session={session_id} prompt={prompt!r}")
-        if session_id:
-            wants_prompt, custom = _session_prompt_intent(prompt)
-            if wants_prompt:
-                if custom.lower() in {"nulstil", "reset", "standard", "default"}:
-                    set_custom_prompt(session_id, None)
-                    # Record total request time and log performance metrics
-                    perf_metrics.total_request_time = time.time() - start_time
-                    log_performance_metrics(user_id, session_id, perf_metrics)
-                    return {
-                        "text": "Session‑personlighed nulstillet. Jeg bruger standarden igen.",
-                        "meta": {"tool_used": False},
-                    }
-                if not custom:
-                    # Record total request time and log performance metrics
-                    perf_metrics.total_request_time = time.time() - start_time
-                    log_performance_metrics(user_id, session_id, perf_metrics)
-                    return {
-                        "text": "Skriv den ønskede personlighed efter kommandoen, fx: /personlighed Kort, varm og praktisk.",
-                        "meta": {"tool_used": False},
-                    }
-                set_custom_prompt(session_id, custom)
-                # Record total request time and log performance metrics
-                perf_metrics.total_request_time = time.time() - start_time
-                log_performance_metrics(user_id, session_id, perf_metrics)
-                return {
-                    "text": "Session‑personlighed opdateret.",
-                    "meta": {"tool_used": False},
-                }
-        profile = get_user_profile(user_id)
-        display_name = _first_name(profile, user_id)
-        user_id_int = (profile or {}).get("id")
-        user_key = user_id
-        is_admin_user = bool((profile or {}).get("is_admin"))
+
+        # Load or initialize session state
+        profile = session_state.profile
+        if profile is None:
+            profile = get_user_profile(user_id)
+            session_state.profile = profile
+
+        display_name = session_state.display_name
+        if display_name is None:
+            display_name = _first_name(profile, user_id)
+            session_state.display_name = display_name
+
+        user_id_int = session_state.user_id_int
+        if user_id_int is None:
+            user_id_int = (profile or {}).get("id")
+            session_state.user_id_int = user_id_int
+
+        user_key = session_state.user_key or user_id
+        session_state.user_key = user_key
+
+        is_admin_user = session_state.is_admin_user
+        if not hasattr(session_state, '_admin_checked'):
+            is_admin_user = bool((profile or {}).get("is_admin"))
+            session_state.is_admin_user = is_admin_user
+            session_state._admin_checked = True
+
+        # Load reminders (computed per request)
         reminders_due = get_due_reminders(user_id_int) if session_id and user_id_int else []
-        pending_weather = _load_state(get_pending_weather(session_id)) if session_id else {}
-        pending_note = _load_state(get_pending_note(session_id)) if session_id else {}
-        pending_reminder = _load_state(get_pending_reminder(session_id)) if session_id else {}
-        pending_file = _load_state(get_pending_file(session_id)) if session_id else {}
-        pending_image_preview = _load_state(get_pending_image_preview(session_id)) if session_id else {}
-        conversation_state = (
-            ConversationState.from_json(get_conversation_state(session_id)) if session_id else ConversationState()
-        )
-        if session_id and get_conversation_state(session_id) is None:
-            set_conversation_state(session_id, conversation_state.to_json())
+
+        # Load pending states from session state
+        pending_weather = session_state.pending_weather
+        pending_note = session_state.pending_note
+        pending_reminder = session_state.pending_reminder
+        pending_file = session_state.pending_file
+        pending_image_preview = session_state.pending_image_preview
+        pending_city = session_state.pending_city
+        pending_scope = session_state.pending_scope
+        pending_prompt = session_state.pending_prompt
+
+        conversation_state = session_state.conversation_state
+        mode = session_state.mode
+        model_profile = session_state.model_profile
+
+        # Handle mode request detection and updates
         mode_request = _detect_response_mode(prompt)
         if mode_request and mode_request != conversation_state.response_mode:
             conversation_state.set_response_mode(mode_request)
-            if session_id:
-                set_conversation_state(session_id, conversation_state.to_json())
-        model_profile = get_mode(session_id) if session_id else "balanced"
+            session_state.conversation_state = conversation_state
     
     # Handle user preference commands
     pref_updates = parse_preference_command(prompt, ui_lang or "da")
@@ -1707,7 +1711,8 @@ def _run_agent_core_fallback(
     # Handle model profile commands
     is_profile_cmd, profile = _is_model_profile_command(prompt, ui_lang or "da")
     if is_profile_cmd:
-        set_mode(session_id, profile)
+        session_state.mode = profile
+        session_state.model_profile = profile
         reply = f"Model profil skiftet til {profile}." if (ui_lang or "da").startswith("da") else f"Model profile switched to {profile}."
         # Record total request time and log performance metrics
         perf_metrics.total_request_time = time.time() - start_time
@@ -1721,7 +1726,7 @@ def _run_agent_core_fallback(
         log_performance_metrics(user_id, session_id, perf_metrics)
         return _handle_perf_status(user_id, session_id, ui_lang or "da")
     
-    cv_state_active = _load_state(get_cv_state(session_id)) if session_id else None
+    cv_state_active = session_state.cv_state if session_id else None
     forced_tool = None
     resume_prompt = None
     if cv_state_active or pending_note or pending_reminder:
@@ -1826,7 +1831,7 @@ def _run_agent_core_fallback(
         add_memory("assistant", reply, user_id=user_id)
         return TurnResult(reply_text=reply, meta={"tool": None, "tool_used": False})
     if session_id and _tool_source_intent(prompt):
-        last = _load_state(get_last_tool(session_id))
+        last = session_state.last_tool
         if not last:
             if user_id_int:
                 detail = f"Manglende tool‑kontekst.\nPrompt: {prompt}"
@@ -1839,7 +1844,7 @@ def _run_agent_core_fallback(
         add_memory("assistant", reply, user_id=user_id)
         return TurnResult(reply_text=reply, meta={"tool": last.get("tool") if last else None, "tool_used": False})
     if session_id and _tool_error_intent(prompt):
-        last = _load_state(get_last_tool(session_id))
+        last = session_state.last_tool
         if not last or not last.get("error"):
             reply = "Jeg har ingen fejl at rapportere fra sidste værktøjskald."
         else:
@@ -1881,7 +1886,7 @@ def _run_agent_core_fallback(
     if session_id:
         if idx is not None:
             _debug(f"📰 read-request: session={session_id} idx={idx}")
-            raw = get_last_news(session_id)
+            raw = session_state.last_news
             source = "news"
             if not raw:
                 raw = get_last_search(session_id)
@@ -1938,7 +1943,8 @@ def _run_agent_core_fallback(
         requested = prompt.strip().split(None, 1)[1].strip().lower()
         from jarvis.performance_metrics import validate_profile
         if validate_profile(requested):
-            set_mode(session_id, requested)
+            session_state.mode = requested
+            session_state.model_profile = requested
             reply = f"Model profil sat til {requested}."
         else:
             from jarvis.performance_metrics import get_available_profiles
@@ -2002,19 +2008,19 @@ def _run_agent_core_fallback(
             payload = pending_file if isinstance(pending_file, dict) else {}
             payload = dict(payload)
             payload["recap_data"] = recap_result.data
-            set_pending_file(session_id, json.dumps(payload, ensure_ascii=False))
+            session_state.pending_file = payload
         add_memory("assistant", recap_result.reply_text, user_id=user_id)
         add_message(session_id, "assistant", recap_result.reply_text)
         return recap_result
 
     if session_id:
-        pending_process = _load_state(get_process_state(session_id))
+        pending_process = session_state.process_state
         pending_pid = pending_process.get("pid") if isinstance(pending_process, dict) else None
         if pending_pid and _process_confirm_intent(prompt):
             kill_process_start = time.time()
             tool_result = call_tool("kill_process", {"pid": int(pending_pid)}, user_id, session_id)
             _record_agent_step(agent_steps, "tool_call", "kill_process", kill_process_start, tool_result.get("ok"))
-            set_process_state(session_id, "")
+            session_state.process_state = ""
             reply = "Proces afsluttet." if tool_result.get("ok") else "Jeg kunne ikke afslutte processen."
             add_memory("assistant", reply, user_id=user_id)
             return TurnResult(reply_text=reply, meta={"tool": "process", "tool_used": True}, data=tool_result)
@@ -2060,7 +2066,7 @@ def _run_agent_core_fallback(
         base_prompt = pending_prompt or prompt
         weather_city = pending_city or extract_location(base_prompt)
         if not weather_city and session_id:
-            weather_city = get_last_city(session_id)
+            weather_city = session_state.last_city
         if not weather_city and profile:
             weather_city = (profile.get("city") or "").strip() or None
         if not weather_city and ui_city:
@@ -2071,13 +2077,11 @@ def _run_agent_core_fallback(
         weather_forecast = None
         if not weather_city:
             if session_id:
-                set_pending_weather(
-                    session_id,
-                    json.dumps(
-                        {"awaiting_city": True, "prompt": prompt, "scope": want_weather_scope(prompt)},
-                        ensure_ascii=False,
-                    ),
-                )
+                session_state.pending_weather = {
+                    "awaiting_city": True,
+                    "prompt": prompt,
+                    "scope": want_weather_scope(prompt)
+                }
             weather_reply = ux_error("weather_city_missing", ui_lang)
         else:
             weather_now_start = time.time()
@@ -2129,14 +2133,14 @@ def _run_agent_core_fallback(
                 weather_rendered = "\n".join([header] + rendered_lines[:5])
                 weather_reply = weather_rendered
                 if session_id:
-                    set_last_city(session_id, name)
+                    session_state.last_city = name
                     last_payload = {
                         "tool": "weather",
                         "source": "OpenWeather",
                         "city": name,
                         "scope": scope,
                     }
-                    set_last_tool(session_id, json.dumps(last_payload, ensure_ascii=False))
+                    session_state.last_tool = last_payload
 
         query = _extract_news_query(prompt)
         category = "technology" if _is_tech_query(query) else None
@@ -2180,14 +2184,14 @@ def _run_agent_core_fallback(
             news_reply = intro + ":\n" + "\n".join(lines)
             news_reply += "\n\nVil du have mig til at læse en af dem? Skriv: læs nr 2."
             if session_id:
-                set_last_news(session_id, json.dumps(news_result, ensure_ascii=False))
+                session_state.last_news = news_result
                 last_payload = {
                     "tool": "news",
                     "source": _collect_sources(items),
                     "sources": _collect_sources(items),
                     "count": len(items),
                 }
-                set_last_tool(session_id, json.dumps(last_payload, ensure_ascii=False))
+                session_state.last_tool = last_payload
 
         reply_parts = []
         if weather_reply:
@@ -2225,20 +2229,18 @@ def _run_agent_core_fallback(
         base_prompt = pending_prompt or prompt
         city = pending_city or extract_location(base_prompt)
         if not city and session_id:
-            city = get_last_city(session_id)
+            city = session_state.last_city
         if not city and profile:
             city = (profile.get("city") or "").strip() or None
         if not city and ui_city:
             city = ui_city.strip() or None
         if not city:
             if session_id:
-                set_pending_weather(
-                    session_id,
-                    json.dumps(
-                        {"awaiting_city": True, "prompt": prompt, "scope": want_weather_scope(prompt)},
-                        ensure_ascii=False,
-                    ),
-                )
+                session_state.pending_weather = {
+                    "awaiting_city": True,
+                    "prompt": prompt,
+                    "scope": want_weather_scope(prompt)
+                }
             reply = "Jeg mangler en by eller et postnummer. Hvis du ønsker det, kan jeg bruge din profilby."
             add_memory("assistant", reply, user_id=user_id)
             return TurnResult(reply_text=reply, meta={"tool": "weather", "tool_used": False})
@@ -2318,7 +2320,6 @@ def _run_agent_core_fallback(
                     risk = spec.risk_level
                 if conversation_state:
                     conversation_state.set_pending_tool("kill_process", {"pid": int(pid)}, risk_level=risk)
-                    set_conversation_state(session_id, conversation_state.to_json())
                 reply = "Jeg kan afslutte proces {pid}. Bekræft?" if (ui_lang or "").startswith("en") else f"Jeg kan afslutte proces {pid}. Skriv 'bekræft' for at fortsætte."
                 plan = "- Terminer processen med kill_process" if not (ui_lang or "").startswith("en") else "- Terminate the process via kill_process"
                 reply = reply.format(pid=pid) + f"\n{plan}"
@@ -2348,7 +2349,7 @@ def _run_agent_core_fallback(
                 "error": True,
                 "detail": f"{reason}: {detail or ''}".strip(),
             }
-            set_last_tool(session_id, json.dumps(last_payload, ensure_ascii=False))
+            session_state.last_tool = last_payload
         if session_id and user_id_int:
             detail_text = _ticket_debug_block(tool, reason, detail, prompt, session_id)
             ticket = _safe_create_ticket(user_id_int, f"Fejl i {tool}", detail_text, _ticket_priority(detail_text))
@@ -2361,7 +2362,7 @@ def _run_agent_core_fallback(
 
     if tool == "currency" and session_id:
         last_payload = {"tool": "currency", "source": "exchangerate.host"}
-        set_last_tool(session_id, json.dumps(last_payload, ensure_ascii=False))
+        session_state.last_tool = last_payload
 
     if tool == "news":
         query = tool_result.get("query", "") if isinstance(tool_result, dict) else ""
@@ -2584,7 +2585,7 @@ def _run_agent_core_fallback(
             return {"text": reply}
         if session_id:
             stored_city = now.get("name") if isinstance(now, dict) else None
-            set_last_city(session_id, stored_city or city)
+            session_state.last_city = stored_city or city
         name = (now.get("name") if isinstance(now, dict) else None) or city
         scope = want_weather_scope(prompt)
         header = f"{name} — i dag"
@@ -2612,7 +2613,7 @@ def _run_agent_core_fallback(
                 "city": name,
                 "scope": scope,
             }
-            set_last_tool(session_id, json.dumps(last_payload, ensure_ascii=False))
+            session_state.last_tool = last_payload
         if resume_prompt:
             reply += f"\n\n{resume_prompt}"
         add_memory("assistant", reply, user_id=user_id)

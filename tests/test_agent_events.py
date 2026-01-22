@@ -33,4 +33,4 @@ def test_streaming_emits_agent_events(monkeypatch, tmp_path):
         assert events_resp.status_code == 200
         events = events_resp.json().get("events", [])
         types = {e["type"] for e in events}
-        assert {"agent.start", "agent.done", "agent.token"}.issubset(types)
+        assert {"agent.start", "agent.done", "agent.stream.start", "agent.stream.delta", "agent.stream.final"}.issubset(types)

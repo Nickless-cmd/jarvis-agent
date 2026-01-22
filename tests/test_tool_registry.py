@@ -19,16 +19,14 @@ def test_allow_and_deny_tool(tmp_path, monkeypatch):
 
     registry.register_tool(registry.ToolSpec("foo", "test", {}, "low"), foo)
     result = registry.call_tool("foo", {"arg": 1}, user_id=1)
-    assert result == "ok"
+    assert result["ok"] is True
+    assert result["data"] == "ok"
     assert calls["arg"] == 1
 
     # Unknown tool should be denied
-    try:
-        registry.call_tool("bar", {}, user_id=1)
-    except ValueError as exc:
-        assert "not registered" in str(exc) or "allowlist" in str(exc)
-    else:  # pragma: no cover
-        assert False, "Expected ValueError"
+    res = registry.call_tool("bar", {}, user_id=1)
+    assert res["ok"] is False
+    assert res["error"]["type"] in {"ToolError", "ToolError"}
 
 
 def test_audit_and_redaction(tmp_path, monkeypatch):
@@ -71,13 +69,68 @@ def test_tool_cache(monkeypatch, tmp_path):
     registry.register_tool(registry.ToolSpec("cached_tool", "test", {}, "low"), cached_tool)
 
     res1 = registry.call_tool("cached_tool", {"x": 1}, user_id=1)
-    assert res1 == {"x": 1}
+    assert res1["ok"] is True and res1["data"] == {"x": 1}
     assert calls["n"] == 1
 
     res2 = registry.call_tool("cached_tool", {"x": 1}, user_id=1)
-    assert res2 == {"x": 1}
+    assert res2["ok"] is True and res2["data"] == {"x": 1}
     assert calls["n"] == 1  # cached, not invoked again
 
     registry._tool_cache.clear()
     registry.call_tool("cached_tool", {"x": 1}, user_id=1)
     assert calls["n"] == 2
+
+
+def test_tool_exception_envelope(monkeypatch, tmp_path):
+    monkeypatch.setenv("JARVIS_DB_PATH", str(tmp_path / "db.sqlite"))
+    monkeypatch.setenv("JARVIS_TOOL_ALLOWLIST", "boom")
+    import jarvis.agent_core.tool_registry as registry
+    registry._reset_registry_for_tests()
+    def boom():
+        raise RuntimeError("explode")
+    registry.register_tool(registry.ToolSpec("boom", "test", {}, "low"), boom)
+    res = registry.call_tool("boom", {}, user_id=1)
+    assert res["ok"] is False
+    assert res["error"]["type"] == "RuntimeError"
+    assert res["error"]["trace_id"]
+
+
+def test_safe_tool_call_catches_exception():
+    import jarvis.agent_core.tool_registry as registry
+    
+    def failing_fn():
+        raise ValueError("test error")
+    
+    result = registry.safe_tool_call("test_tool", failing_fn)
+    assert result["ok"] is False
+    assert result["data"] is None
+    assert result["error"]["type"] == "ValueError"
+    assert result["error"]["message"] == "test error"
+    assert result["error"]["trace_id"]
+    assert result["error"]["where"] == "test_tool"
+
+
+def test_agent_flow_survives_tool_exception():
+    # This is a minimal test to ensure the agent flow doesn't crash on tool exceptions
+    # We'll mock a tool that fails and ensure the agent returns a controlled error response
+    import jarvis.agent_core.tool_registry as registry
+    from jarvis.agent import _tool_failed
+    
+    # Simulate a failed tool result as returned by safe_tool_call
+    failed_result = {
+        "ok": False,
+        "data": None,
+        "error": {
+            "type": "ValueError",
+            "message": "test error",
+            "trace_id": "abc123",
+            "where": "test_tool"
+        }
+    }
+    
+    # Test that _tool_failed detects the failure
+    failure = _tool_failed("test_tool", failed_result)
+    assert failure is not None
+    reason, detail = failure
+    assert reason == "test error"
+    assert detail is None

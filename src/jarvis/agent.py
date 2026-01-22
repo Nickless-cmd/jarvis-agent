@@ -8,7 +8,7 @@ import requests
 import sys
 import time
 from datetime import datetime, timezone, timedelta
-from typing import Optional
+from typing import Optional, Any
 from zoneinfo import ZoneInfo
 
 from jarvis.memory import search_memory, add_memory
@@ -107,6 +107,7 @@ from jarvis.agent_policy.language import _should_translate_vision_response
 from jarvis.agent_core.orchestrator import TurnResult, coerce_to_turn_result, get_last_metrics
 from jarvis.agent_core.tool_registry import get_spec
 from jarvis.agent_core.tool_registry import call_tool
+from jarvis.agent_core.tool_registry import safe_tool_call
 from jarvis.agent_policy.vision_guard import (
     _describe_image_ollama,
     _looks_like_guess,
@@ -129,6 +130,7 @@ from jarvis.agent_core.project_memory import (
     add_roadmap_item as pm_add_roadmap_item,
     summarize_project_state as pm_summarize,
 )
+from jarvis.provider.ollama_client import ollama_request
 from jarvis.user_preferences import get_user_preferences, set_user_preferences, build_persona_directive, parse_preference_command
 
 import jarvis.agent as agent
@@ -165,6 +167,28 @@ from jarvis.agent_skills.recap_skill import handle_recap, maybe_store_confirmati
 def _debug(msg: str) -> None:
     if os.getenv("JARVIS_DEBUG") == "1":
         print(msg)
+
+
+def _tool_ok(res: Any) -> bool:
+    return isinstance(res, dict) and res.get("ok") is True
+
+
+def _tool_data(res: Any, default: Any = None) -> Any:
+    if _tool_ok(res):
+        return res.get("data")
+    return default
+
+
+def _tool_error_text(res: Any, tool: str, ui_lang: str | None) -> str:
+    if not isinstance(res, dict):
+        return "Værktøjet fejlede." if not ui_lang or not ui_lang.startswith("en") else "Tool failed."
+    err = res.get("error") or {}
+    msg = err.get("message") or ("ukendt fejl" if not ui_lang or not ui_lang.startswith("en") else "unknown error")
+    tid = err.get("trace_id")
+    base = f"Værktøjet '{tool}' fejlede: {msg}" if not ui_lang or not ui_lang.startswith("en") else f"Tool '{tool}' failed: {msg}"
+    if tid:
+        base += f" (id: {tid})"
+    return base
 
 
 def should_use_wiki(prompt: str) -> bool:
@@ -288,6 +312,7 @@ def call_ollama(messages, model_profile: str = "balanced"):
     import time
     from jarvis.agent_core.orchestrator import set_last_metric
     from jarvis.performance_metrics import get_model_profile_params
+    import uuid
     start = time.time()
     
     # Get profile parameters
@@ -300,15 +325,21 @@ def call_ollama(messages, model_profile: str = "balanced"):
         **profile_params  # Add profile parameters
     }
     timeout = int(os.getenv("OLLAMA_TIMEOUT_SECONDS", "120"))
-    try:
-        r = requests.post(os.getenv("OLLAMA_URL"), json=payload, timeout=timeout)
-        res = r.json()
+    trace_id = uuid.uuid4().hex[:8]
+    resp = ollama_request(
+        os.getenv("OLLAMA_URL"),
+        payload,
+        connect_timeout=2.0,
+        read_timeout=60.0,
+        retries=2,
+    )
+    if resp.get("ok"):
+        data = resp.get("data") or {}
         set_last_metric("llm_ms", (time.time() - start) * 1000)
-        return res
-    except requests.exceptions.ReadTimeout:
-        return {"error": "OLLAMA_TIMEOUT"}
-    except requests.exceptions.RequestException as exc:
-        return {"error": "OLLAMA_REQUEST_FAILED", "detail": str(exc)}
+        return data
+    error = resp.get("error") or {}
+    set_last_metric("llm_ms", (time.time() - start) * 1000)
+    return {"error": error.get("message") or "OLLAMA_REQUEST_FAILED", "trace_id": error.get("trace_id", trace_id)}
 
 def _format_history(messages: list[dict]) -> list[dict]:
     return [{"role": m["role"], "content": m["content"]} for m in messages]
@@ -1051,23 +1082,24 @@ def _format_dt(value: str) -> str:
 
 
 def _tool_failed(tool: str, tool_result) -> tuple[str | None, str | None] | None:
-    if tool not in {"weather", "news", "search", "currency"}:
-        return None
+    if isinstance(tool_result, dict) and tool_result.get("ok") is False:
+        err = tool_result.get("error") or {}
+        return err.get("message") or "ukendt fejl", None
+    if isinstance(tool_result, dict) and tool_result.get("ok") is True:
+        tool_result = tool_result.get("data")
     if tool == "weather":
         if not isinstance(tool_result, dict):
-            reason, detail = _tool_error_info(tool_result)
-            return (reason or "ukendt fejl", detail)
-        now_reason, now_detail = _tool_error_info(tool_result.get("now"))
-        fc_reason, fc_detail = _tool_error_info(tool_result.get("forecast"))
-        reason = now_reason or fc_reason
-        detail = now_detail or fc_detail
-        if reason:
-            return reason, detail
+            return "ugyldigt format", None
+        now = tool_result.get("now")
+        forecast = tool_result.get("forecast")
+        if now and isinstance(now, dict) and "error" in now:
+            return now["error"], None
+        if forecast and isinstance(forecast, dict) and "error" in forecast:
+            return forecast["error"], None
         return None
-
-    reason, detail = _tool_error_info(tool_result)
-    if reason:
-        return reason, detail
+    # For other tools, assume success unless explicitly an error dict
+    if isinstance(tool_result, dict) and "error" in tool_result:
+        return tool_result["error"], None
     return None
 
 
@@ -2023,11 +2055,25 @@ def _run_agent_core_fallback(
                 )
             weather_reply = ux_error("weather_city_missing", ui_lang)
         else:
-            weather_now = call_tool("weather_now", {"city": weather_city}, user_id, session_id)
-            weather_forecast = call_tool("weather_forecast", {"city": weather_city}, user_id, session_id)
-            today_text = tools.format_weather_today(weather_now)
-            tomorrow_text = tools.format_weather_tomorrow(weather_forecast)
-            multi_text = tools.format_weather_5days(weather_forecast)
+            weather_now_res = call_tool("weather_now", {"city": weather_city}, user_id, session_id)
+            weather_forecast_res = call_tool("weather_forecast", {"city": weather_city}, user_id, session_id)
+            if not _tool_ok(weather_now_res) or not _tool_ok(weather_forecast_res):
+                weather_reply = _tool_error_text(
+                    weather_now_res if not _tool_ok(weather_now_res) else weather_forecast_res,
+                    "weather",
+                    ui_lang,
+                )
+                weather_now = {}
+                weather_forecast = {}
+            else:
+                weather_now = _tool_data(weather_now_res, {}) or {}
+                weather_forecast = _tool_data(weather_forecast_res, {}) or {}
+            today_res = safe_tool_call("format_weather_today", tools.format_weather_today, weather_now)
+            tomorrow_res = safe_tool_call("format_weather_tomorrow", tools.format_weather_tomorrow, weather_forecast)
+            multi_res = safe_tool_call("format_weather_5days", tools.format_weather_5days, weather_forecast)
+            today_text = today_res["data"] if today_res["ok"] else None
+            tomorrow_text = tomorrow_res["data"] if tomorrow_res["ok"] else None
+            multi_text = multi_res["data"] if multi_res["ok"] else None
             scope = pending_scope or want_weather_scope(base_prompt)
             parts = []
             if scope == "today" and today_text:
@@ -2065,13 +2111,18 @@ def _run_agent_core_fallback(
         query = _extract_news_query(prompt)
         category = "technology" if _is_tech_query(query) else None
         news_result = call_tool("news_search", {"query": query}, user_id, session_id)
-        items = news_result.get("items", []) if isinstance(news_result, dict) else []
+        if not _tool_ok(news_result):
+            items = []
+        else:
+            payload = _tool_data(news_result, {}) or {}
+            items = payload.get("items", []) if isinstance(payload, dict) else []
         if len(items) < 3:
             site_hint = (
                 f"{query} site:reuters.com OR site:bbc.co.uk OR site:apnews.com "
                 "OR site:theguardian.com OR site:nytimes.com"
             ).strip()
-            fallback = tools.web_search_news(site_hint)
+            fallback_res = safe_tool_call("web_search_news", tools.web_search_news, site_hint)
+            fallback = fallback_res["data"] if fallback_res["ok"] else []
             if fallback:
                 existing = {i.get("url") for i in items}
                 for item in fallback:
@@ -2159,15 +2210,20 @@ def _run_agent_core_fallback(
             reply = "Jeg mangler en by eller et postnummer. Hvis du ønsker det, kan jeg bruge din profilby."
             add_memory("assistant", reply, user_id=user_id)
             return TurnResult(reply_text=reply, meta={"tool": "weather", "tool_used": False})
-        now = call_tool("weather_now", {"city": city}, user_id, session_id)
-        forecast = call_tool("weather_forecast", {"city": city}, user_id, session_id)
+        now_res = call_tool("weather_now", {"city": city}, user_id, session_id)
+        forecast_res = call_tool("weather_forecast", {"city": city}, user_id, session_id)
+        now = _tool_data(now_res, {}) or {}
+        forecast = _tool_data(forecast_res, {}) or {}
         tool_result = {
             "now": now,
             "forecast": forecast,
         }
-        today_text = tools.format_weather_today(now)
-        tomorrow_text = tools.format_weather_tomorrow(forecast)
-        multi_text = tools.format_weather_5days(forecast)
+        today_res = safe_tool_call("format_weather_today", tools.format_weather_today, now)
+        tomorrow_res = safe_tool_call("format_weather_tomorrow", tools.format_weather_tomorrow, forecast)
+        multi_res = safe_tool_call("format_weather_5days", tools.format_weather_5days, forecast)
+        today_text = today_res["data"] if today_res["ok"] else None
+        tomorrow_text = tomorrow_res["data"] if tomorrow_res["ok"] else None
+        multi_text = multi_res["data"] if multi_res["ok"] else None
         scope = pending_scope or want_weather_scope(base_prompt)
         parts = []
         if scope == "today" and today_text:
@@ -2262,7 +2318,8 @@ def _run_agent_core_fallback(
                 f"{query} site:reuters.com OR site:bbc.co.uk OR site:apnews.com "
                 "OR site:theguardian.com OR site:nytimes.com"
             ).strip()
-            fallback = tools.web_search_news(site_hint)
+            fallback_res = safe_tool_call("web_search_news", tools.web_search_news, site_hint)
+            fallback = fallback_res["data"] if fallback_res["ok"] else []
             if fallback:
                 existing = {i.get("url") for i in items}
                 for item in fallback:
@@ -2375,7 +2432,10 @@ def _run_agent_core_fallback(
         return TurnResult(reply_text=reply, meta={"tool": "search", "tool_used": True, "intent": "cv" if cv_intent else "search"}, data=tool_result)
 
     if tool == "time":
-        now_iso = tool_result if isinstance(tool_result, str) else None
+        if isinstance(tool_result, dict) and "data" in tool_result:
+            now_iso = tool_result.get("data")
+        else:
+            now_iso = tool_result if isinstance(tool_result, str) else None
         try:
             dt = datetime.fromisoformat(now_iso) if now_iso else datetime.now(timezone.utc)
             lang = (ui_lang or "").lower()

@@ -736,15 +736,16 @@ def _describe_image_ollama(b64: str, is_admin: bool, ui_lang: str | None) -> tup
         ultra_strict_prompt = strict_prompt + "\n\nSet 'uncertain' on all fields you are not 100% sure about."
 
     def _try_generate(payload, timeout):
-        try:
-            resp = requests.post(url, json=payload, timeout=timeout)
-            if not resp.ok:
-                return None, f"Ollama fejl {resp.status_code}: {resp.text[:200].replace('\\n', ' ').strip()}"
-            data = resp.json()
-            text = (data.get("response") or "").strip()
-            return text, None
-        except Exception as exc:
-            return None, f"Ollama kunne ikke nås: {exc}"
+        from jarvis.provider.ollama_client import ollama_request
+        resp = ollama_request(url, payload, connect_timeout=5.0, read_timeout=timeout, retries=2)
+        if not resp.get("ok"):
+            err = resp.get("error") or {}
+            return None, f"Ollama kunne ikke nås: {err.get('message','ukendt fejl')} (id: {err.get('trace_id','-')})"
+        data = resp.get("data") or {}
+        text = (data.get("response") or "").strip()
+        if not text:
+            return None, "Ollama returnerede tomt svar"
+        return text, None
 
     ctx = int(os.getenv("OLLAMA_VISION_CTX", "2048"))
     num_gpu = os.getenv("OLLAMA_VISION_NUM_GPU")
@@ -775,7 +776,7 @@ def _describe_image_ollama(b64: str, is_admin: bool, ui_lang: str | None) -> tup
             except ValueError:
                 pass
 
-        text, err = _try_generate(payload, 90)
+        text, err = _try_generate(payload, 30)
         if err:
             if attempt == 2:
                 return None, err
@@ -819,4 +820,3 @@ __all__ = [
     "_looks_like_hallucination",
     "_describe_image_ollama",
 ]
-

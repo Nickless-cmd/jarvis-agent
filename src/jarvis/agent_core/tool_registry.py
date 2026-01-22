@@ -12,6 +12,8 @@ from datetime import datetime, timezone
 
 from jarvis.db import get_conn
 from jarvis.agent_core.cache import TTLCache
+import traceback
+import uuid
 
 
 @dataclass
@@ -156,7 +158,15 @@ def _record_cache_metric(entry: Dict[str, Any]) -> None:
         pass
 
 
-def call_tool(name: str, args: Dict[str, Any], user_id: int, session_id: Optional[str] = None) -> Any:
+def _make_envelope(ok: bool, data: Any, error: Optional[Dict[str, Any]], trace_id: str, tool_name: str) -> Dict[str, Any]:
+    envelope = {"ok": ok, "data": data, "error": error, "trace_id": trace_id, "tool": tool_name}
+    # Backwards compatibility: surface dict data at top-level so existing callers using .get("items") still work.
+    if ok and isinstance(data, dict):
+        envelope.update(data)
+    return envelope
+
+
+def call_tool(name: str, args: Dict[str, Any], user_id: int, session_id: Optional[str] = None) -> Dict[str, Any]:
     """
     Call a tool safely through the registry.
     
@@ -167,22 +177,30 @@ def call_tool(name: str, args: Dict[str, Any], user_id: int, session_id: Optiona
         session_id: Session ID for audit
         
     Returns:
-        Tool result
-        
-    Raises:
-        ValueError: If tool is not allowed or not registered
+        Envelope containing ok/data/error/trace_id
     """
+    trace_id = uuid.uuid4().hex[:8]
     # Load allowlist if not loaded
     if not _allowlist:
         _load_allowlist()
     
     # Check if tool is allowed
     if name not in _allowlist:
-        raise ValueError(f"Tool '{name}' is not in allowlist")
+        return _make_envelope(False, None, {
+            "type": "ToolError",
+            "message": f"Tool '{name}' is not in allowlist",
+            "trace_id": trace_id,
+            "where": name,
+        }, trace_id, name)
     
     # Check if tool is registered
     if name not in _tool_registry:
-        raise ValueError(f"Tool '{name}' is not registered")
+        return _make_envelope(False, None, {
+            "type": "ToolError",
+            "message": f"Tool '{name}' is not registered",
+            "trace_id": trace_id,
+            "where": name,
+        }, trace_id, name)
     
     spec, fn = _tool_registry[name]
 
@@ -198,21 +216,55 @@ def call_tool(name: str, args: Dict[str, Any], user_id: int, session_id: Optiona
 
     # Call tool and measure latency
     start_time = time.time()
+    success = False
+    result = None
+    error_obj = None
     try:
         result = fn(**args)
         success = True
         if cache_key:
-            _tool_cache.set(cache_key, result, ttl=ttl)
+            _tool_cache.set(cache_key, _make_envelope(True, result, None, trace_id, name), ttl=ttl)
     except Exception as e:
-        result = {"error": str(e)}
+        err_type = e.__class__.__name__
+        error_obj = {
+            "type": err_type,
+            "message": str(e),
+            "trace_id": trace_id,
+            "where": name,
+        }
         success = False
-        raise  # Re-raise to preserve error propagation
-    
+        traceback.print_exc()
     finally:
         latency_ms = (time.time() - start_time) * 1000
         _audit_tool_call(user_id, session_id, name, args, success, latency_ms)
+    if success:
+        return _make_envelope(True, result, None, trace_id, name)
+    return _make_envelope(False, None, error_obj, trace_id, name)
+
+
+def safe_tool_call(tool_name: str, fn: Callable, *args, **kwargs) -> dict:
+    """
+    Safe wrapper for tool function calls.
     
-    return result
+    Returns:
+        {"ok": bool, "data": any|None, "error": {type,message,trace_id,where}|None}
+    """
+    trace_id = uuid.uuid4().hex[:8]
+    logger = None  # Assuming logger is available, but for now we'll use print or skip
+    try:
+        result = fn(*args, **kwargs)
+        return {"ok": True, "data": result, "error": None}
+    except Exception as e:
+        error_info = {
+            "type": e.__class__.__name__,
+            "message": str(e),
+            "trace_id": trace_id,
+            "where": tool_name,
+        }
+        # Log the exception with trace_id and tool_name
+        print(f"Tool '{tool_name}' failed (trace_id: {trace_id}): {e}")
+        traceback.print_exc()
+        return {"ok": False, "data": None, "error": error_info}
 
 
 def _reset_registry_for_tests() -> None:

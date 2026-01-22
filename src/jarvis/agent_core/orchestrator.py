@@ -281,8 +281,13 @@ def handle_turn(
             try:
                 result = call_tool(pending_tool["name"], pending_tool.get("args", {}), user_id, session_id)
                 reply = result if isinstance(result, str) else str(result)
-                if isinstance(result, dict) and "text" in result:
-                    reply = result["text"]
+                if isinstance(result, dict) and result.get("ok"):
+                    reply = str(result.get("data"))
+                    if isinstance(result.get("data"), dict) and "text" in result.get("data", {}):
+                        reply = result["data"]["text"]
+                elif isinstance(result, dict) and result.get("error"):
+                    err = result["error"]
+                    reply = f"Tool '{pending_tool['name']}' failed: {err.get('message','ukendt fejl')} (id: {err.get('trace_id','-')})"
                 preloaded["conversation_state"].pending_tool_action = None
                 set_conversation_state(session_id, preloaded["conversation_state"].to_json())
                 return build_response(

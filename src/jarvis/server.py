@@ -36,6 +36,7 @@ from jarvis.auth import (
 from jarvis.db import get_conn, log_login_session
 from jarvis.personality import SYSTEM_PROMPT
 from jarvis.prompts.system_prompts import SYSTEM_PROMPT_USER, SYSTEM_PROMPT_ADMIN
+from jarvis.prompt_manager import get_prompt_manager
 from jarvis.memory import purge_user_memory
 from jarvis.files import (
     safe_path,
@@ -130,6 +131,7 @@ _last_log_cleanup = 0.0
 _TEST_MODE = os.getenv("JARVIS_TEST_MODE", "0") == "1"
 _PROMPT_CACHE: dict[str, str] = {}
 _EXPOSE_SYSTEM_PROMPT = os.getenv("JARVIS_EXPOSE_SYSTEM_PROMPT", "0") == "1"
+_PROMPT_MANAGER = get_prompt_manager()
 
 LOGIN_PATH = UI_DIR / "login.html"
 REGISTER_PATH = UI_DIR / "registere.html"
@@ -649,13 +651,30 @@ def _load_prompts() -> dict[str, str]:
 
 def _current_system_prompt() -> str:
     """Return active system prompt (DB override if set, otherwise bundled prompt)."""
-    prompts = _load_prompts()
-    return _get_setting("system_prompt", prompts.get("user", SYSTEM_PROMPT))
+    try:
+        return _PROMPT_MANAGER.effective_prompt(is_admin=False).text
+    except Exception:
+        prompts = _load_prompts()
+        return _get_setting("system_prompt", prompts.get("user", SYSTEM_PROMPT))
 
 
 def _current_admin_prompt() -> str:
-    prompts = _load_prompts()
-    return prompts.get("admin", SYSTEM_PROMPT)
+    try:
+        return _PROMPT_MANAGER.effective_prompt(is_admin=True).text
+    except Exception:
+        prompts = _load_prompts()
+        return prompts.get("admin", SYSTEM_PROMPT)
+
+
+def _active_prompt_info(is_admin: bool) -> dict:
+    bundle = _PROMPT_MANAGER.effective_prompt(is_admin=is_admin)
+    info = {
+        "name": "admin_system" if is_admin else "system",
+        "hash": bundle.sha256,
+    }
+    if _EXPOSE_SYSTEM_PROMPT or is_admin:
+        info["preview"] = bundle.preview(200)
+    return info
 
 
 def _parse_banner_entries(raw: str) -> list[dict]:
@@ -1187,10 +1206,8 @@ async def prompts_endpoint(
     if user.get("is_disabled"):
         raise HTTPException(403, detail="User is disabled")
     _enforce_maintenance(user)
-    payload = {"build_id": BUILD_ID}
-    if _EXPOSE_SYSTEM_PROMPT or user.get("is_admin"):
-        payload["system_prompt"] = _current_system_prompt()
-    return payload
+    info = _active_prompt_info(user.get("is_admin", False))
+    return {"build_id": BUILD_ID, "prompt": info, "is_admin": user.get("is_admin", False)}
 
 
 @app.get("/v1/prompts/admin")
@@ -1208,7 +1225,25 @@ async def prompts_admin_endpoint(
     if user.get("is_disabled"):
         raise HTTPException(403, detail="User is disabled")
     _enforce_maintenance(user)
-    return {"admin_prompt": _current_admin_prompt(), "build_id": BUILD_ID}
+    info = _active_prompt_info(True)
+    return {"prompt": info, "is_admin": True, "build_id": BUILD_ID}
+
+
+@app.get("/v1/prompt/active")
+async def prompt_active_endpoint(
+    authorization: str | None = Header(None),
+    token: str | None = Depends(_resolve_token),
+):
+    if not _auth_or_token_ok(authorization, token):
+        raise HTTPException(401, detail="Invalid API key")
+    user = get_user_by_token(token)
+    if not user:
+        raise HTTPException(401, detail="Missing or invalid user token")
+    if user.get("is_disabled"):
+        raise HTTPException(403, detail="User is disabled")
+    _enforce_maintenance(user)
+    info = _active_prompt_info(user.get("is_admin", False))
+    return {"prompt": info, "is_admin": user.get("is_admin", False), "build_id": BUILD_ID}
 
 
 @app.post("/v1/events/{event_id}/dismiss")
@@ -3125,8 +3160,3 @@ async def tickets_page():
 @app.get("/account")
 async def account_page():
     return FileResponse(ACCOUNT_PATH)
-
-
-
-
-

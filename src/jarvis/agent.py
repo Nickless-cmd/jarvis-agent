@@ -74,8 +74,7 @@ from jarvis.notes import (
     mark_reminded,
 )
 from jarvis.tickets import create_ticket, get_ticket_admin, add_ticket_message
-from jarvis.personality import SYSTEM_PROMPT
-from jarvis.prompts.system_prompts import SYSTEM_PROMPT_USER, SYSTEM_PROMPT_ADMIN
+from jarvis.prompt_manager import get_prompt_manager
 from jarvis.db import get_conn
 from jarvis.auth import get_user_profile, register_user
 from jarvis.files import (
@@ -132,6 +131,7 @@ from jarvis.agent_core.project_memory import (
 )
 from jarvis.provider.ollama_client import ollama_request
 from jarvis.user_preferences import get_user_preferences, set_user_preferences, build_persona_directive, parse_preference_command
+from jarvis.personality import SYSTEM_PROMPT
 
 import jarvis.agent as agent
 print("JARVIS agent loaded from:", agent.__file__)
@@ -880,12 +880,16 @@ def _project_context_block(prompt: str, ui_lang: str | None = None) -> str | Non
     return header + ":\n" + "\n".join(f"- {b}" for b in bullets)
 
 
-def _get_system_prompt() -> str:
-    with get_conn() as conn:
-        row = conn.execute("SELECT value FROM settings WHERE key = ?", ("system_prompt",)).fetchone()
-    if row and row["value"]:
-        return row["value"]
-    return SYSTEM_PROMPT
+def _get_system_prompt(is_admin: bool = False) -> str:
+    pm = get_prompt_manager()
+    try:
+        return pm.effective_prompt(is_admin=is_admin).text
+    except Exception:
+        with get_conn() as conn:
+            row = conn.execute("SELECT value FROM settings WHERE key = ?", ("system_prompt",)).fetchone()
+        if row and row["value"]:
+            return row["value"]
+        return pm.effective_prompt(is_admin=is_admin).text
 
 
 def _session_prompt_intent(prompt: str) -> tuple[bool, str | None]:
@@ -2590,7 +2594,8 @@ def _run_agent_core_fallback(
     else:
         mode_hint = "Mode normal: balanceret længde og dybde."
 
-    sys_prompt = SYSTEM_PROMPT_ADMIN if is_admin_user else SYSTEM_PROMPT_USER
+    pm = get_prompt_manager()
+    sys_prompt = _get_system_prompt(is_admin=is_admin_user)
     if session_id:
         override = get_custom_prompt(session_id)
         if override:

@@ -17,6 +17,22 @@ from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse,
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
+
+
+@dataclass
+class AppState:
+    """Application state container for initialized services."""
+    demo_user_ensured: bool = False
+    repo_watcher_started: bool = False
+    paths_logged: bool = False
+    project_root_overridden: bool = False
+    startup_time: float = 0.0
+
+
+# Global application state
+app_state = AppState()
+
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -157,14 +173,21 @@ def _log_startup_paths():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup logic
+    app_state.startup_time = time.time()
+    app_state.paths_logged = True
     _log_startup_paths()
+    
+    app_state.demo_user_ensured = True
     ensure_demo_user()
+    
+    app_state.repo_watcher_started = True
     start_repo_watcher_if_enabled()
     
     # Handle project root override and static file mounting at startup
     global ROOT, UI_DIR, APP_HTML
     EXPECTED_ROOT = Path(os.getenv("JARVIS_PROJECT_ROOT", "/home/bs/vscode/jarvis-agent"))
     if EXPECTED_ROOT.exists() and EXPECTED_ROOT != ROOT:
+        app_state.project_root_overridden = True
         ROOT = EXPECTED_ROOT
         UI_DIR = ROOT / "ui"
         APP_HTML = UI_DIR / "app.html"
@@ -2581,7 +2604,12 @@ async def v1_captcha():
 
 @app.get("/status")
 async def status():
-    return {"ok": True, "online": True, "version": "1.0.0"}
+    # Return status based on application state
+    return {
+        "ok": app_state.demo_user_ensured and app_state.paths_logged,
+        "online": True,
+        "version": "1.0.0"
+    }
 
 
 @app.get("/v1/info")

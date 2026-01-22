@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 
 from jarvis.db import get_conn
 from jarvis.agent_core.cache import TTLCache
+from jarvis.event_bus import Event, get_event_bus
 import traceback
 import uuid
 import logging
@@ -155,6 +156,23 @@ class ToolRunner:
         timeout_val = timeout if timeout is not None else TOOL_TIMEOUTS.get(name, self.default_timeout)
         retries_val = retries if retries is not None else self.default_retries
 
+        # Emit tool.started event
+        try:
+            bus = get_event_bus()
+            bus.publish(Event(
+                type="tool.started",
+                ts=t_start,
+                session_id=session_id,
+                payload={
+                    "tool_name": name,
+                    "input_summary": _redact_args(args or {}),
+                    "trace_id": trace_id
+                }
+            ))
+        except Exception:
+            # EventBus unavailable, continue silently
+            pass
+
         attempt = 0
         while attempt <= retries_val:
             attempt_start = time.time()
@@ -202,6 +220,38 @@ class ToolRunner:
             error=error_obj,
             trace_id=trace_id,
         )
+        
+        # Emit completion event
+        try:
+            bus = get_event_bus()
+            if success:
+                bus.publish(Event(
+                    type="tool.finished",
+                    ts=ended_at,
+                    session_id=session_id,
+                    payload={
+                        "tool_name": name,
+                        "ok": True,
+                        "duration_ms": duration_ms,
+                        "trace_id": trace_id
+                    }
+                ))
+            else:
+                bus.publish(Event(
+                    type="tool.failed",
+                    ts=ended_at,
+                    session_id=session_id,
+                    payload={
+                        "tool_name": name,
+                        "error": error_obj,
+                        "duration_ms": duration_ms,
+                        "trace_id": trace_id
+                    }
+                ))
+        except Exception:
+            # EventBus unavailable, continue silently
+            pass
+        
         if success and cache_key:
             _tool_cache.set(cache_key, tool_result, ttl=ttl)
         return tool_result

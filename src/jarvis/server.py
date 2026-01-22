@@ -1,6 +1,6 @@
 import asyncio
-import json
 import logging
+import json
 import os
 import re
 import time
@@ -16,6 +16,7 @@ from fastapi import BackgroundTasks, Cookie, Depends, FastAPI, File, Header, HTT
 from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse, JSONResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -92,8 +93,6 @@ from jarvis.notifications.store import (
 from jarvis.watchers.repo_watcher import start_repo_watcher_if_enabled
 from jarvis.watchers.test_watcher import run_pytest_and_notify
 
-app = FastAPI()
-
 ROOT = Path(__file__).resolve().parents[2]
 UI_DIR = ROOT / "ui"
 APP_HTML = UI_DIR / "app.html"
@@ -105,50 +104,6 @@ try:
 except Exception:
     BUILD_ID = str(int(time.time()))
 
-app.mount("/ui/static", StaticFiles(directory=str(UI_DIR / "static")), name="ui-static")
-# Removed /ui mount to allow routes to handle /ui/ redirects without interference
-
-# Allow overriding project root at runtime (helps when uvicorn was started from another copy)
-EXPECTED_ROOT = Path(os.getenv("JARVIS_PROJECT_ROOT", "/home/bs/vscode/jarvis-agent"))
-if EXPECTED_ROOT.exists() and EXPECTED_ROOT != ROOT:
-    # switch UI_DIR/APP_HTML to the expected repo path
-    ROOT = EXPECTED_ROOT
-    UI_DIR = ROOT / "ui"
-    APP_HTML = UI_DIR / "app.html"
-    try:
-        # re-mount static directories to point to the repository UI
-        app.mount("/ui/static", StaticFiles(directory=str(UI_DIR / "static")), name="ui-static")
-        app.mount("/static", StaticFiles(directory=os.path.join(UI_DIR, "static")), name="static")
-    except Exception:
-        # ignore mount errors if already mounted
-        pass
-
-
-@app.on_event("startup")
-async def _log_startup_paths():
-    # Log which server file and project root are active so authors can verify the correct repo is used.
-    try:
-        _req_logger.info(f"STARTUP: jarvis.server file: {__file__}")
-        _req_logger.info(f"STARTUP: PROJECT_ROOT: {ROOT}")
-        _req_logger.info(f"STARTUP: APP_HTML path: {APP_HTML} exists={APP_HTML.exists()}")
-    except Exception:
-        pass
-
-# UI routing: Legacy index.html redirects to modern app.html for deterministic UX
-# Users should always land on /app (ui/app.html), not legacy /ui/index.html
-
-@app.api_route("/ui/", methods=["GET", "HEAD"])
-async def ui_root_redirect():
-    """Redirect /ui/ to /app to ensure users land on modern UI"""
-    return RedirectResponse(url="/app", status_code=302)
-
-@app.api_route("/ui/index.html", methods=["GET", "HEAD"])
-async def legacy_index_redirect():
-    """Redirect legacy index.html to modern app to avoid confusion"""
-    return RedirectResponse(url="/app", status_code=302)
-
-ensure_demo_user()
-start_repo_watcher_if_enabled()
 
 DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 LOG_DIR = Path(os.getenv("JARVIS_LOG_DIR", DATA_DIR / "logs"))
@@ -186,7 +141,55 @@ DOCS_PATH = UI_DIR / "docs.html"
 TICKETS_PATH = UI_DIR / "tickets.html"
 MAINTENANCE_PATH = UI_DIR / "maintenance.html"
 
+
+def _log_startup_paths():
+    # Log which server file and project root are active so authors can verify the correct repo is used.
+    try:
+        _req_logger.info(f"STARTUP: jarvis.server file: {__file__}")
+        _req_logger.info(f"STARTUP: PROJECT_ROOT: {ROOT}")
+        _req_logger.info(f"STARTUP: APP_HTML path: {APP_HTML} exists={APP_HTML.exists()}")
+    except Exception:
+        pass
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    _log_startup_paths()
+    ensure_demo_user()
+    start_repo_watcher_if_enabled()
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
+
+# Mount static assets
+app.mount("/ui/static", StaticFiles(directory=str(UI_DIR / "static")), name="ui-static")
 app.mount("/static", StaticFiles(directory=os.path.join(UI_DIR, "static")), name="static")
+
+# Allow overriding project root at runtime (helps when uvicorn was started from another copy)
+EXPECTED_ROOT = Path(os.getenv("JARVIS_PROJECT_ROOT", "/home/bs/vscode/jarvis-agent"))
+if EXPECTED_ROOT.exists() and EXPECTED_ROOT != ROOT:
+    ROOT = EXPECTED_ROOT
+    UI_DIR = ROOT / "ui"
+    APP_HTML = UI_DIR / "app.html"
+    try:
+        app.mount("/ui/static", StaticFiles(directory=str(UI_DIR / "static")), name="ui-static")
+        app.mount("/static", StaticFiles(directory=os.path.join(UI_DIR, "static")), name="static")
+    except Exception:
+        pass
+
+# UI routing: Legacy index.html redirects to modern app.html for deterministic UX
+# Users should always land on /app (ui/app.html), not legacy /ui/index.html
+
+@app.api_route("/ui/", methods=["GET", "HEAD"])
+async def ui_root_redirect():
+    """Redirect /ui/ to /app to ensure users land on modern UI"""
+    return RedirectResponse(url="/app", status_code=302)
+
+@app.api_route("/ui/index.html", methods=["GET", "HEAD"])
+async def legacy_index_redirect():
+    """Redirect legacy index.html to modern app to avoid confusion"""
+    return RedirectResponse(url="/app", status_code=302)
 
 
 @app.middleware("http")
@@ -3122,10 +3125,6 @@ async def tickets_page():
 @app.get("/account")
 async def account_page():
     return FileResponse(ACCOUNT_PATH)
-
-
-
-
 
 
 

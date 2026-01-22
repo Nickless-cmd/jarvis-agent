@@ -182,10 +182,12 @@ def test_user_endpoints_work_with_cookie():
     token = login["token"]
     
     # User endpoint with cookie should work
-    resp = client.get("/sessions", cookies={"jarvis_token": token})
+    client.cookies.set("jarvis_token", token)
+    resp = client.get("/sessions")
     assert resp.status_code == 200
     assert "sessions" in resp.json()
     
     # Without cookie should fail
+    client.cookies.clear()
     resp = client.get("/sessions")
     assert resp.status_code == 401

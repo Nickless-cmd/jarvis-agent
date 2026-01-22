@@ -1,6 +1,7 @@
 import base64
 from urllib.parse import urlencode
 import json
+import logging
 import os
 import re
 import sqlite3
@@ -9,6 +10,7 @@ import sys
 import time
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Any
+from dataclasses import dataclass
 from zoneinfo import ZoneInfo
 
 from jarvis.memory import search_memory, add_memory
@@ -163,6 +165,25 @@ from jarvis.agent_skills.notes_skill import (
 
 from jarvis.agent_skills.process_skill import handle_process
 from jarvis.agent_skills.recap_skill import handle_recap, maybe_store_confirmation
+
+@dataclass
+class AgentStep:
+    step_type: str  # "thinking", "tool_call", "tool_result", "final"
+    name: str
+    started_at: float
+    duration_ms: int = 0
+    ok: bool = True
+
+def _record_agent_step(steps: list, step_type: str, name: str, started_at: float, ok: bool = True) -> None:
+    """Record an agent step with timing."""
+    duration_ms = int((time.time() - started_at) * 1000)
+    steps.append(AgentStep(
+        step_type=step_type,
+        name=name,
+        started_at=started_at,
+        duration_ms=duration_ms,
+        ok=ok
+    ))
 
 def _debug(msg: str) -> None:
     if os.getenv("JARVIS_DEBUG") == "1":
@@ -1557,6 +1578,9 @@ def _run_agent_core_fallback(
     perf_metrics = SimpleNamespace()
     log_performance_metrics = lambda *args, **kwargs: None  # no-op placeholder
     start_time = time.time()
+    
+    # Initialize agent step tracing
+    agent_steps = []
     if preloaded:
         mem = preloaded["mem"]
         session_hist = preloaded["session_hist"]
@@ -1892,7 +1916,9 @@ def _run_agent_core_fallback(
                 reply = cached_summary
                 add_memory("assistant", reply, user_id=user_id)
                 return TurnResult(reply_text=reply, meta={"tool": None, "tool_used": False})
+            read_article_start = time.time()
             article = call_tool("read_article", {"url": url}, user_id, session_id)
+            _record_agent_step(agent_steps, "tool_call", "read_article", read_article_start, not (article.get("error") or not article.get("text")))
             if article.get("error") or not article.get("text"):
                 _debug(f"📰 read-request: article fetch failed: {article.get('error')}")
                 reply = "Jeg kan ikke hente artiklen lige nu."
@@ -1992,7 +2018,9 @@ def _run_agent_core_fallback(
         pending_process = _load_state(get_process_state(session_id))
         pending_pid = pending_process.get("pid") if isinstance(pending_process, dict) else None
         if pending_pid and _process_confirm_intent(prompt):
+            kill_process_start = time.time()
             tool_result = call_tool("kill_process", {"pid": int(pending_pid)}, user_id, session_id)
+            _record_agent_step(agent_steps, "tool_call", "kill_process", kill_process_start, tool_result.get("ok"))
             set_process_state(session_id, "")
             reply = "Proces afsluttet." if tool_result.get("ok") else "Jeg kunne ikke afslutte processen."
             add_memory("assistant", reply, user_id=user_id)
@@ -2059,8 +2087,13 @@ def _run_agent_core_fallback(
                 )
             weather_reply = ux_error("weather_city_missing", ui_lang)
         else:
+            weather_now_start = time.time()
             weather_now_res = call_tool("weather_now", {"city": weather_city}, user_id, session_id)
+            _record_agent_step(agent_steps, "tool_call", "weather_now", weather_now_start, _tool_ok(weather_now_res))
+            
+            weather_forecast_start = time.time()
             weather_forecast_res = call_tool("weather_forecast", {"city": weather_city}, user_id, session_id)
+            _record_agent_step(agent_steps, "tool_call", "weather_forecast", weather_forecast_start, _tool_ok(weather_forecast_res))
             if not _tool_ok(weather_now_res) or not _tool_ok(weather_forecast_res):
                 weather_reply = _tool_error_text(
                     weather_now_res if not _tool_ok(weather_now_res) else weather_forecast_res,
@@ -2114,7 +2147,9 @@ def _run_agent_core_fallback(
 
         query = _extract_news_query(prompt)
         category = "technology" if _is_tech_query(query) else None
+        news_search_start = time.time()
         news_result = call_tool("news_search", {"query": query}, user_id, session_id)
+        _record_agent_step(agent_steps, "tool_call", "news_search", news_search_start, _tool_ok(news_result))
         if not _tool_ok(news_result):
             items = []
         else:
@@ -2214,8 +2249,13 @@ def _run_agent_core_fallback(
             reply = "Jeg mangler en by eller et postnummer. Hvis du ønsker det, kan jeg bruge din profilby."
             add_memory("assistant", reply, user_id=user_id)
             return TurnResult(reply_text=reply, meta={"tool": "weather", "tool_used": False})
+        weather_now_start = time.time()
         now_res = call_tool("weather_now", {"city": city}, user_id, session_id)
+        _record_agent_step(agent_steps, "tool_call", "weather_now", weather_now_start, _tool_ok(now_res))
+        
+        weather_forecast_start = time.time()
         forecast_res = call_tool("weather_forecast", {"city": city}, user_id, session_id)
+        _record_agent_step(agent_steps, "tool_call", "weather_forecast", weather_forecast_start, _tool_ok(forecast_res))
         now = _tool_data(now_res, {}) or {}
         forecast = _tool_data(forecast_res, {}) or {}
         tool_result = {
@@ -2240,20 +2280,32 @@ def _run_agent_core_fallback(
     elif tool == "news":
         query = _extract_news_query(prompt)
         category = "technology" if _is_tech_query(query) else None
+        news_start = time.time()
         tool_result = call_tool("news_search", {"query": query}, user_id, session_id)
+        _record_agent_step(agent_steps, "tool_call", "news_search", news_start, _tool_ok(tool_result))
     elif tool == "search":
         query = _extract_cv_query(prompt) if cv_intent else _extract_search_query(prompt)
+        search_start = time.time()
         tool_result = call_tool("search_combined", {"query": query, "max_items": 5}, user_id, session_id)
+        _record_agent_step(agent_steps, "tool_call", "search_combined", search_start, _tool_ok(tool_result))
     elif tool == "currency":
+        currency_start = time.time()
         tool_result = call_tool("currency_convert", {"frm": "EUR", "to": "DKK"}, user_id, session_id)
+        _record_agent_step(agent_steps, "tool_call", "currency_convert", currency_start, _tool_ok(tool_result))
     elif tool == "time":
+        time_start = time.time()
         tool_result = call_tool("time_now", {}, user_id, session_id)
+        _record_agent_step(agent_steps, "tool_call", "time_now", time_start, _tool_ok(tool_result))
     elif tool == "system":
+        system_start = time.time()
         tool_result = call_tool("system_info", {}, user_id, session_id)
+        _record_agent_step(agent_steps, "tool_call", "system_info", system_start, _tool_ok(tool_result))
     elif tool == "ping":
         host = _extract_host(prompt)
         if host:
+            ping_start = time.time()
             tool_result = call_tool("ping_host", {"host": host}, user_id, session_id)
+            _record_agent_step(agent_steps, "tool_call", "ping_host", ping_start, _tool_ok(tool_result))
         else:
             tool_result = {"error": "missing_host"}
     elif tool == "process":
@@ -2282,9 +2334,13 @@ def _run_agent_core_fallback(
                     add_message(session_id, "assistant", reply)
                 return TurnResult(reply_text=reply, meta={"tool": "process", "tool_used": False})
         elif action == "find":
+            find_process_start = time.time()
             tool_result = call_tool("find_process", {"query": prompt}, user_id, session_id)
+            _record_agent_step(agent_steps, "tool_call", "find_process", find_process_start, _tool_ok(tool_result))
         else:
+            list_processes_start = time.time()
             tool_result = call_tool("list_processes", {"limit": 10}, user_id, session_id)
+            _record_agent_step(agent_steps, "tool_call", "list_processes", list_processes_start, _tool_ok(tool_result))
 
     failure = _tool_failed(tool, tool_result)
     if failure:
@@ -2384,7 +2440,9 @@ def _run_agent_core_fallback(
             url = item.get("url")
             summary = ""
             if url:
+                read_article_start = time.time()
                 article = call_tool("read_article", {"url": url}, user_id, session_id)
+                _record_agent_step(agent_steps, "tool_call", "read_article", read_article_start, not (article.get("error") or not article.get("text")))
                 text = (article or {}).get("text") or ""
                 summary = _summarize_text(text, sentences=sentence_count)
                 if not summary:
@@ -2625,8 +2683,22 @@ def _run_agent_core_fallback(
         payload = tool_summary if tool_summary else tool_result
         messages.append({"role": "assistant", "content": f"Tool result: {payload}"})
 
+    # Record thinking step before LLM call
+    thinking_start = time.time()
     res = call_ollama(messages, model_profile)
+    _record_agent_step(agent_steps, "thinking", "llm_call", thinking_start, not res.get("error"))
+    
     if res.get("error"):
+        reply = ux_error("model_timeout", ui_lang)
+        if reminders_due and _should_attach_reminders(prompt):
+            reply = _prepend_reminders(reply, reminders_due, user_id_int)
+        add_memory("assistant", reply, user_id=user_id)
+        if session_id:
+            add_message(session_id, "assistant", reply)
+        # Record total request time and log performance metrics even on error
+        perf_metrics.total_request_time = time.time() - start_time
+        log_performance_metrics(user_id, session_id, perf_metrics)
+        return {"text": reply, "meta": {"tool": tool or None, "tool_used": tool_used}}
         reply = ux_error("model_timeout", ui_lang)
         if reminders_due and _should_attach_reminders(prompt):
             reply = _prepend_reminders(reply, reminders_due, user_id_int)
@@ -2650,6 +2722,16 @@ def _run_agent_core_fallback(
         reply = f"{reply}\n\n{resume_prompt}"
 
     add_memory("assistant", reply, user_id=user_id)
+
+    # Record final step and log agent steps
+    final_start = time.time()
+    _record_agent_step(agent_steps, "final", "response_complete", final_start, True)
+    
+    # Log agent steps at DEBUG level
+    logger = logging.getLogger(__name__)
+    if agent_steps:
+        steps_summary = [{"type": s.step_type, "name": s.name, "duration_ms": s.duration_ms, "ok": s.ok} for s in agent_steps]
+        logger.debug(f"Agent steps for user {user_id}: {steps_summary}")
 
     # Record total request time and log performance metrics
     perf_metrics.total_request_time = time.time() - start_time

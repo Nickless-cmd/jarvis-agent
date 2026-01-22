@@ -191,3 +191,142 @@ def test_user_endpoints_work_with_cookie():
     client.cookies.clear()
     resp = client.get("/sessions")
     assert resp.status_code == 401
+
+
+def test_events_endpoint():
+    """Test /v1/events endpoint returns EventBus events."""
+    from jarvis import server
+    from jarvis.events import publish, subscribe_all
+    from jarvis.event_store import get_event_store
+    
+    client = TestClient(server.app)
+    
+    # Clear event store and manually subscribe (in case lifespan doesn't run in TestClient)
+    event_store = get_event_store()
+    event_store.clear()
+    unsubscribe = subscribe_all(lambda event_type, payload: event_store.append(event_type, payload))
+    
+    # Register and login to get token
+    try:
+        register_user("charlie", "secret", email="charlie@example.com")
+    except sqlite3.IntegrityError:
+        pass
+    
+    login = login_user("charlie", "secret")
+    token = login["token"]
+    
+    # Set cookie for auth
+    client.cookies.set("jarvis_token", token)
+    
+    # First request should return empty
+    resp = client.get("/v1/events")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "events" in data
+    assert "last_id" in data
+    initial_last_id = data["last_id"]
+    
+    # Publish a test event
+    publish("test.event", {"message": "hello world"})
+    
+    # Get events again
+    resp = client.get("/v1/events")
+    assert resp.status_code == 200
+    
+    data = resp.json()
+    assert "events" in data
+    assert "last_id" in data
+    assert len(data["events"]) == 1
+    assert data["events"][0]["type"] == "test.event"
+    assert data["events"][0]["payload"]["message"] == "hello world"
+    
+    # Test pagination with after parameter
+    last_id = data["last_id"]
+    publish("test.event2", {"message": "second event"})
+    
+    resp = client.get(f"/v1/events?after={last_id}")
+    assert resp.status_code == 200
+    
+    data2 = resp.json()
+    assert len(data2["events"]) == 1
+    assert data2["events"][0]["type"] == "test.event2"
+    
+    # Cleanup
+    unsubscribe()
+
+
+def test_chat_events():
+    """Test chat lifecycle events are published to EventBus."""
+    from jarvis import server
+    from jarvis.events import publish, subscribe
+    from jarvis.event_store import get_event_store
+    
+    client = TestClient(server.app)
+    
+    # Register and login to get token
+    try:
+        register_user("charlie", "secret", email="charlie@example.com")
+    except sqlite3.IntegrityError:
+        pass
+    
+    login = login_user("charlie", "secret")
+    token = login["token"]
+    
+    # Set cookie for auth
+    client.cookies.set("jarvis_token", token)
+    
+    # Clear event store and manually subscribe
+    event_store = get_event_store()
+    event_store.clear()
+    unsubscribe = subscribe("*", lambda event_type, payload: event_store.append(event_type, payload))
+    
+    # Test the subscription
+    publish("test.event", {"test": "data"})
+    assert len(event_store.get_events()["events"]) == 1
+    
+    # Make a chat request
+    resp = client.post("/v1/chat/completions", json={
+        "messages": [{"role": "user", "content": "Hello, how are you?"}],
+        "model": "test",
+        "stream": False
+    })
+    assert resp.status_code == 200
+    
+    # Check events
+    resp = client.get("/v1/events")
+    assert resp.status_code == 200
+    
+    data = resp.json()
+    events = data["events"]
+    
+    # Should have test.event, chat.user_message and chat.assistant_message
+    event_types = [e["type"] for e in events]
+    assert "test.event" in event_types
+    assert "chat.user_message" in event_types
+    assert "chat.assistant_message" in event_types
+    
+    user_event = next(e for e in events if e["type"] == "chat.user_message")
+    assert "session_id" in user_event["payload"]
+    assert "message_id" in user_event["payload"]
+    assert user_event["payload"]["text_preview"] == "Hello, how are you?"
+    
+    assistant_event = next(e for e in events if e["type"] == "chat.assistant_message")
+    assert assistant_event["payload"]["ok"] is True
+    assert "text_preview" in assistant_event["payload"]
+    assert "duration_ms" in assistant_event["payload"]
+    
+    # Cleanup
+    unsubscribe()
+    
+    user_event = next(e for e in events if e["type"] == "chat.user_message")
+    assert "session_id" in user_event["payload"]
+    assert "message_id" in user_event["payload"]
+    assert user_event["payload"]["text_preview"] == "Hello, how are you?"
+    
+    assistant_event = next(e for e in events if e["type"] == "chat.assistant_message")
+    assert assistant_event["payload"]["ok"] is True
+    assert "text_preview" in assistant_event["payload"]
+    assert "duration_ms" in assistant_event["payload"]
+    
+    # Cleanup
+    unsubscribe()

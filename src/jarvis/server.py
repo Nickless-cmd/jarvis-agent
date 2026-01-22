@@ -12,12 +12,13 @@ import gzip
 from datetime import datetime, timezone, timedelta
 import uuid
 import sqlite3
-from fastapi import BackgroundTasks, Cookie, Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
+from fastapi import BackgroundTasks, Cookie, Depends, FastAPI, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse, JSONResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from typing import Optional
 
 
 @dataclass
@@ -53,6 +54,8 @@ from jarvis.db import get_conn, log_login_session
 from jarvis.personality import SYSTEM_PROMPT
 from jarvis.prompts.system_prompts import SYSTEM_PROMPT_USER, SYSTEM_PROMPT_ADMIN
 from jarvis.prompt_manager import get_prompt_manager
+from jarvis.event_store import get_event_store
+from jarvis.events import subscribe_all
 from jarvis.memory import purge_user_memory
 from jarvis.files import (
     safe_path,
@@ -109,6 +112,8 @@ from jarvis.notifications.store import (
 )
 from jarvis.watchers.repo_watcher import start_repo_watcher_if_enabled
 from jarvis.watchers.test_watcher import run_pytest_and_notify
+from jarvis.event_store import get_event_store
+from jarvis.events import subscribe, publish
 
 ROOT = Path(__file__).resolve().parents[2]
 UI_DIR = ROOT / "ui"
@@ -183,6 +188,10 @@ async def lifespan(app: FastAPI):
     app_state.repo_watcher_started = True
     start_repo_watcher_if_enabled()
     
+    # Subscribe EventStore to EventBus
+    event_store = get_event_store()
+    unsubscribe_events = subscribe_all(lambda et, payload: event_store.append(et, payload))
+    
     # Handle project root override and static file mounting at startup
     global ROOT, UI_DIR, APP_HTML
     EXPECTED_ROOT = Path(os.getenv("JARVIS_PROJECT_ROOT", "/home/bs/vscode/jarvis-agent"))
@@ -197,10 +206,13 @@ async def lifespan(app: FastAPI):
         except Exception:
             pass
     
-    yield
-    
-    # Shutdown logic (currently none)
-    pass
+    try:
+        yield
+    finally:
+        try:
+            unsubscribe_events()
+        except Exception:
+            pass
 
 
 app = FastAPI(lifespan=lifespan)
@@ -1217,8 +1229,8 @@ async def notifications(
 
 @app.get("/v1/events")
 async def list_events_endpoint(
-    since_id: int | None = None,
-    limit: int = 50,
+    after: Optional[int] = Query(None, description="Return events after this ID"),
+    limit: Optional[int] = Query(None, description="Maximum number of events to return"),
     authorization: str | None = Header(None),
     token: str | None = Depends(_resolve_token),
 ):
@@ -1230,8 +1242,11 @@ async def list_events_endpoint(
     if user.get("is_disabled"):
         raise HTTPException(403, detail="User is disabled")
     _enforce_maintenance(user)
-    events = list_notification_events(user["id"], since_id=since_id, limit=limit)
-    return {"events": events}
+    
+    # Use EventStore for EventBus events
+    event_store = get_event_store()
+    result = event_store.get_events(after=after, limit=limit)
+    return result
 
 
 @app.get("/v1/prompts")
@@ -2024,6 +2039,21 @@ async def chat(
             return JSONResponse(status_code=exc.status_code, content=exc.detail)
         raise
     _debug(f"📨 chat: user={user['username']} session={session_id} stream={stream} prompt={prompt!r}")
+    
+    # Publish chat.user_message event
+    message_id = f"chatcmpl-{uuid.uuid4().hex}"
+    if prompt:
+        text_preview = prompt[:120] if len(prompt) > 120 else prompt
+        try:
+            publish("chat.user_message", {
+                "session_id": session_id,
+                "message_id": message_id,
+                "text_preview": text_preview,
+                "ts": time.time(),
+            })
+        except Exception:
+            pass
+    
     if prompt and _contains_sensitive(prompt):
         if session_id:
             with get_conn() as conn:
@@ -2346,15 +2376,40 @@ async def chat(
         return StreamingResponse(generator(), media_type="text/event-stream")
 
     ui_city = req.headers.get("x-ui-city")
-    result = run_agent(
-        user["username"],
-        prompt,
-        session_id=session_id,
-        allowed_tools=allowed_tools,
-        ui_city=ui_city,
-        ui_lang=ui_lang,
-    )
-    text = _butlerize_text(result.get("text", ""), user)
+    start_time = time.time()
+    try:
+        result = run_agent(
+            user["username"],
+            prompt,
+            session_id=session_id,
+            allowed_tools=allowed_tools,
+            ui_city=ui_city,
+            ui_lang=ui_lang,
+        )
+        duration_ms = int((time.time() - start_time) * 1000)
+        
+        # Publish chat.assistant_message event
+        if prompt:
+            text_preview = result.get("text", "")[:120]
+            publish("chat.assistant_message", {
+                "session_id": session_id,
+                "message_id": message_id,
+                "ok": True,
+                "text_preview": text_preview,
+                "duration_ms": duration_ms,
+            })
+        
+        text = _butlerize_text(result.get("text", ""), user)
+    except Exception as exc:
+        # Publish chat.error event
+        if prompt:
+            publish("chat.error", {
+                "session_id": session_id,
+                "message_id": message_id,
+                "error": str(exc),
+                "stage": "agent_processing",
+            })
+        raise
     if note_reminder:
         text = f"{note_reminder}\n\n{text}"
     if expiry_warning:

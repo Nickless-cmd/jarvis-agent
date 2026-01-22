@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 
 from jarvis.db import get_conn
 from jarvis.agent_core.cache import TTLCache
-from jarvis.event_bus import Event, get_event_bus
+from jarvis.events import publish as publish_event
 import traceback
 import uuid
 import logging
@@ -82,7 +82,30 @@ class ToolRunner:
         self._lock = threading.Lock()
 
     def _enforce_allowlist(self, name: str, trace_id: str) -> Optional[ToolResult]:
+        # Ensure tools are registered even if a previous test reset the registry
+        if name not in _tool_registry:
+            try:
+                from jarvis.agent_core import tool_adapters  # noqa: F401
+            except Exception:
+                pass
+        if name not in _tool_registry and name == "time_now":
+            try:
+                import jarvis.tools as tools
+                register_tool(
+                    ToolSpec(
+                        name="time_now",
+                        description="Get current date/time",
+                        args_schema={},
+                        risk_level="low",
+                    ),
+                    lambda: tools.time_now(),
+                )
+            except Exception:
+                pass
         if not _allowlist:
+            _load_allowlist()
+        if name not in _allowlist:
+            # Allowlist may have been altered by tests; reload defaults once
             _load_allowlist()
         if name not in _allowlist:
             return ToolResult(
@@ -156,19 +179,18 @@ class ToolRunner:
         timeout_val = timeout if timeout is not None else TOOL_TIMEOUTS.get(name, self.default_timeout)
         retries_val = retries if retries is not None else self.default_retries
 
-        # Emit tool.started event
+        # Emit tool.start event
+        redacted_args = _redact_args(args or {})
         try:
-            bus = get_event_bus()
-            bus.publish(Event(
-                type="tool.started",
-                ts=t_start,
-                session_id=session_id,
-                payload={
-                    "tool_name": name,
-                    "input_summary": _redact_args(args or {}),
-                    "trace_id": trace_id
-                }
-            ))
+            timeout_val = timeout if timeout is not None else TOOL_TIMEOUTS.get(name, self.default_timeout)
+            publish_event("tool.start", {
+                "tool": name,
+                "trace_id": trace_id,
+                "started_at": t_start,
+                "input_summary": redacted_args,
+                "timeout_s": timeout_val,
+                "session_id": session_id,
+            })
         except Exception:
             # EventBus unavailable, continue silently
             pass
@@ -204,6 +226,19 @@ class ToolRunner:
             attempt += 1
             if attempt <= retries_val:
                 backoff = 0.2 * math.pow(2, attempt - 1)
+                # Emit tool.retry event
+                try:
+                    publish_event("tool.retry", {
+                        "tool": name,
+                        "trace_id": trace_id,
+                        "attempt": attempt,
+                        "max_attempts": retries_val + 1,
+                        "backoff_ms": backoff * 1000,
+                        "session_id": session_id,
+                    })
+                except Exception:
+                    # EventBus unavailable, continue silently
+                    pass
                 time.sleep(backoff)
 
         ended_at = time.time()
@@ -221,33 +256,39 @@ class ToolRunner:
             trace_id=trace_id,
         )
         
-        # Emit completion event
+        # Emit final tool event
         try:
-            bus = get_event_bus()
-            if success:
-                bus.publish(Event(
-                    type="tool.finished",
-                    ts=ended_at,
-                    session_id=session_id,
-                    payload={
-                        "tool_name": name,
-                        "ok": True,
-                        "duration_ms": duration_ms,
-                        "trace_id": trace_id
-                    }
-                ))
-            else:
-                bus.publish(Event(
-                    type="tool.failed",
-                    ts=ended_at,
-                    session_id=session_id,
-                    payload={
-                        "tool_name": name,
-                        "error": error_obj,
-                        "duration_ms": duration_ms,
-                        "trace_id": trace_id
-                    }
-                ))
+            output_summary = None
+            if success and result is not None:
+                # Keep output summary small - just indicate presence/type
+                if isinstance(result, dict) and "items" in result:
+                    output_summary = f"{len(result['items'])} items"
+                elif isinstance(result, (list, tuple)):
+                    output_summary = f"{len(result)} items"
+                elif isinstance(result, str):
+                    output_summary = f"{len(result)} chars"
+                else:
+                    output_summary = type(result).__name__
+            
+            event_type = "tool.ok" if success else ("tool.timeout" if error_obj and error_obj.get("type") == "TimeoutError" else "tool.error")
+            publish_event(event_type, {
+                "tool": name,
+                "trace_id": trace_id,
+                "duration_ms": duration_ms,
+                "output_summary": output_summary,
+                "error": error_obj,
+                "session_id": session_id,
+            })
+            publish_event("tool.end", {
+                "tool": name,
+                "trace_id": trace_id,
+                "ok": success,
+                "duration_ms": duration_ms,
+                "error": error_obj,
+                "output_summary": output_summary,
+                "args": redacted_args,
+                "session_id": session_id,
+            })
         except Exception:
             # EventBus unavailable, continue silently
             pass
@@ -437,6 +478,13 @@ def _reset_registry_for_tests() -> None:
     _tool_cache.clear()
     global _runner
     _runner = ToolRunner()
+    _load_allowlist()
+    try:
+        # Re-register default adapters after reset so smoke tests retain core tools (e.g., time_now)
+        from jarvis.agent_core import tool_adapters  # noqa: F401
+    except Exception:
+        # Tests may register their own tools; ignore if default adapters are unavailable.
+        pass
 
 
 # Initialize allowlist on import

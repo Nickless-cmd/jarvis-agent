@@ -2378,12 +2378,20 @@ async def chat(
 
     if stream:
         async def generator():
+            from jarvis.events import subscribe_async
+            
             trace_id = uuid.uuid4().hex
             stream_id = f"chatcmpl-{uuid.uuid4().hex}"
             deadline = time.monotonic() + MAX_STREAM_SECONDS
             done_sent = False
             agent_start_time = time.time()
-
+            
+            # Subscribe to agent.stream events for this trace_id
+            event_queue = await subscribe_async(
+                ["agent.stream.start", "agent.stream.delta", "agent.stream.final", "agent.stream.error", "agent.stream.status"],
+                session_filter=session_id
+            )
+            
             try:
                 # Emit agent.start event
                 try:
@@ -2399,117 +2407,288 @@ async def chat(
                 tool_hint = choose_tool(prompt, allowed_tools=allowed_tools)
                 if tool_hint in {"news", "search", "weather", "currency"}:
                     yield _status_event("using_tool", tool_hint, trace_id=trace_id, session_id=session_id)
+                
+                # Start agent in background task
+                agent_task = None
+                agent_result = None
+                agent_error = None
                 ui_city = req.headers.get("x-ui-city")
-                try:
-                    result = run_agent(
-                        user["username"],
-                        prompt,
-                        session_id=session_id,
-                        allowed_tools=allowed_tools,
-                        ui_city=ui_city,
-                        ui_lang=ui_lang,
-                    )
-                except asyncio.CancelledError:
-                    _req_logger.info("Streaming run_agent cancelled trace=%s", trace_id)
+                
+                async def run_agent_task():
+                    nonlocal agent_result, agent_error
                     try:
-                        publish("agent.stream.error", {
-                            "session_id": session_id,
-                            "message_id": stream_id,
-                            "trace_id": trace_id,
-                            "error": "Cancelled",
-                        })
-                    except Exception:
-                        pass
-                    return
-                except Exception as exc:
-                    _req_logger.exception("Streaming run_agent failed trace=%s", trace_id)
-                    try:
-                        publish("agent.error", {
-                            "session_id": session_id,
-                            "trace_id": trace_id,
-                            "error_type": exc.__class__.__name__,
-                            "error_message": str(exc),
-                        })
-                    except Exception:
-                        pass
-                    try:
-                        publish("agent.stream.error", {
-                            "session_id": session_id,
-                            "message_id": stream_id,
-                            "trace_id": trace_id,
-                            "error": str(exc),
-                        })
-                    except Exception:
-                        pass
-                    yield _stream_error_event(
-                        "Provider or server error. Please retry.",
-                        exc.__class__.__name__,
-                        trace_id,
-                        session_id,
-                    )
-                    yield "data: [DONE]\n\n"
-                    return
-
-                if result.get("meta", {}).get("tool_used"):
-                    yield _status_event(
-                        "writing",
-                        result.get("meta", {}).get("tool"),
-                        trace_id=trace_id,
-                        session_id=session_id,
-                    )
-                text_stream = _butlerize_text(result.get("text", ""), user)
-                if note_reminder:
-                    text_stream = f"{note_reminder}\n\n{text_stream}"
-                if expiry_warning:
-                    text_stream = f"{expiry_warning}\n\n{text_stream}"
-                if quota_warning:
-                    text_stream = f"{quota_warning}\n\n{text_stream}"
-                for chunk in _stream_chunks(
-                    text_stream,
-                    model,
-                    stream_id=stream_id,
-                    trace_id=trace_id,
-                    session_id=session_id,
-                ):
-                    # early termination on timeout/disconnect
-                    if await req.is_disconnected():
-                        # Emit agent.stream.error event for disconnect
+                        # Run agent
+                        result = await asyncio.to_thread(
+                            run_agent,
+                            user["username"],
+                            prompt,
+                            session_id=session_id,
+                            allowed_tools=allowed_tools,
+                            ui_city=ui_city,
+                            ui_lang=ui_lang,
+                        )
+                        agent_result = result
+                        
+                        # Process result and emit streaming events
+                        if result.get("meta", {}).get("tool_used"):
+                            # Emit agent.stream.status event for tool usage
+                            try:
+                                publish("agent.stream.status", {
+                                    "session_id": session_id,
+                                    "message_id": stream_id,
+                                    "trace_id": trace_id,
+                                    "status": "writing",
+                                    "tool": result.get("meta", {}).get("tool"),
+                                })
+                            except Exception:
+                                pass
+                        
+                        text_stream = _butlerize_text(result.get("text", ""), user)
+                        if note_reminder:
+                            text_stream = f"{note_reminder}\n\n{text_stream}"
+                        if expiry_warning:
+                            text_stream = f"{expiry_warning}\n\n{text_stream}"
+                        if quota_warning:
+                            text_stream = f"{quota_warning}\n\n{text_stream}"
+                        
+                        # Run _stream_chunks to emit events (consume yields but don't use them)
+                        await asyncio.to_thread(lambda: list(_stream_chunks(
+                            text_stream,
+                            model,
+                            stream_id=stream_id,
+                            trace_id=trace_id,
+                            session_id=session_id,
+                        )))
+                        
+                    except asyncio.CancelledError:
+                        # CancelledError should not emit error events - it's handled by the main generator
+                        raise  # Re-raise to be handled by main generator
+                    except Exception as exc:
+                        agent_error = exc
+                        # Emit agent.error event
                         try:
-                            publish("agent.stream.error", {
-                                "message_id": stream_id,
+                            publish("agent.error", {
                                 "session_id": session_id,
                                 "trace_id": trace_id,
-                                "error_type": "ClientDisconnected",
-                                "error_message": "Client disconnected during streaming",
+                                "error_type": exc.__class__.__name__,
+                                "error_message": str(exc),
                             })
                         except Exception:
-                            pass  # EventBus unavailable, continue
+                            pass
+                        # Emit agent.stream.error
+                        try:
+                            publish("agent.stream.error", {
+                                "session_id": session_id,
+                                "message_id": stream_id,
+                                "trace_id": trace_id,
+                                "error_type": "ProviderError",
+                                "error_message": "Provider or server error. Please retry.",
+                            })
+                        except Exception:
+                            pass
+                
+                agent_task = asyncio.create_task(run_agent_task())
+                
+                # Process streaming events
+                while True:
+                    try:
+                        event_type, payload = await asyncio.wait_for(event_queue.get(), timeout=0.1)
+                        
+                        if event_type == "agent.stream.start":
+                            # Yield the head chunk
+                            created = int(time.time())
+                            head = {
+                                "id": stream_id,
+                                "object": "chat.completion.chunk",
+                                "created": created,
+                                "model": model,
+                                "trace_id": trace_id,
+                                "session_id": session_id,
+                                "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
+                            }
+                            yield f"data: {json.dumps(head)}\n\n"
+                        
+                        elif event_type == "agent.stream.delta":
+                            # Yield data chunk
+                            created = int(time.time())
+                            data = {
+                                "id": stream_id,
+                                "object": "chat.completion.chunk",
+                                "created": created,
+                                "model": model,
+                                "trace_id": trace_id,
+                                "session_id": session_id,
+                                "choices": [{"index": 0, "delta": {"content": payload["token"]}, "finish_reason": None}],
+                            }
+                            yield f"data: {json.dumps(data)}\n\n"
+                        
+                        elif event_type == "agent.stream.status":
+                            # Yield status event for tool usage
+                            yield _status_event(
+                                payload["status"],
+                                payload.get("tool"),
+                                trace_id=trace_id,
+                                session_id=session_id,
+                            )
+                        
+                        elif event_type == "agent.stream.final":
+                            # Yield tail chunk and DONE
+                            created = int(time.time())
+                            tail = {
+                                "id": stream_id,
+                                "object": "chat.completion.chunk",
+                                "created": created,
+                                "model": model,
+                                "trace_id": trace_id,
+                                "session_id": session_id,
+                                "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                            }
+                            yield f"data: {json.dumps(tail)}\n\n"
+                            yield "data: [DONE]\n\n"
+                            done_sent = True
+                            break
+                        
+                        elif event_type == "agent.stream.error":
+                            yield _stream_error_event(
+                                payload.get("error_message", "Stream error"),
+                                payload.get("error_type", "Error"),
+                                trace_id,
+                                session_id,
+                            )
+                            yield "data: [DONE]\n\n"
+                            return
+                            
+                    except asyncio.TimeoutError:
+                        # Check if agent task is done - if so, wait a bit more for any remaining events
+                        if agent_task and agent_task.done():
+                            # Wait a short time for any remaining events
+                            try:
+                                event_type, payload = await asyncio.wait_for(event_queue.get(), timeout=0.5)
+                                # Process the event (same logic as above)
+                                if event_type == "agent.stream.start":
+                                    created = int(time.time())
+                                    head = {
+                                        "id": stream_id,
+                                        "object": "chat.completion.chunk",
+                                        "created": created,
+                                        "model": model,
+                                        "trace_id": trace_id,
+                                        "session_id": session_id,
+                                        "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
+                                    }
+                                    yield f"data: {json.dumps(head)}\n\n"
+                                
+                                elif event_type == "agent.stream.delta":
+                                    created = int(time.time())
+                                    data = {
+                                        "id": stream_id,
+                                        "object": "chat.completion.chunk",
+                                        "created": created,
+                                        "model": model,
+                                        "trace_id": trace_id,
+                                        "session_id": session_id,
+                                        "choices": [{"index": 0, "delta": {"content": payload["token"]}, "finish_reason": None}],
+                                    }
+                                    yield f"data: {json.dumps(data)}\n\n"
+                                
+                                elif event_type == "agent.stream.final":
+                                    created = int(time.time())
+                                    tail = {
+                                        "id": stream_id,
+                                        "object": "chat.completion.chunk",
+                                        "created": created,
+                                        "model": model,
+                                        "trace_id": trace_id,
+                                        "session_id": session_id,
+                                        "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                                    }
+                                    yield f"data: {json.dumps(tail)}\n\n"
+                                    yield "data: [DONE]\n\n"
+                                    done_sent = True
+                                    break
+                                
+                                elif event_type == "agent.stream.status":
+                                    yield _status_event(
+                                        payload["status"],
+                                        payload.get("tool"),
+                                        trace_id=trace_id,
+                                        session_id=session_id,
+                                    )
+                                
+                                elif event_type == "agent.stream.error":
+                                    yield _stream_error_event(
+                                        payload.get("error_message", "Stream error"),
+                                        payload.get("error_type", "Error"),
+                                        trace_id,
+                                        session_id,
+                                    )
+                                    yield "data: [DONE]\n\n"
+                                    return
+                            except asyncio.TimeoutError:
+                                # No more events, break
+                                break
+                        
+                        # Check for disconnect/timeout
+                        if await req.is_disconnected():
+                            if agent_task and not agent_task.done():
+                                agent_task.cancel()
+                            try:
+                                publish("agent.stream.error", {
+                                    "message_id": stream_id,
+                                    "session_id": session_id,
+                                    "trace_id": trace_id,
+                                    "error_type": "ClientDisconnected",
+                                    "error_message": "Client disconnected during streaming",
+                                })
+                            except Exception:
+                                pass
+                            return
+                        if time.monotonic() > deadline:
+                            if agent_task and not agent_task.done():
+                                agent_task.cancel()
+                            try:
+                                publish("agent.stream.error", {
+                                    "message_id": stream_id,
+                                    "session_id": session_id,
+                                    "trace_id": trace_id,
+                                    "error_type": "Timeout",
+                                    "error_message": "Streaming timeout",
+                                })
+                            except Exception:
+                                pass
+                            yield _stream_error_event(
+                                "Streaming timeout. Please retry.",
+                                "Timeout",
+                                trace_id,
+                                session_id,
+                            )
+                            yield "data: [DONE]\n\n"
+                            return
+                
+                # Wait for agent task to complete
+                if agent_task:
+                    try:
+                        await agent_task
+                        if agent_error:
+                            raise agent_error
+                        result = agent_result
+                    except asyncio.CancelledError:
+                        _req_logger.info("Streaming run_agent cancelled trace=%s", trace_id)
                         return
-                    if time.monotonic() > deadline:
-                        # Emit agent.stream.error event for timeout
-                        try:
-                            publish("agent.stream.error", {
-                                "message_id": stream_id,
-                                "session_id": session_id,
-                                "trace_id": trace_id,
-                                "error_type": "Timeout",
-                                "error_message": "Streaming timeout",
-                            })
-                        except Exception:
-                            pass  # EventBus unavailable, continue
+                    except Exception as exc:
+                        _req_logger.exception("Streaming run_agent failed trace=%s", trace_id)
                         yield _stream_error_event(
-                            "Streaming timeout. Please retry.",
-                            "Timeout",
+                            "Provider or server error. Please retry.",
+                            exc.__class__.__name__,
                             trace_id,
                             session_id,
                         )
                         yield "data: [DONE]\n\n"
                         return
-                    if chunk.endswith("[DONE]\n\n"):
-                        done_sent = True
-                    yield chunk
                 
                 yield _status_event("idle", trace_id=trace_id, session_id=session_id)
+                
+                # Emit agent.done event
                 try:
                     publish("agent.done", {
                         "session_id": session_id,
@@ -2518,6 +2697,7 @@ async def chat(
                     })
                 except Exception:
                     pass
+                
                 rendered_text_stream = result.get("rendered_text")
                 payload_data_stream = result.get("data")
                 payload_meta_stream = result.get("meta")
@@ -2543,39 +2723,24 @@ async def chat(
                         f"data: {json.dumps(payload)}\n\n"
                     )
                 
-                # Emit agent.done event
-                try:
-                    publish("agent.done", {
-                        "session_id": session_id,
-                        "trace_id": trace_id,
-                        "duration_ms": int((time.time() - agent_start_time) * 1000),
-                    })
-                except Exception:
-                    pass  # EventBus unavailable, continue
-            except asyncio.CancelledError:
-                _req_logger.info("Streaming cancelled trace=%s", trace_id)
-                return
             except Exception as exc:
-                _req_logger.exception("Streaming error trace=%s", trace_id)
-                # Emit agent.error event
-                try:
-                    publish("agent.error", {
-                        "session_id": session_id,
-                        "trace_id": trace_id,
-                        "error_type": exc.__class__.__name__,
-                        "error_message": str(exc),
-                    })
-                except Exception:
-                    pass  # EventBus unavailable, continue
-                yield _stream_error_event(
-                    "Streaming error. Please retry.",
-                    exc.__class__.__name__,
-                    trace_id,
-                    session_id,
-                )
-            finally:
+                _req_logger.exception("Streaming generator failed trace=%s", trace_id)
                 if not done_sent:
+                    yield _stream_error_event(
+                        "Internal server error",
+                        "InternalError",
+                        trace_id,
+                        session_id,
+                    )
                     yield "data: [DONE]\n\n"
+            finally:
+                # Cleanup
+                try:
+                    event_queue.cleanup()
+                except Exception:
+                    pass
+                if agent_task and not agent_task.done():
+                    agent_task.cancel()
 
         return StreamingResponse(generator(), media_type="text/event-stream")
 

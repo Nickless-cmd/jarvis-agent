@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from typing import Callable, Dict, List, Any
+import asyncio
 
 # Mapping of event_type -> list of callbacks
 _subs: Dict[str, List[Callable[[Any], None]]] = defaultdict(list)
@@ -46,6 +47,36 @@ def subscribe_all(callback: Callable[[str, Any], None]) -> Callable[[], None]:
             pass
 
     return unsubscribe
+
+
+async def subscribe_async(event_types: List[str], session_filter: str | None = None) -> asyncio.Queue:
+    """
+    Subscribe to multiple event types and return an async queue.
+    Events are filtered by session_id if provided.
+    
+    Returns a queue that will receive (event_type, payload) tuples.
+    """
+    queue = asyncio.Queue()
+    
+    def handler(event_type, payload):
+        if session_filter and payload.get("session_id") != session_filter:
+            return
+        queue.put_nowait((event_type, payload))
+    
+    unsubscribers = []
+    for event_type in event_types:
+        unsubscribers.append(subscribe(event_type, handler))
+    
+    # Return queue and cleanup function
+    def cleanup():
+        for unsub in unsubscribers:
+            try:
+                unsub()
+            except Exception:
+                pass
+    
+    queue.cleanup = cleanup  # type: ignore
+    return queue
 
 
 def publish(event_type: str, payload: Any) -> None:

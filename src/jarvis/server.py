@@ -156,29 +156,47 @@ def _log_startup_paths():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Startup logic
     _log_startup_paths()
     ensure_demo_user()
     start_repo_watcher_if_enabled()
+    
+    # Handle project root override and static file mounting at startup
+    global ROOT, UI_DIR, APP_HTML
+    EXPECTED_ROOT = Path(os.getenv("JARVIS_PROJECT_ROOT", "/home/bs/vscode/jarvis-agent"))
+    if EXPECTED_ROOT.exists() and EXPECTED_ROOT != ROOT:
+        ROOT = EXPECTED_ROOT
+        UI_DIR = ROOT / "ui"
+        APP_HTML = UI_DIR / "app.html"
+        try:
+            app.mount("/ui/static", StaticFiles(directory=str(UI_DIR / "static")), name="ui-static")
+            app.mount("/static", StaticFiles(directory=os.path.join(UI_DIR, "static")), name="static")
+        except Exception:
+            pass
+    
     yield
+    
+    # Shutdown logic (currently none)
+    pass
 
 
 app = FastAPI(lifespan=lifespan)
 
-# Mount static assets
+# Mount static assets (will be remounted in lifespan if project root changes)
 app.mount("/ui/static", StaticFiles(directory=str(UI_DIR / "static")), name="ui-static")
 app.mount("/static", StaticFiles(directory=os.path.join(UI_DIR, "static")), name="static")
 
-# Allow overriding project root at runtime (helps when uvicorn was started from another copy)
-EXPECTED_ROOT = Path(os.getenv("JARVIS_PROJECT_ROOT", "/home/bs/vscode/jarvis-agent"))
-if EXPECTED_ROOT.exists() and EXPECTED_ROOT != ROOT:
-    ROOT = EXPECTED_ROOT
-    UI_DIR = ROOT / "ui"
-    APP_HTML = UI_DIR / "app.html"
-    try:
-        app.mount("/ui/static", StaticFiles(directory=str(UI_DIR / "static")), name="ui-static")
-        app.mount("/static", StaticFiles(directory=os.path.join(UI_DIR, "static")), name="static")
-    except Exception:
-        pass
+# Allow overriding project root at runtime (handled in lifespan now)
+# EXPECTED_ROOT = Path(os.getenv("JARVIS_PROJECT_ROOT", "/home/bs/vscode/jarvis-agent"))
+# if EXPECTED_ROOT.exists() and EXPECTED_ROOT != ROOT:
+#     ROOT = EXPECTED_ROOT
+#     UI_DIR = ROOT / "ui"
+#     APP_HTML = UI_DIR / "app.html"
+#     try:
+#         app.mount("/ui/static", StaticFiles(directory=str(UI_DIR / "static")), name="ui-static")
+#         app.mount("/static", StaticFiles(directory=os.path.join(UI_DIR, "static")), name="static")
+#     except Exception:
+#         pass
 
 # UI routing: Legacy index.html redirects to modern app.html for deterministic UX
 # Users should always land on /app (ui/app.html), not legacy /ui/index.html

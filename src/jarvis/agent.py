@@ -134,6 +134,7 @@ from jarvis.agent_core.project_memory import (
 from jarvis.provider.ollama_client import ollama_request
 from jarvis.user_preferences import get_user_preferences, set_user_preferences, build_persona_directive, parse_preference_command
 from jarvis.personality import SYSTEM_PROMPT
+from jarvis.context_builder import get_context_builder
 
 import jarvis.agent as agent
 print("JARVIS agent loaded from:", agent.__file__)
@@ -1660,14 +1661,6 @@ def _run_agent_core_fallback(
             if session_id:
                 set_conversation_state(session_id, conversation_state.to_json())
         model_profile = get_mode(session_id) if session_id else "balanced"
-    budget = get_budget()
-    session_hist, mem, context_counts, budget_exceeded, items_trimmed = budget.enforce_budget(session_hist, mem)
-    if preloaded:
-        preloaded["mem"] = mem
-        preloaded["session_hist"] = session_hist
-    context_counts = context_counts if 'context_counts' in locals() else {}
-    budget_exceeded = budget_exceeded if 'budget_exceeded' in locals() else False
-    items_trimmed = items_trimmed if 'items_trimmed' in locals() else 0
     
     # Handle user preference commands
     pref_updates = parse_preference_command(prompt, ui_lang or "da")
@@ -2667,21 +2660,23 @@ def _run_agent_core_fallback(
     
     # Use preferred name if set
     effective_name = user_prefs.get("preferred_name") or display_name
-    name_hint = f"Brugerens navn er {effective_name}."
-    time_context = inject_time_context(ui_lang)
-    project_context = _project_context_block(prompt, ui_lang)
-    
-    sys_content_parts = [sys_prompt, name_hint, mode_hint, time_context]
-    if project_context:
-        sys_content_parts.append(project_context)
-    messages = [{"role": "system", "content": "\n".join(sys_content_parts)}]
-    if mem:
-        messages.append({"role": "assistant", "content": "\n".join(mem)})
-    messages.extend(_format_history(session_hist))
-    messages.append({"role": "user", "content": prompt})
-    if tool_result is not None:
-        payload = tool_summary if tool_summary else tool_result
-        messages.append({"role": "assistant", "content": f"Tool result: {payload}"})
+    # Build conversation context using centralized builder
+    context_builder = get_context_builder()
+    context_result = context_builder.build_context(
+        user_id=user_id,
+        prompt=prompt,
+        session_id=session_id,
+        ui_lang=ui_lang,
+        allowed_tools=allowed_tools,
+        tool_result=tool_result if tool_summary else None,
+        is_admin=is_admin_user,
+    )
+    messages = context_result.messages
+
+    # Update performance metrics with context info
+    perf_metrics.context_counts = context_result.context_counts
+    perf_metrics.budget_exceeded = context_result.budget_exceeded
+    perf_metrics.items_trimmed = context_result.items_trimmed
 
     # Record thinking step before LLM call
     thinking_start = time.time()

@@ -98,3 +98,46 @@ def test_events_endpoint_returns_tool_events():
         assert len(ok_events) == 1
         assert ok_events[0]["payload"]["tool"] == "test_tool"
         assert "duration_ms" in ok_events[0]["payload"]
+
+
+def test_events_endpoint_returns_agent_events():
+    from jarvis import server
+    client = TestClient(server.app)
+
+    store = get_event_store()
+    store._reset_for_tests()
+
+    # Ensure user/token
+    try:
+        register_user("agent_user", "secret", email="agent@example.com")
+    except Exception:
+        pass
+    token = login_user("agent_user", "secret")["token"]
+
+    client.cookies.set("jarvis_token", token)
+
+    with client as c:
+        # Make a simple chat request
+        resp = c.post("/v1/chat/completions", json={
+            "model": "test-model",
+            "messages": [{"role": "user", "content": "Hello"}],
+            "stream": False
+        })
+        assert resp.status_code == 200
+        
+        # Check that agent events appear in /v1/events
+        resp = c.get("/v1/events?after=0")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "events" in data
+        
+        agent_events = [ev for ev in data["events"] if ev["type"].startswith("agent.")]
+        assert len(agent_events) >= 2  # At least agent.start and agent.done
+        
+        # Check for agent.start
+        start_events = [ev for ev in agent_events if ev["type"] == "agent.start"]
+        assert len(start_events) >= 1
+        
+        # Check for agent.done
+        done_events = [ev for ev in agent_events if ev["type"] == "agent.done"]
+        assert len(done_events) >= 1

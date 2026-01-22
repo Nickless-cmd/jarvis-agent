@@ -601,6 +601,17 @@ def _stream_chunks(text: str, model: str, trace_id: str | None = None, session_i
     yield f"data: {json.dumps(head)}\n\n"
 
     for part in _chunk_text(text):
+        # Emit agent.token event
+        try:
+            publish("agent.token", {
+                "token": part,
+                "role": "assistant",
+                "trace_id": trace_id,
+                "session_id": session_id,
+            })
+        except Exception:
+            pass  # EventBus unavailable, continue
+        
         data = {
             "id": stream_id,
             "object": "chat.completion.chunk",
@@ -2273,8 +2284,19 @@ async def chat(
             trace_id = uuid.uuid4().hex
             deadline = time.monotonic() + MAX_STREAM_SECONDS
             done_sent = False
+            agent_start_time = time.time()
 
             try:
+                # Emit agent.start event
+                try:
+                    publish("agent.start", {
+                        "session_id": session_id,
+                        "trace_id": trace_id,
+                        "prompt_preview": (prompt or "")[:120] if prompt else "",
+                    })
+                except Exception:
+                    pass  # EventBus unavailable, continue
+                
                 yield _status_event("thinking", trace_id=trace_id, session_id=session_id)
                 tool_hint = choose_tool(prompt, allowed_tools=allowed_tools)
                 if tool_hint in {"news", "search", "weather", "currency"}:
@@ -2294,6 +2316,15 @@ async def chat(
                     return
                 except Exception as exc:
                     _req_logger.exception("Streaming run_agent failed trace=%s", trace_id)
+                    try:
+                        publish("agent.error", {
+                            "session_id": session_id,
+                            "trace_id": trace_id,
+                            "error_type": exc.__class__.__name__,
+                            "error_message": str(exc),
+                        })
+                    except Exception:
+                        pass
                     yield _stream_error_event(
                         "Provider or server error. Please retry.",
                         exc.__class__.__name__,
@@ -2358,11 +2389,31 @@ async def chat(
                         "event: meta\n"
                         f"data: {json.dumps(payload)}\n\n"
                     )
+                
+                # Emit agent.done event
+                try:
+                    publish("agent.done", {
+                        "session_id": session_id,
+                        "trace_id": trace_id,
+                        "duration_ms": int((time.time() - agent_start_time) * 1000),
+                    })
+                except Exception:
+                    pass  # EventBus unavailable, continue
             except asyncio.CancelledError:
                 _req_logger.info("Streaming cancelled trace=%s", trace_id)
                 return
             except Exception as exc:
                 _req_logger.exception("Streaming error trace=%s", trace_id)
+                # Emit agent.error event
+                try:
+                    publish("agent.error", {
+                        "session_id": session_id,
+                        "trace_id": trace_id,
+                        "error_type": exc.__class__.__name__,
+                        "error_message": str(exc),
+                    })
+                except Exception:
+                    pass  # EventBus unavailable, continue
                 yield _stream_error_event(
                     "Streaming error. Please retry.",
                     exc.__class__.__name__,
@@ -2377,16 +2428,49 @@ async def chat(
 
     ui_city = req.headers.get("x-ui-city")
     start_time = time.time()
+    trace_id = uuid.uuid4().hex
     try:
-        result = run_agent(
-            user["username"],
-            prompt,
-            session_id=session_id,
-            allowed_tools=allowed_tools,
-            ui_city=ui_city,
-            ui_lang=ui_lang,
-        )
+        # Emit agent.start event
+        try:
+            publish("agent.start", {
+                "session_id": session_id,
+                "trace_id": trace_id,
+                "prompt_preview": (prompt or "")[:120] if prompt else "",
+            })
+        except Exception:
+            pass  # EventBus unavailable, continue
+        
+        try:
+            result = run_agent(
+                user["username"],
+                prompt,
+                session_id=session_id,
+                allowed_tools=allowed_tools,
+                ui_city=ui_city,
+                ui_lang=ui_lang,
+            )
+        except Exception as exc:
+            try:
+                publish("agent.error", {
+                    "session_id": session_id,
+                    "trace_id": trace_id,
+                    "error_type": exc.__class__.__name__,
+                    "error_message": str(exc),
+                })
+            except Exception:
+                pass
+            raise
         duration_ms = int((time.time() - start_time) * 1000)
+        
+        # Emit agent.done event
+        try:
+            publish("agent.done", {
+                "session_id": session_id,
+                "trace_id": trace_id,
+                "duration_ms": duration_ms,
+            })
+        except Exception:
+            pass  # EventBus unavailable, continue
         
         # Publish chat.assistant_message event
         if prompt:
@@ -2401,6 +2485,17 @@ async def chat(
         
         text = _butlerize_text(result.get("text", ""), user)
     except Exception as exc:
+        # Emit agent.error event
+        try:
+            publish("agent.error", {
+                "session_id": session_id,
+                "trace_id": trace_id,
+                "error_type": exc.__class__.__name__,
+                "error_message": str(exc),
+            })
+        except Exception:
+            pass  # EventBus unavailable, continue
+        
         # Publish chat.error event
         if prompt:
             publish("chat.error", {

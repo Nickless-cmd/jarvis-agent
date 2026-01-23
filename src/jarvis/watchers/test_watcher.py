@@ -204,9 +204,14 @@ class PollingTestWatcher:
         self._stop.set()
 
 
+def _is_test_mode():
+    import os
+    return os.getenv("JARVIS_TEST_MODE") == "1"
+
+
 def start_test_watcher_if_enabled() -> None:
     """Start test watcher if env flag is enabled."""
-    if os.getenv("JARVIS_TEST_MODE") == "1":
+    if _is_test_mode():
         return None
     if os.getenv("JARVIS_ENABLE_TEST_WATCHER") != "1":
         return None

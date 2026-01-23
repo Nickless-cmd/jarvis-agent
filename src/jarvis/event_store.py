@@ -13,17 +13,18 @@ from typing import Any, Deque, Dict, List, Optional
 
 from jarvis import events
 
-# Use dummy lock in test mode to avoid async issues
-import os
-if os.getenv("JARVIS_TEST_MODE") == "1":
-    class DummyLock:
-        def __enter__(self):
-            pass
-        def __exit__(self, *args):
-            pass
-    _Lock = DummyLock
-else:
-    _Lock = Lock
+def _get_lock_class():
+    import os
+    if os.getenv("JARVIS_TEST_MODE") == "1":
+        class DummyLock:
+            def __enter__(self):
+                pass
+            def __exit__(self, *args):
+                pass
+        return DummyLock
+    else:
+        from threading import Lock
+        return Lock
 
 
 @dataclass
@@ -41,7 +42,7 @@ class EventStore:
     def __init__(self, max_size: int = 1000) -> None:
         self._events: Deque[StoredEvent] = deque(maxlen=max_size)
         self._next_id = 1
-        self._lock = _Lock()
+        self._lock = _get_lock_class()()
 
     def append(self, event_type: str, payload: Dict[str, Any], session_id: Optional[str] = None) -> StoredEvent:
         with self._lock:

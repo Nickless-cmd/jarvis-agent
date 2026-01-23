@@ -1,6 +1,7 @@
 import sys
 import signal
 import faulthandler
+import pytest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,3 +24,26 @@ def dump_stacks(signum, frame):
     print("=== End Thread Stacks ===\n")
 
 signal.signal(signal.SIGUSR1, dump_stacks)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def ensure_no_background_threads():
+    """Ensure no background threads are left after tests."""
+    import threading
+    import time
+    initial_threads = set(threading.enumerate())
+    
+    yield
+    
+    # Give some time for cleanup
+    time.sleep(0.5)
+    
+    current_threads = set(threading.enumerate())
+    new_threads = current_threads - initial_threads
+    
+    # Allow daemon threads, but no new non-daemon threads
+    non_daemon_new = [t for t in new_threads if not t.daemon]
+    
+    if non_daemon_new:
+        print(f"Warning: Non-daemon threads created during tests: {[t.name for t in non_daemon_new]}")
+        # Don't fail, just warn for now

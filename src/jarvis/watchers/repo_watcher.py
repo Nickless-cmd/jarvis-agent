@@ -154,13 +154,14 @@ class PollingRepoWatcher:
         self._stop.set()
 
 
-def start_repo_watcher_if_enabled() -> None:
+def start_repo_watcher_if_enabled() -> PollingRepoWatcher | None:
     """Start watcher if env flag is enabled."""
     if os.getenv("JARVIS_ENABLE_WATCHERS") != "1":
-        return
+        return None
     repo_root = Path(os.getenv("JARVIS_REPO_ROOT") or DEFAULT_REPO_ROOT)
     interval = int(os.getenv("JARVIS_WATCHER_INTERVAL_SEC", "5") or 5)
     auto_reindex = os.getenv("JARVIS_AUTO_REINDEX") == "1"
     user_id = int(os.getenv("JARVIS_WATCHER_USER_ID", "1"))
     watcher = PollingRepoWatcher(repo_root=repo_root, user_id=user_id, interval_sec=interval, auto_reindex=auto_reindex)
     watcher.start()
+    return watcher

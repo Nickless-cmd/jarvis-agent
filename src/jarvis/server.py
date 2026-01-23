@@ -174,6 +174,8 @@ def _log_startup_paths():
     except Exception:
         pass
 
+# Global watcher instance for shutdown
+_repo_watcher = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -186,7 +188,9 @@ async def lifespan(app: FastAPI):
     ensure_demo_user()
     
     app_state.repo_watcher_started = True
-    start_repo_watcher_if_enabled()
+    global _repo_watcher
+    if not _TEST_MODE:
+        _repo_watcher = start_repo_watcher_if_enabled()
     
     # Subscribe EventStore to EventBus
     event_store = get_event_store()
@@ -211,6 +215,11 @@ async def lifespan(app: FastAPI):
     finally:
         try:
             unsubscribe_events()
+        except Exception:
+            pass
+        try:
+            if _repo_watcher:
+                _repo_watcher.stop()
         except Exception:
             pass
 

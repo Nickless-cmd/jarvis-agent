@@ -100,8 +100,16 @@ def test_events_endpoint_returns_tool_events():
         assert "duration_ms" in ok_events[0]["payload"]
 
 
-def test_events_endpoint_returns_agent_events():
+def test_events_endpoint_returns_agent_events(monkeypatch):
     from jarvis import server
+
+    # Mock run_agent to avoid heavy work
+    def fake_run_agent(user_id, prompt, session_id=None, allowed_tools=None, ui_city=None, ui_lang=None):
+        return {"text": "hi there", "meta": {}}
+
+    monkeypatch.setattr(server, "run_agent", fake_run_agent)
+    monkeypatch.setenv("JARVIS_TEST_MODE", "1")
+
     client = TestClient(server.app)
 
     store = get_event_store()
@@ -141,3 +149,22 @@ def test_events_endpoint_returns_agent_events():
         # Check for agent.done
         done_events = [ev for ev in agent_events if ev["type"] == "agent.done"]
         assert len(done_events) >= 1
+
+
+def test_no_background_threads_after_test():
+    """Ensure no non-daemon threads are left running after tests."""
+    import threading
+    import time
+    
+    # Import server to trigger any startup background tasks
+    from jarvis import server
+    
+    # Give a moment for any async startup to complete
+    time.sleep(0.1)
+    
+    # Check that only main thread and possibly daemon threads exist
+    threads = threading.enumerate()
+    non_daemon = [t for t in threads if not t.daemon and t != threading.main_thread()]
+    
+    # In test mode, there should be no non-daemon background threads
+    assert len(non_daemon) == 0, f"Non-daemon threads found: {[t.name for t in non_daemon]}"

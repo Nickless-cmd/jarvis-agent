@@ -7,6 +7,7 @@ var authStore = window.authStore;
 let pollingIntervals = [];
 let openStreams = [];
 let eventClient = null;
+let adminPanelsLocked = false;
 let lastEventId = 0;
 
 function handleBusEvent(evt) {
@@ -717,12 +718,17 @@ async function loadRightNotes() {
 }
 
 async function loadRightTickets() {
-  if (!isAdminUser) return;
+  if (!isAdminUser || adminPanelsLocked) return;
   const rightTicketsBody = document.getElementById("rightTicketsBody");
   const rightTicketsTitle = document.getElementById("rightTicketsTitle");
   const rightTicketsPanel = document.getElementById("rightTicketsPanel");
   if (!rightTicketsBody || !rightTicketsPanel) return;
   const data = await safeJson("/admin/tickets", { method: "GET" }, {});
+  if (data && data.adminDenied) {
+    adminPanelsLocked = true;
+    rightTicketsBody.innerHTML = `<div class="muted">${getUiLang() === "en" ? "Admin access required." : "Admin kræver adgang."}</div>`;
+    return;
+  }
   let all = [];
   if (data) {
     all = data.tickets || [];
@@ -749,8 +755,16 @@ async function loadRightTickets() {
 }
 
 async function loadRightLogs() {
-  if (!isAdminUser) return;
+  if (!isAdminUser || adminPanelsLocked) return;
   const data = await safeJson("/admin/logs", { method: "GET" }, {});
+  if (data && data.adminDenied) {
+    adminPanelsLocked = true;
+    const statusPanel = document.getElementById("statusPanel");
+    if (statusPanel) {
+      statusPanel.innerHTML = `<div class="muted">${getUiLang() === "en" ? "Admin access required." : "Admin kræver adgang."}</div>`;
+    }
+    return;
+  }
   if (!data) return;
   const files = data.files || [];
   const statusPanel = document.getElementById("statusPanel");
@@ -1983,6 +1997,7 @@ async function safeApiFetch(url, opts = {}) {
 async function safeApiFetchJson(url, opts = {}, fallback = {}) {
   const res = await safeApiFetch(url, opts);
   if (!res) return fallback;
+  if (res.adminDenied) return { adminDenied: true };
   try {
     return await res.json();
   } catch (err) {
@@ -1994,7 +2009,13 @@ async function safeApiFetchJson(url, opts = {}, fallback = {}) {
 // New safeJson helper using existing apiFetch
 async function safeJson(url, fallback = null, opts = {}) {
   try {
-    return await apiFetch(url, opts);
+    const res = await apiFetch(url, opts);
+    if (!res) return fallback;
+    if (res.adminDenied) return { adminDenied: true };
+    if (typeof res.json === "function") {
+      return await res.json();
+    }
+    return res;
   } catch (e) {
     console.warn("fetch failed", url, e);
     return fallback;

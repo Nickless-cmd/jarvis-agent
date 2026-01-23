@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from threading import Lock
 from typing import Any, Deque, Dict, List, Optional
 
+from jarvis import events
+
 
 @dataclass
 class StoredEvent:
@@ -73,6 +75,17 @@ class EventStore:
 
     def clear(self) -> None:
         self._reset_for_tests()
+
+    def shutdown(self) -> None:
+        """Shutdown the event store, clearing events and closing the bus."""
+        with self._lock:
+            self._events.clear()
+            self._next_id = 1
+        # Close the bus if available
+        try:
+            events.close()
+        except Exception:
+            pass
 
 
 _store: Optional[EventStore] = None

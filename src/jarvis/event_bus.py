@@ -28,6 +28,7 @@ class EventBus:
         self._subscribers: Dict[str, list[Callable[[Event], None]]] = {}
         self._session_subscribers: Dict[str, Dict[str, list[Callable[[Event], None]]]] = {}
         self._backlog = deque(maxlen=backlog_size)
+        self._closed = False
 
     def publish(self, event: Event) -> None:
         """Publish an event to all subscribers."""
@@ -58,6 +59,8 @@ class EventBus:
     def subscribe(self, event_type: str, callback: Callable[[Event], None]) -> None:
         """Subscribe to events of a specific type globally."""
         with self._lock:
+            if self._closed:
+                return  # Silently ignore if closed
             if event_type not in self._subscribers:
                 self._subscribers[event_type] = []
             self._subscribers[event_type].append(callback)
@@ -77,6 +80,8 @@ class EventBus:
     def subscribe_session(self, session_id: str, event_type: str, callback: Callable[[Event], None]) -> None:
         """Subscribe to events of a specific type for a specific session."""
         with self._lock:
+            if self._closed:
+                return  # Silently ignore if closed
             if session_id not in self._session_subscribers:
                 self._session_subscribers[session_id] = {}
             if event_type not in self._session_subscribers[session_id]:
@@ -111,6 +116,19 @@ class EventBus:
         """Clear the event backlog."""
         with self._lock:
             self._backlog.clear()
+
+    def close(self) -> None:
+        """Close the event bus, preventing new subscriptions and clearing state."""
+        with self._lock:
+            self._closed = True
+            self._subscribers.clear()
+            self._session_subscribers.clear()
+            self._backlog.clear()
+
+    def is_closed(self) -> bool:
+        """Check if the event bus is closed."""
+        with self._lock:
+            return self._closed
 
 
 # Global instance

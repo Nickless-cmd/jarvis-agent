@@ -16,6 +16,7 @@ import threading
 _subs: Dict[str, List[Callable[[Any], None]]] = defaultdict(list)
 # Wildcard subscribers receive (event_type, payload)
 _wildcard_subs: List[Callable[[str, Any], None]] = []
+_closed = False
 
 
 # Chat token batching state
@@ -144,6 +145,8 @@ def subscribe(event_type: str, callback: Callable[[str, Any], None]) -> Callable
     Returns:
         unsubscribe function.
     """
+    if _closed:
+        return lambda: None
     _subs[event_type].append(callback)
 
     def unsubscribe() -> None:
@@ -159,6 +162,8 @@ def subscribe_all(callback: Callable[[str, Any], None]) -> Callable[[], None]:
     """
     Subscribe to all events. Callback receives (event_type, payload).
     """
+    if _closed:
+        return lambda: None
     _wildcard_subs.append(callback)
 
     def unsubscribe() -> None:
@@ -202,6 +207,8 @@ async def subscribe_async(event_types: List[str], session_filter: str | None = N
 
 def publish(event_type: str, payload: Any) -> None:
     """Publish an event to subscribers of the given type."""
+    if _closed:
+        return
     # Handle chat token batching
     if event_type == "chat.token":
         _handle_chat_token_event(payload)
@@ -225,3 +232,25 @@ def publish(event_type: str, payload: Any) -> None:
             cb(event_type, payload)
         except Exception:
             pass
+
+
+def close() -> None:
+    """Idempotent shutdown to help tests exit cleanly."""
+    global _closed
+    _closed = True
+    _subs.clear()
+    _wildcard_subs.clear()
+    with _chat_token_lock:
+        for request_id in list(_chat_token_buffers.keys()):
+            _flush_chat_token_buffer(request_id)
+        _chat_token_buffers.clear()
+
+
+def reset_for_tests() -> None:
+    """Clear subscriptions and reopen the bus (used by tests)."""
+    global _closed
+    _closed = False
+    _subs.clear()
+    _wildcard_subs.clear()
+    with _chat_token_lock:
+        _chat_token_buffers.clear()

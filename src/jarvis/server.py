@@ -218,6 +218,15 @@ async def lifespan(app: FastAPI):
         except Exception:
             pass
         try:
+            event_store = get_event_store()
+            event_store.shutdown()
+        except Exception:
+            pass
+        try:
+            events.close()
+        except Exception:
+            pass
+        try:
             if _repo_watcher:
                 _repo_watcher.stop()
         except Exception:
@@ -1429,6 +1438,9 @@ async def stream_events_endpoint(
                 if deadline and time.monotonic() > deadline:
                     break
                 if max_events is not None and events_sent >= max_events:
+                    break
+                bus = get_event_bus()
+                if bus.is_closed():
                     break
                 new_events = event_store.get_events(after=last_id, limit=1000)["events"]
                 seen_max_id = last_id

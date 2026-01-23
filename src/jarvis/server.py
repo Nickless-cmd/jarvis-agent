@@ -1362,7 +1362,9 @@ async def stream_events_endpoint(
                 if max_events is not None and events_sent >= max_events:
                     break
                 new_events = event_store.get_events(after=last_id, limit=1000)["events"]
+                seen_max_id = last_id
                 for ev in new_events:
+                    seen_max_id = max(seen_max_id, ev["id"])
                     # Filter by type prefixes
                     if type_prefixes:
                         if not any(ev["type"].startswith(prefix) for prefix in type_prefixes):
@@ -1374,6 +1376,8 @@ async def stream_events_endpoint(
                     events_sent += 1
                     if max_events is not None and events_sent >= max_events:
                         return
+                # Always advance the cursor even if events were filtered out
+                last_id = seen_max_id
                 await asyncio.sleep(sleep_interval)
         except asyncio.CancelledError:
             # Handle client disconnect gracefully

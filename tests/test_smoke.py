@@ -619,5 +619,18 @@ def test_events_stream_filtering():
         # Should terminate within reasonable time (less than 1 second since max_ms=200ms and events exist)
         assert elapsed < 1.0
         
+        # Test termination when filters exclude all events
+        start_time = time.time()
+        with client.stream("GET", "/v1/events/stream?types=none.&max_ms=200&max_events=5") as resp:
+            assert resp.status_code == 200
+            events_received = []
+            for line in resp.iter_lines():
+                if line.startswith("event: "):
+                    events_received.append(line)
+            # No matching events should be delivered
+            assert len(events_received) == 0
+        elapsed = time.time() - start_time
+        assert elapsed < 1.0
+        
     finally:
         unsubscribe()

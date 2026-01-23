@@ -2949,6 +2949,16 @@ async def chat(
             raise
         duration_ms = int((time.time() - start_time) * 1000)
         
+        # Emit agent.done event
+        try:
+            publish("agent.done", {
+                "session_id": session_id,
+                "trace_id": trace_id,
+                "duration_ms": duration_ms,
+            })
+        except Exception:
+            pass  # EventBus unavailable, continue
+        
         # Process the response text
         text = _butlerize_text(result.get("text", ""), user)
         
@@ -2963,15 +2973,6 @@ async def chat(
         except Exception:
             pass  # Never crash the request
         
-        # Emit agent.done event
-        try:
-            publish("agent.done", {
-                "session_id": session_id,
-                "trace_id": trace_id,
-                "duration_ms": duration_ms,
-            })
-        except Exception:
-            pass  # EventBus unavailable, continue
         try:
             publish("chat.end", {
                 "session_id": session_id,

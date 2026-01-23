@@ -642,3 +642,42 @@ def test_events_stream_filtering():
         
     finally:
         pass
+
+
+def test_prod_smoke_testclient():
+    """Production smoke test using TestClient: register, login, sessions, chat completions."""
+    from jarvis import server
+    client = TestClient(server.app)
+    
+    # Register user
+    try:
+        register_user("smokeuser", "smokepass", email="smoke@example.com")
+    except sqlite3.IntegrityError:
+        pass
+    
+    # Login
+    login_resp = client.post("/auth/login", json={"username": "smokeuser", "password": "smokepass", "captcha_token": "dummy", "captcha_answer": "dummy"})
+    assert login_resp.status_code == 200
+    token = login_resp.json()["token"]
+    
+    # Set cookie for auth
+    client.cookies.set("jarvis_token", token)
+    
+    # Get sessions
+    sessions_resp = client.get("/sessions")
+    assert sessions_resp.status_code == 200
+    sessions_data = sessions_resp.json()
+    assert "sessions" in sessions_data
+    assert isinstance(sessions_data["sessions"], list)
+    
+    # Chat completions (non-stream)
+    chat_resp = client.post("/v1/chat/completions", json={
+        "messages": [{"role": "user", "content": "Hello"}],
+        "stream": False
+    })
+    assert chat_resp.status_code == 200
+    chat_data = chat_resp.json()
+    assert "choices" in chat_data
+    assert len(chat_data["choices"]) > 0
+    assert "message" in chat_data["choices"][0]
+    assert "content" in chat_data["choices"][0]["message"]

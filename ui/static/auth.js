@@ -30,7 +30,6 @@ function getToken() {
 }
 
 function setToken(token, remember = true) {
-  document.cookie = `jarvis_token=${encodeURIComponent(token)}; Path=/; SameSite=Lax`;
   if (remember) {
     localStorage.setItem(TOKEN_KEY, token);
     sessionStorage.removeItem(TOKEN_SESSION_KEY);

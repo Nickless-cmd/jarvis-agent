@@ -102,7 +102,6 @@
         const remember = document.getElementById("rememberMe").checked;
         sessionStorage.setItem("jarvisRememberMe", remember ? "1" : "0");
         setToken(data.token, remember);
-        document.cookie = `jarvis_token=${encodeURIComponent(data.token)}; Path=/; SameSite=Lax`;
         const last = getLastPath();
         window.location.href = last && !last.startsWith("/admin") ? last : "/app";
       } else {

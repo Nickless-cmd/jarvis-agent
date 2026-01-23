@@ -1210,7 +1210,7 @@ async def login(request: Request, req: LoginRequest, authorization: str | None =
     response = JSONResponse({"token": token, "expires_at": expires_at})
     if expires_at:
         secure = os.getenv("JARVIS_COOKIE_SECURE", "0") == "1"
-        samesite = "none" if secure else "lax"
+        samesite = os.getenv("JARVIS_COOKIE_SAMESITE", "lax")
         response.set_cookie(
             "jarvis_token",
             token,
@@ -1246,7 +1246,7 @@ async def admin_login(request: Request, req: LoginRequest, authorization: str | 
     response = JSONResponse({"token": token, "expires_at": expires_at})
     if expires_at:
         secure = os.getenv("JARVIS_COOKIE_SECURE", "0") == "1"
-        samesite = "none" if secure else "lax"
+        samesite = os.getenv("JARVIS_COOKIE_SAMESITE", "lax")
         response.set_cookie(
             "jarvis_token",
             token,

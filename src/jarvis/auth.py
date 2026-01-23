@@ -6,10 +6,19 @@ from datetime import datetime, timezone, timedelta
 from dataclasses import dataclass
 
 from jarvis.db import get_conn, update_login_session_activity
+from jarvis.config import load_config
 
 SESSION_TTL_HOURS = int(os.getenv("SESSION_TTL_HOURS", "24"))
 SESSION_IDLE_MINUTES = int(os.getenv("SESSION_IDLE_MINUTES", "60"))
 DEFAULT_API_KEY = "devkey"
+_config = None
+
+
+def _cfg():
+    global _config
+    if _config is None:
+        _config = load_config()
+    return _config
 
 
 def _hash_password(password: str, salt: bytes | None = None) -> str:
@@ -85,7 +94,7 @@ def login_user(username: str, password: str) -> dict | None:
 
         token = uuid.uuid4().hex
         now = datetime.now(timezone.utc)
-        expires_at = now + timedelta(hours=SESSION_TTL_HOURS)
+        expires_at = now + timedelta(hours=_cfg().cookie_ttl_seconds / 3600)
         conn.execute(
             "UPDATE users SET token = ?, token_expires_at = ?, last_seen = ? WHERE id = ?",
             (token, expires_at.isoformat(), now.isoformat(), row["id"]),

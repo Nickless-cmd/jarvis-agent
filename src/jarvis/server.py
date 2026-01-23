@@ -3189,8 +3189,9 @@ async def chat(
 
 
 @app.get("/config")
-async def config():
-    return {"model": os.getenv("OLLAMA_MODEL", "local")}
+async def config_endpoint():
+    cfg = load_config()
+    return {"model": os.getenv("OLLAMA_MODEL", "local"), "env": cfg.env}
 
 
 @app.get("/models")

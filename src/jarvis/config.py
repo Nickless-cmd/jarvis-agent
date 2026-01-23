@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
 
 
@@ -24,7 +25,8 @@ def load_config() -> JarvisConfig:
     """Load configuration from environment at call time (runtime-safe)."""
     env = os.getenv("JARVIS_ENV", "dev")
     test_mode = os.getenv("JARVIS_TEST_MODE", "0") == "1"
-    db_path = os.path.abspath(os.getenv("JARVIS_DB_PATH", os.path.join(os.path.dirname(__file__), "..", "..", "data", "jarvis.db")))
+    default_db = Path(__file__).resolve().parent.parent.parent / "data" / "jarvis.db"
+    db_path = os.path.abspath(os.getenv("JARVIS_DB_PATH", str(default_db)))
     event_backlog_maxlen = int(os.getenv("JARVIS_EVENT_BACKLOG", "1000"))
     tool_timeout_default = float(os.getenv("JARVIS_TOOL_TIMEOUT", "30"))
     tool_retries = int(os.getenv("JARVIS_TOOL_RETRIES", "0"))

@@ -1388,6 +1388,38 @@ async def stream_events_endpoint(
     )
 
 
+@app.get("/v1/events/tool")
+async def tool_events_endpoint(
+    since_id: Optional[int] = Query(None, description="Get events after this ID"),
+    limit: int = Query(50, description="Maximum number of events to return", ge=1, le=200),
+    authorization: str | None = Header(None),
+    token: str | None = Depends(_resolve_token),
+):
+    if not _auth_or_token_ok(authorization, token):
+        raise HTTPException(401, detail="Invalid API key")
+    user = get_user_by_token(token)
+    if not user:
+        raise HTTPException(401, detail="Missing or invalid user token")
+    if user.get("is_disabled"):
+        raise HTTPException(403, detail="User is disabled")
+    _enforce_maintenance(user)
+
+    event_store = get_event_store()
+    
+    # Get all events and filter for tool events
+    all_events = event_store.get_events(after=since_id, limit=None)["events"]
+    tool_events = [ev for ev in all_events if ev["type"].startswith("tool.")]
+    
+    # Apply limit to filtered results
+    tool_events = tool_events[:limit]
+    
+    return {
+        "events": tool_events,
+        "count": len(tool_events),
+        "limit": limit,
+    }
+
+
 @app.get("/v1/prompts")
 async def prompts_endpoint(
     authorization: str | None = Header(None),

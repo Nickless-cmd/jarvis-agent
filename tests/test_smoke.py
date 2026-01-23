@@ -400,3 +400,76 @@ def test_events_stream_filtering():
     resp = client.get("/v1/events/stream?since_id=0&topics=agent.start,agent.done&session_id=test&max_events=1&max_ms=300")
     assert resp.status_code == 200
     assert resp.headers["content-type"] == "text/event-stream; charset=utf-8"
+
+
+def test_tool_events_endpoint():
+    """Test tool events endpoint returns only tool.* events and respects limit."""
+    from jarvis import server
+    from jarvis.events import publish, subscribe_all
+    from jarvis.event_store import get_event_store
+    
+    client = TestClient(server.app)
+    
+    # Register and login to get token
+    try:
+        register_user("foxtrot", "secret", email="foxtrot@example.com")
+    except sqlite3.IntegrityError:
+        pass
+    
+    login = login_user("foxtrot", "secret")
+    token = login["token"]
+    
+    # Set cookie for auth
+    client.cookies.set("jarvis_token", token)
+    
+    # Clear event store and set up subscription for test
+    event_store = get_event_store()
+    event_store.clear()
+    
+    # Manually subscribe event store to events for this test
+    unsubscribe = subscribe_all(lambda et, payload: event_store.append(et, payload))
+    
+    try:
+        # Publish various events including tool events
+        publish("agent.start", {"session_id": "sess1"})
+        publish("tool.search.start", {"query": "test", "session_id": "sess1"})
+        publish("tool.search.end", {"results": [], "session_id": "sess1"})
+        publish("agent.done", {"session_id": "sess1"})
+        publish("tool.weather.start", {"city": "test", "session_id": "sess1"})
+        
+        # Test endpoint returns 200 and only tool events
+        resp = client.get("/v1/events/tool")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "events" in data
+        assert "count" in data
+        assert "limit" in data
+        
+        # Should only contain tool.* events
+        for event in data["events"]:
+            assert event["type"].startswith("tool.")
+        
+        # Should have 3 tool events
+        assert data["count"] == 3
+        assert len(data["events"]) == 3
+        
+        # Test limit parameter
+        resp = client.get("/v1/events/tool?limit=2")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["events"]) == 2
+        assert data["count"] == 2
+        assert data["limit"] == 2
+        
+        # Test limit max (200)
+        resp = client.get("/v1/events/tool?limit=200")
+        assert resp.status_code == 200
+        
+        # Test limit min (1) and max validation
+        resp = client.get("/v1/events/tool?limit=0")
+        assert resp.status_code == 422  # Validation error
+        
+        resp = client.get("/v1/events/tool?limit=201")
+        assert resp.status_code == 422  # Validation error
+    finally:
+        unsubscribe()

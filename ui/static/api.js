@@ -17,6 +17,10 @@ function safeAuthHeaders(extra = {}) {
   return { ...base, ...extra };
 }
 
+function isAuthCriticalEndpoint(path) {
+  return path.startsWith("/v1/") && !path.startsWith("/v1/status") && !path.startsWith("/v1/settings/public");
+}
+
 async function apiFetch(path, options = {}) {
   const headersObj = safeAuthHeaders(options.headers || {});
   const headers = new Headers(headersObj);
@@ -26,9 +30,17 @@ async function apiFetch(path, options = {}) {
   try {
     const res = await fetch(path, { ...options, headers });
     if (res.status === 401 || res.status === 403) {
-      clearToken();
-      window.location.href = "/login";
-      return null;
+      if (isAuthCriticalEndpoint(path)) {
+        clearToken();
+        window.location.href = "/login";
+        return null;
+      } else if (path.startsWith("/admin/")) {
+        console.warn("Admin endpoint forbidden (expected for non-admin)");
+        // Return response so caller can handle (e.g., hide admin panels)
+      } else {
+        // For other non-critical endpoints, return null
+        return null;
+      }
     }
     return res;
   } catch (err) {

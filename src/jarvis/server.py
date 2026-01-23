@@ -423,6 +423,15 @@ def _resolve_token(
     return request.cookies.get("jarvis_token")
 
 
+def _public_user(user: dict) -> dict:
+    """Return a user payload with normalized admin flag."""
+    return {
+        "id": user["id"],
+        "username": user["username"],
+        "is_admin": is_admin_user(user),
+    }
+
+
 def is_admin_user(user: dict | None) -> bool:
     """Normalize admin detection across payloads."""
     if not user:
@@ -1095,7 +1104,7 @@ def _maintenance_message() -> str:
 
 
 def _enforce_maintenance(user: dict) -> None:
-    if _maintenance_enabled() and not user.get("is_admin"):
+    if _maintenance_enabled() and not is_admin_user(user):
         raise HTTPException(503, detail=_maintenance_message())
 
 
@@ -1203,7 +1212,7 @@ async def register(req: RegisterRequest, authorization: str | None = Header(None
         )
     except sqlite3.IntegrityError:
         raise HTTPException(400, detail="Username already exists")
-    return {"id": user["id"], "username": user["username"], "is_admin": user["is_admin"]}
+    return _public_user(user)
 
 
 @app.post("/auth/login")
@@ -1250,7 +1259,7 @@ async def admin_login(request: Request, req: LoginRequest, authorization: str | 
     token = result["token"]
     expires_at = result.get("expires_at")
     user = get_user_by_token(token)
-    if not user or not user.get("is_admin"):
+    if not is_admin_user(user):
         with get_conn() as conn:
             conn.execute("UPDATE users SET token = NULL, token_expires_at = NULL WHERE token = ?", (token,))
             conn.commit()
@@ -1550,8 +1559,9 @@ async def prompts_endpoint(
     if user.get("is_disabled"):
         raise HTTPException(403, detail="User is disabled")
     _enforce_maintenance(user)
-    info = _active_prompt_info(user.get("is_admin", False))
-    return {"build_id": BUILD_ID, "prompt": info, "is_admin": user.get("is_admin", False)}
+    admin_flag = is_admin_user(user)
+    info = _active_prompt_info(admin_flag)
+    return {"build_id": BUILD_ID, "prompt": info, "is_admin": admin_flag}
 
 
 @app.get("/v1/prompts/admin")
@@ -1564,7 +1574,7 @@ async def prompts_admin_endpoint(
     user = get_user_by_token(token)
     if not user:
         raise HTTPException(401, detail="Missing or invalid user token")
-    if not user.get("is_admin"):
+    if not is_admin_user(user):
         raise HTTPException(403, detail="Admin required")
     if user.get("is_disabled"):
         raise HTTPException(403, detail="User is disabled")
@@ -1586,8 +1596,9 @@ async def prompt_active_endpoint(
     if user.get("is_disabled"):
         raise HTTPException(403, detail="User is disabled")
     _enforce_maintenance(user)
-    info = _active_prompt_info(user.get("is_admin", False))
-    return {"prompt": info, "is_admin": user.get("is_admin", False), "build_id": BUILD_ID}
+    admin_flag = is_admin_user(user)
+    info = _active_prompt_info(admin_flag)
+    return {"prompt": info, "is_admin": admin_flag, "build_id": BUILD_ID}
 
 
 @app.post("/v1/events/{event_id}/dismiss")
@@ -1992,7 +2003,7 @@ async def upload_file(
     if user.get("is_disabled"):
         raise HTTPException(403, detail="User is disabled")
     data = await file.read()
-    if not user.get("is_admin"):
+    if not is_admin_user(user):
         max_bytes = 10 * 1024 * 1024
         if len(data) > max_bytes:
             raise HTTPException(413, detail="Filen er for stor. Maks 10 MB for almindelige brugere.")
@@ -2248,7 +2259,7 @@ async def admin_create_user(
         )
     except sqlite3.IntegrityError:
         raise HTTPException(400, detail={"ok": False, "error": {"type": "BadRequest", "message": "Username already exists"}})
-    return {"id": created["id"], "username": created["username"], "is_admin": created["is_admin"]}
+    return _public_user(created)
 
 
 @app.post("/admin/users/{user_id}/disable")
@@ -2422,7 +2433,7 @@ async def chat(
                     )
                     conn.commit()
 
-    if user and user.get("is_admin") and prompt:
+    if user and is_admin_user(user) and prompt:
         banner_text = None
         lowered = prompt.strip().lower()
         if lowered.startswith("/banner"):
@@ -2498,7 +2509,7 @@ async def chat(
         _cleanup_user_assets(user)
         expiry_warning = _expiry_warning_text(user)
         note_reminder = _note_reminder_text(user)
-    if user and not user.get("is_admin"):
+    if user and not is_admin_user(user):
         limit_mb, credits_mb = _get_user_quota(user["id"])
         used_bytes = _monthly_usage_bytes(user["id"])
         used_mb = _bytes_to_mb(used_bytes)
@@ -3650,7 +3661,7 @@ async def create_note_endpoint(
         raise HTTPException(403, detail="User is disabled")
     with get_conn() as conn:
         count = conn.execute("SELECT COUNT(*) as c FROM notes WHERE user_id = ?", (user["id"],)).fetchone()["c"]
-    if count >= 40 and not user.get("is_admin"):
+    if count >= 40 and not is_admin_user(user):
         raise HTTPException(400, detail="Du har naet maksimum paa 40 noter.")
     item = add_note(
         user["id"],
@@ -3985,7 +3996,7 @@ async def app_page_head(request: Request):
 async def admin_page(request: Request):
     token = request.cookies.get("jarvis_token")
     user = get_user_by_token(token) if token else None
-    if not user or not user.get("is_admin"):
+    if not is_admin_user(user):
         return RedirectResponse(url="/admin-login")
     return FileResponse(ADMIN_PATH)
 

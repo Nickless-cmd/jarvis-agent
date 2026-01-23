@@ -1209,12 +1209,16 @@ async def login(request: Request, req: LoginRequest, authorization: str | None =
         log_login_session(user["id"], token, now_iso, expires_at, ip, ua, now_iso)
     response = JSONResponse({"token": token, "expires_at": expires_at})
     if expires_at:
+        secure = os.getenv("JARVIS_COOKIE_SECURE", "0") == "1"
+        samesite = "none" if secure else "lax"
         response.set_cookie(
             "jarvis_token",
             token,
             max_age=SESSION_TTL_HOURS * 3600,
             path="/",
-            samesite="lax",
+            httponly=True,
+            secure=secure,
+            samesite=samesite,
         )
     return response
 
@@ -1241,12 +1245,16 @@ async def admin_login(request: Request, req: LoginRequest, authorization: str | 
         log_login_session(user["id"], token, now_iso, expires_at, ip, ua, now_iso)
     response = JSONResponse({"token": token, "expires_at": expires_at})
     if expires_at:
+        secure = os.getenv("JARVIS_COOKIE_SECURE", "0") == "1"
+        samesite = "none" if secure else "lax"
         response.set_cookie(
             "jarvis_token",
             token,
             max_age=SESSION_TTL_HOURS * 3600,
             path="/",
-            samesite="lax",
+            httponly=True,
+            secure=secure,
+            samesite=samesite,
         )
     return response
 

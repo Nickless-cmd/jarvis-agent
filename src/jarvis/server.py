@@ -3341,13 +3341,21 @@ async def update_account_profile(
 
 @app.get("/settings/public")
 async def public_settings(x_ui_lang: str | None = Header(None)):
+    # Source of truth for UI defaults
+    default_lang = _get_setting("default_lang", "da")
+    default_theme = _get_setting("default_theme", "light")
+    default_streaming = _get_setting("default_streaming", True)
+    notifications_enabled = _get_setting("notifications_enabled", True)
     return {
         "maintenance": {
             "enabled": _maintenance_enabled(),
             "message": _maintenance_message(),
         },
-        "default_lang": "da",
-        "default_theme": "light",
+        "default_lang": default_lang,
+        "default_language": default_lang,  # alias for UI
+        "default_theme": default_theme,
+        "default_streaming": default_streaming,
+        "notifications_enabled": notifications_enabled,
         "features": {
             "captcha": False,
         },

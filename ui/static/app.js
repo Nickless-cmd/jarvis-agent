@@ -3284,12 +3284,13 @@ function registerStream(stream) {
 // Initialize UI in a safe, deterministic order. Any single failure will be logged
 // but will not abort the rest of the startup.
 async function initUI() {
+  await applyPublicSettings();
   await safe(loadBrand, "loadBrand");
   await safe(loadSettings, "loadSettings");
   await safe(loadQuotaBar, "loadQuotaBar");
   await safe(loadSessions, "loadSessions");
   await safe(loadStatus, "loadStatus");
-
+  
   // Initialize global UI element references
   noteCreateBtn = getNoteCreateBtn();
   noteCreateWrap = gid("noteCreateWrap");
@@ -3300,7 +3301,7 @@ async function initUI() {
   sessionPromptSave = getSessionPromptSave();
   sessionPromptClear = getSessionPromptClear();
   noteContentInput = getNoteContentInput();
-
+  
   // Non-critical but useful steps
   await safe(loadModel, "loadModel");
   await safe(loadFooter, "loadFooter");
@@ -3310,19 +3311,17 @@ async function initUI() {
   await safe(loadFiles, "loadFiles");
   await safe(loadRightNotes, "loadRightNotes");
   await safe(loadRightLogs, "loadRightLogs");
-
+  
   // Start polling and background tasks — wrapped to avoid throw-through
   try {
-    startEventsStream();
+    if (PUBLIC_SETTINGS.notifications_enabled !== false) {
+      startEventsStream();
+      startNotificationPolling();
+    }
   } catch (err) {
-    console.warn("events stream failed", err);
+    console.warn("events/notifications stream failed", err);
   }
-  try {
-    startNotificationPolling();
-  } catch (err) {
-    console.warn("startNotificationPolling failed", err);
-  }
-
+  
   // periodic refreshers
   pollingIntervals.push(setInterval(loadStatus, 30000));
   pollingIntervals.push(setInterval(loadFiles, 15000));
@@ -3332,7 +3331,7 @@ async function initUI() {
   adminIntervals.push(setInterval(loadRightTickets, 15000));
   adminIntervals.push(setInterval(loadRightLogs, 60000));
   setInterval(() => renderRightPanels(window.__updatesLog || "", window.__commandsList || []), 1000);
-
+  
   // Final UI touches
   try { setStatus("Klar"); } catch (err) {}
   try { updateToolDots(); } catch (err) {}
@@ -3340,14 +3339,14 @@ async function initUI() {
   if (typeof initCookieBanner === "function") {
     try { initCookieBanner(); } catch (err) { console.warn("initCookieBanner failed", err); }
   }
-
+  
   // Mark UI as ready (used by CSS to reveal non-essential UI parts)
   document.body.classList.add("ui-ready");
   // Removed tooltip support for chat messages
   
   console.log("UI ready");
 }
-
+  
 document.addEventListener("DOMContentLoaded", initUI);
 window.addEventListener("beforeunload", () => {
   stopEventsStream();

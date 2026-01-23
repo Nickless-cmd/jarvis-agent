@@ -1349,6 +1349,7 @@ async def stream_events_endpoint(
         deadline = None
         if max_ms is not None:
             deadline = time.monotonic() + (max_ms / 1000.0)
+        sleep_interval = 0.05 if (max_ms is not None or max_events is not None) else 1.0
         try:
             # Send an initial heartbeat so clients don't block forever on connect
             yield ": heartbeat\n\n"
@@ -1370,7 +1371,7 @@ async def stream_events_endpoint(
                     events_sent += 1
                     if max_events is not None and events_sent >= max_events:
                         return
-                await asyncio.sleep(0.2 if max_events or max_ms else 1.0)
+                await asyncio.sleep(sleep_interval)
         except asyncio.CancelledError:
             # Handle client disconnect gracefully
             pass

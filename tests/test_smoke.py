@@ -396,7 +396,7 @@ def test_events_stream_filtering():
     event_store = get_event_store()
     event_store.clear()
     
-    # Test that filtering parameters are accepted
-    resp = client.get("/v1/events/stream?since_id=0&topics=agent.start,agent.done&session_id=test")
+    # Test that filtering parameters are accepted and stream terminates
+    resp = client.get("/v1/events/stream?since_id=0&topics=agent.start,agent.done&session_id=test&max_events=1&max_ms=300")
     assert resp.status_code == 200
     assert resp.headers["content-type"] == "text/event-stream; charset=utf-8"

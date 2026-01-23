@@ -384,7 +384,69 @@ const LAST_SESSION_COOKIE = "jarvis_last_session";
 let currentSessionId = null;
 let sessionsCache = [];
 let lastSent = { text: "", ts: 0 };
+// Centralized auth state from authStore
 let isAdminUser = false;
+let isLoggedIn = false;
+let username = "";
+let tokenPresent = false;
+
+function updateAuthStateFromStore() {
+  if (!window.authStore) return;
+  isAdminUser = !!window.authStore.isAdmin;
+  isLoggedIn = !!window.authStore.isAuthenticated;
+  username = window.authStore.username || "";
+  tokenPresent = !!(window.getToken && window.getToken());
+}
+
+// Listen for auth state changes
+if (window.authStore && typeof window.authStore.onChange === 'function') {
+  window.authStore.onChange(() => {
+    updateAuthStateFromStore();
+    // Hide admin panels and stop polling if not admin
+    if (!isAdminUser) {
+      hideAdminPanels();
+      stopAdminPolling();
+    } else {
+      showAdminPanels();
+      startAdminPolling();
+    }
+  });
+}
+
+function hideAdminPanels() {
+  document.querySelectorAll('.admin-only, #rightTicketsPanel, #statusPanel').forEach(el => {
+    el.classList.add('panel-disabled');
+    if (el.id === 'rightTicketsPanel' || el.id === 'statusPanel') {
+      el.innerHTML = `<div class="muted">${getUiLang() === "en" ? "Admin access required." : "Admin kræver adgang."}</div>`;
+    }
+  });
+}
+
+function showAdminPanels() {
+  document.querySelectorAll('.admin-only, #rightTicketsPanel, #statusPanel').forEach(el => {
+    el.classList.remove('panel-disabled');
+  });
+}
+
+function stopAdminPolling() {
+  // Stop any polling intervals related to admin endpoints
+  if (window.adminPollingIntervals) {
+    window.adminPollingIntervals.forEach(clearInterval);
+    window.adminPollingIntervals = [];
+  }
+}
+
+function startAdminPolling() {
+  // Only start polling if admin
+  if (!isAdminUser) return;
+  if (!window.adminPollingIntervals) window.adminPollingIntervals = [];
+  // Example: poll tickets/logs every 15s
+  window.adminPollingIntervals.push(setInterval(loadRightTickets, 15000));
+  window.adminPollingIntervals.push(setInterval(loadRightLogs, 15000));
+}
+
+// Initial state
+updateAuthStateFromStore();
 let tooltipEl = null;
 let ticketsCache = [];
 let searchSeq = 0;
@@ -2161,7 +2223,14 @@ async function loadProfile() {
   const res = await apiFetch("/account/profile", { method: "GET" });
   if (!res) return;
   const data = await res.json();
-  isAdminUser = !!data.is_admin;
+  // Only update via authStore
+  if (window.authStore) {
+    window.authStore.setAuthState({
+      isAuthenticated: true,
+      isAdmin: !!data.is_admin,
+      lastAuthCheckAt: Date.now(),
+    });
+  }
   if (data.city) {
     localStorage.setItem("jarvisCity", data.city);
   }

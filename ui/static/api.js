@@ -50,11 +50,14 @@ async function apiFetch(path, options = {}) {
   try {
     const res = await fetch(path, fetchOptions);
     if (res.status === 401 || res.status === 403) {
+      // --- 401/403 handling ---
       if (isAdminEndpoint(path)) {
-        // Do not trigger logout for admin endpoints, return special object
+        // Never trigger logout for admin endpoints; just return adminDenied
+        // UI will hide admin panels and stop polling, but session remains active
         return { ok: false, status: res.status, adminDenied: true };
       }
       if (path === "/auth/me") {
+        // Only /auth/me 401 triggers full logout/session expiry
         console.warn("[auth] apiFetch: /auth/me returned ", res.status, "- triggering logout");
         if (typeof window.onAuthLost === 'function') window.onAuthLost('401');
         window.dispatchEvent(new CustomEvent('apiAuthError', { detail: { path, status: res.status } }));

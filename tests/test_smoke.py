@@ -332,6 +332,68 @@ def test_chat_events():
     unsubscribe()
 
 
+def test_chat_token_batching():
+    """Test chat token batching reduces event spam and preserves ordering."""
+    from jarvis.events import publish
+    import time
+    
+    # Collect events directly
+    collected_events = []
+    
+    def collect_event(event_type, payload):
+        collected_events.append((event_type, payload))
+    
+    # Subscribe to chat.token events
+    from jarvis.events import subscribe
+    unsubscribe = subscribe("chat.token", collect_event)
+    
+    request_id = "test-request-123"
+    session_id = "test-session-456"
+    
+    # Publish many small chat.token events
+    original_tokens = []
+    for i in range(20):
+        token = f"token{i:02d} "
+        original_tokens.append(token)
+        publish("chat.token", {
+            "request_id": request_id,
+            "session_id": session_id,
+            "token": token,
+            "sequence": i,
+        })
+    
+    # Wait for batching timeout
+    time.sleep(0.2)
+    
+    # Publish chat.end to force final flush
+    publish("chat.end", {
+        "request_id": request_id,
+        "session_id": session_id,
+    })
+    
+    # Check collected events
+    chat_token_events = [e for e in collected_events if e[0] == "chat.token"]
+    
+    # Should have fewer events than original tokens (batching worked)
+    assert len(chat_token_events) < len(original_tokens), f"Expected fewer than {len(original_tokens)} events, got {len(chat_token_events)}"
+    
+    # Reconstruct the full text from batched events
+    reconstructed_text = ""
+    for _, payload in chat_token_events:
+        reconstructed_text += payload["token"]
+    
+    # Should match the original concatenation
+    expected_text = "".join(original_tokens)
+    assert reconstructed_text == expected_text, f"Reconstructed text doesn't match: expected '{expected_text}', got '{reconstructed_text}'"
+    
+    # Check that batched events have the batched flag
+    for _, payload in chat_token_events:
+        assert payload.get("batched") is True
+    
+    # Cleanup
+    unsubscribe()
+
+
 def test_events_stream():
     """Test SSE streaming endpoint accessibility and headers."""
     from jarvis import server

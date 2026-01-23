@@ -27,8 +27,12 @@ async function apiFetch(path, options = {}) {
   if (!headers.has("Authorization")) {
     headers.set("Authorization", "Bearer devkey");
   }
+  const fetchOptions = { ...options, headers };
+  if (path.startsWith("/admin/")) {
+    fetchOptions.credentials = "include";
+  }
   try {
-    const res = await fetch(path, { ...options, headers });
+    const res = await fetch(path, fetchOptions);
     if (res.status === 401 || res.status === 403) {
       if (isAuthCriticalEndpoint(path)) {
         clearToken();

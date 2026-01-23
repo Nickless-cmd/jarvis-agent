@@ -51,6 +51,12 @@ def test_chat_events_flow(monkeypatch):
         assert "chat.end" in types
         assert "chat.user_message" in types
         assert "chat.assistant_message" in types
+        
+        # Ensure event order: chat.start before chat.token before chat.end
+        start_idx = types.index("chat.start")
+        token_idx = types.index("chat.token")
+        end_idx = types.index("chat.end")
+        assert start_idx < token_idx < end_idx
 
 
 def test_chat_events_error_path(monkeypatch):

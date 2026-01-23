@@ -537,6 +537,36 @@ def test_tool_events_endpoint():
         unsubscribe()
 
 
+def test_events_stream_no_match_returns_fast():
+    """Stream with non-matching filter should terminate within deadline and return snapshot."""
+    from jarvis import server
+    from jarvis.events import subscribe_all
+    from jarvis.event_store import get_event_store
+
+    client = TestClient(server.app)
+
+    try:
+        register_user("hotel", "secret", email="hotel@example.com")
+    except sqlite3.IntegrityError:
+        pass
+
+    login = login_user("hotel", "secret")
+    token = login["token"]
+    client.cookies.set("jarvis_token", token)
+
+    event_store = get_event_store()
+    event_store.clear()
+    unsubscribe = subscribe_all(lambda et, payload: event_store.append(et, payload))
+
+    try:
+        resp = client.get("/v1/events/stream?types=no.such.type&max_ms=200&max_events=1")
+        assert resp.status_code == 200
+        # Snapshot path should at least include heartbeat to keep SSE format valid
+        assert resp.text.startswith(": heartbeat")
+    finally:
+        unsubscribe()
+
+
 def test_events_stream_filtering():
     """Test events stream filtering and deterministic termination."""
     from jarvis import server

@@ -370,6 +370,7 @@ class TicketUpdateRequest(BaseModel):
 
 DEFAULT_API_KEY = "devkey"
 CAPCHAS = {}
+CAPTCHA_TTL_SECONDS = 300
 
 
 def _auth_ok(authorization: str | None) -> bool:
@@ -385,12 +386,12 @@ def _auth_ok(authorization: str | None) -> bool:
     return token in candidates
 
 
-def _auth_or_token_ok(authorization: str | None, x_user_token: str | None) -> bool:
+def _auth_or_token_ok(authorization: str | None, token: str | None) -> bool:
     if _auth_ok(authorization):
         return True
-    if not x_user_token:
+    if not token:
         return False
-    return get_user_by_token(x_user_token) is not None
+    return get_user_by_token(token) is not None
 
 
 def _resolve_token(
@@ -410,8 +411,12 @@ def _check_admin_auth(request: Request, authorization: str | None, x_user_token:
     if not ctx.is_admin:
         raise HTTPException(403, detail={"ok": False, "error": {"type": "AdminRequired", "message": "admin required"}})
     return ctx
+
+
+def _clean_expired_captcha() -> None:
+    """Remove expired captcha tokens to avoid unbounded growth."""
     now = time.time()
-    expired = [k for k, v in CAPCHAS.items() if now - v["ts"] > 300]
+    expired = [k for k, v in CAPCHAS.items() if now - v.get("ts", now) > CAPTCHA_TTL_SECONDS]
     for k in expired:
         CAPCHAS.pop(k, None)
 
@@ -1166,8 +1171,6 @@ async def register(req: RegisterRequest, authorization: str | None = Header(None
 
 @app.post("/auth/login")
 async def login(request: Request, req: LoginRequest, authorization: str | None = Header(None)):
-    if not _auth_ok(authorization):
-        raise HTTPException(401, detail="Invalid API key")
     if not _TEST_MODE and _get_setting("captcha_enabled", "1") == "1":
         if not _verify_captcha(req.captcha_token, req.captcha_answer):
             raise HTTPException(400, detail="Captcha er forkert")
@@ -1198,8 +1201,6 @@ async def login(request: Request, req: LoginRequest, authorization: str | None =
 
 @app.post("/auth/admin/login")
 async def admin_login(request: Request, req: LoginRequest, authorization: str | None = Header(None)):
-    if not _auth_ok(authorization):
-        raise HTTPException(401, detail="Invalid API key")
     result = login_user(req.username, req.password)
     if not result:
         raise HTTPException(401, detail="Invalid credentials")
@@ -2718,6 +2719,7 @@ async def chat(
                         
                         elif event_type == "agent.stream.final":
                             if not tokens_emitted:
+                                # Ensure at least one chat.token event for streaming (guarantees chat.token before chat.end)
                                 try:
                                     publish("chat.token", {
                                         "session_id": session_id,
@@ -3027,7 +3029,7 @@ async def chat(
         # Process the response text
         text = _butlerize_text(result.get("text", ""), user)
         
-        # Emit chat.token event with full text for non-streaming
+        # Emit chat.token event with full text for non-streaming (ensures at least one chat.token before chat.end)
         try:
             publish("chat.token", {
                 "session_id": session_id,

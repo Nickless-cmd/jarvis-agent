@@ -56,6 +56,7 @@ from jarvis.prompts.system_prompts import SYSTEM_PROMPT_USER, SYSTEM_PROMPT_ADMI
 from jarvis.prompt_manager import get_prompt_manager
 from jarvis.event_store import get_event_store, wire_event_store_to_bus
 from jarvis.events import subscribe_all
+from jarvis.config import load_config
 from jarvis.memory import purge_user_memory
 from jarvis.files import (
     safe_path,

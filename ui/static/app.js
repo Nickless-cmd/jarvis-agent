@@ -417,17 +417,19 @@ function updateAuthStateFromStore() {
 }
 
 // Listen for auth state changes
-if (window.authStore && typeof window.authStore.onChange === 'function') {
-  window.authStore.onChange(() => {
-    updateAuthStateFromStore();
-    // Hide admin panels and stop polling if not admin
+// Centralized auth state for UI session logic
+const authState = {
+  isLoggedIn: false,
+  isAdmin: false,
+  adminUnavailable: false, // Set to true if /admin/* returns 401
+  token: null
+};
     if (!isAdminUser) {
       hideAdminPanels();
       stopAdminPolling();
-    } else {
-      showAdminPanels();
-      startAdminPolling();
-    }
+  authState.isAdmin = !!window.authStore.isAdmin;
+  authState.isLoggedIn = !!window.authStore.isAuthenticated;
+  authState.token = window.getToken ? window.getToken() : null;
   });
 }
 
@@ -677,116 +679,88 @@ function applyUiTheme(value) {
   }
   const themeSelect = getThemeSelect();
   if (themeSelect) themeSelect.value = want;
-}
-
-function initTheme() {
-  const saved = sessionStorage.getItem("jarvisThemeSession");
-  const theme = saved === "light" || saved === "system" ? saved : "system";
-  applyUiTheme(theme);
-  if (theme === "system" && window.matchMedia) {
-    const media = window.matchMedia("(prefers-color-scheme: dark)");
-    media.addEventListener("change", () => {
-      if ((sessionStorage.getItem("jarvisThemeSession") || "system") === "system") {
-        applyUiTheme("system");
-      }
-    });
-  }
-}
-
-function renderRightPanels(updatesLog = "", commands = []) {
-  const updatesPanel = document.getElementById("updatesPanel");
-  const updatesClock = document.getElementById("updatesClock");
-  const rightbarCity = document.getElementById("rightbarCity");
-  const commandsPanel = document.getElementById("commandsPanel");
-  const statusPanel = document.getElementById("statusPanel");
-  const rightNotesBody = document.getElementById("rightNotesBody");
-  const lang = getUiLang();
-  if (updatesClock) {
-    const now = new Date();
-    const locale = lang === "en" ? "en-GB" : "da-DK";
-    const time = now.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
-    const date = now.toLocaleDateString(locale, { day: "2-digit", month: "2-digit", year: "numeric" });
-    const city = localStorage.getItem("jarvisCity") || (lang === "en" ? "City" : "By");
-    updatesClock.textContent = `${time} · ${date} · ${city}`;
-  }
-  if (rightbarCity) {
-    rightbarCity.textContent = ""; // Clear the separate city span since it's now combined
-  }
-  if (updatesPanel) {
-    const lines = (updatesLog || "")
-      .split("\n")
-      .map((l) => l.trim())
-      .filter((l) => l);
-    if (!lines.length) {
-      updatesPanel.innerHTML = `<div class="muted">${lang === "en" ? "No updates yet." : "Ingen opdateringer endnu."}</div>`;
-    } else {
-      const items = lines.slice(0, 6).map((l) => `<li>${l}</li>`).join("");
+    if (!authState.isAdmin || authState.adminUnavailable) return;
+    const rightTicketsBody = document.getElementById("rightTicketsBody");
+    const rightTicketsTitle = document.getElementById("rightTicketsTitle");
+    const rightTicketsPanel = document.getElementById("rightTicketsPanel");
+    if (!rightTicketsBody || !rightTicketsPanel) return;
+    const data = await safeJson("/admin/tickets", { method: "GET" }, {});
+    if (data && data.adminDenied) {
+      setAdminUnavailable();
+      return;
+    }
+    let all = [];
+    if (data) {
+      all = data.tickets || [];
+    }
+    const activeCount = all.filter((t) => t.status !== "closed" && t.status !== "fixed").length;
+    if (rightTicketsTitle) {
+      rightTicketsTitle.textContent =
+        getUiLang() === "en" ? `Tickets (${activeCount} active)` : `Tickets (${activeCount} aktive)`;
+    }
+    const list = all.slice(0, 5);
+    if (!list.length) {
+      rightTicketsBody.innerHTML = `<div class="muted">${getUiLang() === "en" ? "No tickets." : "Ingen tickets."}</div>`;
+      return;
+    }
+    const statusLabel = (s) => (s || "").toLowerCase();
+    const items = list.map((t) => {
+      const status = statusLabel(t.status);
+      const priority = (t.priority || "").toLowerCase();
+      const statusCls = status === "open" ? "status-green" : status === "pending" ? "status-yellow" : "status-red";
+      const prioCls = priority === "kritisk" ? "status-red" : priority === "moderat" ? "status-yellow" : "status-green";
+      return `<li><a class="ticket-link" href="/admin#tickets">#${t.id} ${t.title}</a><span class="ticket-status ${statusCls}">${t.status}</span><span class="ticket-priority ${prioCls}">${priority || "ukendt"}</span></li>`;
+    }).join("");
+    rightTicketsBody.innerHTML = `<ul class="ticket-list">${items}</ul>`;
       updatesPanel.innerHTML = `<ul>${items}</ul>`;
     }
   }
-  if (commandsPanel) {
-    const items = commands && commands.length
-      ? commands
-      : lang === "en"
-        ? [
-            "/summary — Summarize chat",
-            "/cv example — CV structure",
-            "/cv jarvis — JARVIS CV",
-            "/banner — Admin banner",
-          ]
-        : [
-            "/summary — Opsummer chat",
-            "/cv eksempel — CV‑struktur",
-            "/cv jarvis — JARVIS‑CV",
-            "/banner — Admin‑banner",
-          ];
-    commandsPanel.innerHTML = `<ul>${items.map((i) => `<li>${i}</li>`).join("")}</ul>`;
-  }
-  if (statusPanel) {
-    statusPanel.dataset.placeholder = "1";
-  }
-  if (rightNotesBody) {
-    rightNotesBody.dataset.placeholder = "1";
-  }
-}
-
-async function loadRightPanels() {
-  const data = await safeJson("/settings/public", {});
-  if (!data) return;
-  const notifWrap = document.getElementById("notifWrap");
+    if (!authState.isAdmin || authState.adminUnavailable) return;
+    const statusPanel = document.getElementById("statusPanel");
+    const data = await safeJson("/admin/logs", { method: "GET" }, {});
+    if (data && data.adminDenied) {
+      setAdminUnavailable();
+      return;
+    }
+    if (!data) return;
+    const files = data.files || [];
+    if (!files.length) {
+      if (statusPanel) statusPanel.innerHTML = `<div class="muted">${getUiLang() === "en" ? "No logs yet." : "Ingen logs endnu."}</div>`;
+      return;
+    }
+    const latest = files[0]?.name;
+    if (!latest) return;
+    const payload = await safeJson(`/admin/logs/${latest}`, { method: "GET" }, {});
+    const content = (payload.content || "").trim();
+    const lines = content.split("\n").slice(-12).join("\n");
+    if (statusPanel) statusPanel.innerHTML = `<pre>${lines || (getUiLang() === "en" ? "No logs yet." : "Ingen logs endnu.")}</pre>`;
   if (notifWrap) {
     if (data.notify_enabled) {
       notifWrap.classList.remove("hidden");
-    } else {
-      notifWrap.classList.add("hidden");
+    const res = await apiFetch("/account/profile", { method: "GET" });
+    if (!res) return;
+    const data = await res.json();
+    // Only update via authStore
+    if (window.authStore) {
+      window.authStore.setAuthState({
+        isAuthenticated: true,
+        isAdmin: !!data.is_admin,
+        lastAuthCheckAt: Date.now(),
+      });
     }
-  }
-  const list = (data.updates_log || "").trim()
-    ? data.updates_log
-    : (data.updates_auto || []).join("\n");
-  window.__updatesLog = list || "";
-  window.__commandsList = data.commands || [];
-  renderRightPanels(window.__updatesLog, window.__commandsList);
-  const rightNotesPanel = document.getElementById("rightNotesPanel");
-  const rightTicketsPanel = document.getElementById("rightTicketsPanel");
-  if (isAdminUser) {
-    if (rightNotesPanel) rightNotesPanel.classList.add("hidden");
-    if (rightTicketsPanel) rightTicketsPanel.classList.remove("hidden");
-  } else {
-    if (rightTicketsPanel) rightTicketsPanel.classList.add("hidden");
-    if (rightNotesPanel) rightNotesPanel.classList.remove("hidden");
-  }
-}
-
-async function loadRightNotes() {
-  if (isAdminUser) return;
-  const data = await safeJson("/notes", {}, { method: "GET" });
-  const rightNotesBody = document.getElementById("rightNotesBody");
-  if (!rightNotesBody) return;
-  const lang = getUiLang();
-  const items = (data && data.items) || [];
-  if (!items.length) {
-    rightNotesBody.innerHTML = `<div class="muted">${lang === "en" ? "No notes yet." : "Ingen noter endnu."}</div>`;
+    updateAuthStateFromStore();
+    if (!authState.isAdmin) {
+      stopAdminPolling();
+      hideAdminPanels();
+    } else if (!authState.adminUnavailable) {
+      showAdminPanels();
+      startAdminPolling();
+    }
+    updateToolsSummary();
+    updateToolDots();
+    loadQuotaBar();
+    if (quotaBar) quotaBar.style.display = authState.isAdmin ? "none" : "block";
+    if (quotaRequestBtn) quotaRequestBtn.style.display = authState.isAdmin ? "none" : "block";
     return;
   }
   const list = items.slice(0, 5).map((n) => {

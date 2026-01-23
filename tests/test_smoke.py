@@ -473,3 +473,89 @@ def test_tool_events_endpoint():
         assert resp.status_code == 422  # Validation error
     finally:
         unsubscribe()
+
+
+def test_events_stream_filtering():
+    """Test events stream filtering and deterministic termination."""
+    from jarvis import server
+    from jarvis.events import publish, subscribe_all
+    from jarvis.event_store import get_event_store
+    
+    client = TestClient(server.app)
+    
+    # Register and login to get token
+    try:
+        register_user("golf", "secret", email="golf@example.com")
+    except sqlite3.IntegrityError:
+        pass
+    
+    login = login_user("golf", "secret")
+    token = login["token"]
+    
+    # Set cookie for auth
+    client.cookies.set("jarvis_token", token)
+    
+    # Clear event store and set up subscription for test
+    event_store = get_event_store()
+    event_store.clear()
+    
+    # Manually subscribe event store to events for this test
+    unsubscribe = subscribe_all(lambda et, payload: event_store.append(et, payload))
+    
+    try:
+        # Publish various events
+        publish("agent.start", {"session_id": "sess1"})
+        publish("tool.search.start", {"query": "test", "session_id": "sess1"})
+        publish("chat.message", {"text": "hello", "session_id": "sess1"})
+        publish("tool.weather.start", {"city": "test", "session_id": "sess1"})
+        publish("agent.done", {"session_id": "sess1"})
+        
+        # Test filtering by types (prefix matching)
+        with client.stream("GET", "/v1/events/stream?types=tool.,chat.&max_events=10&max_ms=1000") as resp:
+            assert resp.status_code == 200
+            # Collect SSE events
+            events_received = []
+            for line in resp.iter_lines():
+                if line.startswith("event: "):
+                    event_type = line.split("event: ")[1].strip()
+                    events_received.append(event_type)
+            
+            # Should only contain tool.* and chat.* events
+            assert all(et.startswith("tool.") or et.startswith("chat.") for et in events_received)
+            # Should have received the matching events
+            assert "tool.search.start" in events_received
+            assert "chat.message" in events_received
+            assert "tool.weather.start" in events_received
+            # Should not have received non-matching events
+            assert "agent.start" not in events_received
+            assert "agent.done" not in events_received
+        
+        # Test termination by max_events
+        with client.stream("GET", "/v1/events/stream?max_events=2&max_ms=5000") as resp:
+            assert resp.status_code == 200
+            events_received = []
+            for line in resp.iter_lines():
+                if line.startswith("event: "):
+                    event_type = line.split("event: ")[1].strip()
+                    events_received.append(event_type)
+            # Should terminate after exactly 2 events
+            assert len(events_received) == 2
+        
+        # Test termination by max_ms (should terminate quickly even with no new events)
+        import time
+        start_time = time.time()
+        with client.stream("GET", "/v1/events/stream?max_ms=200&max_events=100") as resp:
+            assert resp.status_code == 200
+            events_received = []
+            for line in resp.iter_lines():
+                if line.startswith("event: "):
+                    event_type = line.split("event: ")[1].strip()
+                    events_received.append(event_type)
+            # Should have received all events (5 total)
+            assert len(events_received) == 5
+        elapsed = time.time() - start_time
+        # Should terminate within reasonable time (less than 1 second since max_ms=200ms and events exist)
+        assert elapsed < 1.0
+        
+    finally:
+        unsubscribe()

@@ -1319,7 +1319,7 @@ async def list_events_endpoint(
 async def stream_events_endpoint(
     request: Request,
     since_id: Optional[int] = Query(None, description="Stream events after this ID"),
-    topics: Optional[str] = Query(None, description="Comma-separated list of event types to filter by"),
+    types: Optional[str] = Query(None, description="Comma-separated list of event type prefixes to filter by"),
     session_id: Optional[str] = Query(None, description="Filter events by session_id"),
     max_events: Optional[int] = Query(None, description="Stop stream after N events (for testing)"),
     max_ms: Optional[int] = Query(None, description="Stop stream after T milliseconds (for testing)"),
@@ -1335,10 +1335,10 @@ async def stream_events_endpoint(
         raise HTTPException(403, detail="User is disabled")
     _enforce_maintenance(user)
 
-    # Parse topics filter
-    topic_filter = None
-    if topics:
-        topic_filter = set(t.strip() for t in topics.split(",") if t.strip())
+    # Parse types filter (prefix matching)
+    type_prefixes = None
+    if types:
+        type_prefixes = [t.strip() for t in types.split(",") if t.strip()]
 
     event_store = get_event_store()
     last_id = since_id or 0
@@ -1356,14 +1356,17 @@ async def stream_events_endpoint(
             while True:
                 if await request.is_disconnected():
                     break
+                # Check termination conditions even if no events arrive
                 if deadline and time.monotonic() > deadline:
                     break
                 if max_events is not None and events_sent >= max_events:
                     break
                 new_events = event_store.get_events(after=last_id, limit=1000)["events"]
                 for ev in new_events:
-                    if topic_filter and ev["type"] not in topic_filter:
-                        continue
+                    # Filter by type prefixes
+                    if type_prefixes:
+                        if not any(ev["type"].startswith(prefix) for prefix in type_prefixes):
+                            continue
                     if session_id and ev.get("session_id") and ev.get("session_id") != session_id:
                         continue
                     last_id = max(last_id, ev["id"])
@@ -1380,7 +1383,7 @@ async def stream_events_endpoint(
 
     return StreamingResponse(
         event_generator(),
-        media_type="text/event-stream",
+        media_type="text/event-stream; charset=utf-8",
         headers={
             "Cache-Control": "no-store",
             "Connection": "keep-alive",

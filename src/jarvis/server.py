@@ -1311,7 +1311,7 @@ async def list_events_endpoint(
     
     # Use EventStore for EventBus events
     event_store = get_event_store()
-    result = event_store.get_events(after=after, limit=limit)
+    result = event_store.get_events_snapshot(after=after, limit=limit)
     return result
 
 
@@ -2597,6 +2597,7 @@ async def chat(
                 agent_task = asyncio.create_task(run_agent_task())
                 
                 # Process streaming events
+                tokens_emitted = False
                 while True:
                     try:
                         event_type, payload = await asyncio.wait_for(event_queue.get(), timeout=0.1)
@@ -2639,6 +2640,7 @@ async def chat(
                                 })
                             except Exception:
                                 pass
+                            tokens_emitted = True
                         
                         elif event_type == "agent.stream.status":
                             # Yield status event for tool usage
@@ -2650,6 +2652,18 @@ async def chat(
                             )
                         
                         elif event_type == "agent.stream.final":
+                            if not tokens_emitted:
+                                try:
+                                    publish("chat.token", {
+                                        "session_id": session_id,
+                                        "trace_id": trace_id,
+                                        "request_id": stream_id,
+                                        "token": payload.get("text") or "",
+                                        "sequence": payload.get("parts"),
+                                        "final": True,
+                                    })
+                                except Exception:
+                                    pass
                             # Yield tail chunk and DONE
                             created = int(time.time())
                             tail = {
@@ -2935,6 +2949,20 @@ async def chat(
             raise
         duration_ms = int((time.time() - start_time) * 1000)
         
+        # Process the response text
+        text = _butlerize_text(result.get("text", ""), user)
+        
+        # Emit chat.token event with full text for non-streaming
+        try:
+            publish("chat.token", {
+                "session_id": session_id,
+                "request_id": message_id,
+                "trace_id": trace_id,
+                "token": text,
+            })
+        except Exception:
+            pass  # Never crash the request
+        
         # Emit agent.done event
         try:
             publish("agent.done", {
@@ -2957,17 +2985,6 @@ async def chat(
         
         # Publish chat.assistant_message event
         if prompt:
-            text_preview = result.get("text", "")[:120]
-            try:
-                # Emit a single chat.token for non-streaming flow (preview only)
-                publish("chat.token", {
-                    "session_id": session_id,
-                    "request_id": message_id,
-                    "trace_id": trace_id,
-                    "token": text_preview,
-                })
-            except Exception:
-                pass
             publish("chat.assistant_message", {
                 "session_id": session_id,
                 "message_id": message_id,
@@ -2975,8 +2992,6 @@ async def chat(
                 "text_preview": text_preview,
                 "duration_ms": duration_ms,
             })
-        
-        text = _butlerize_text(result.get("text", ""), user)
     except Exception as exc:
         # Emit agent.error event
         try:
@@ -3015,6 +3030,18 @@ async def chat(
         text = f"{expiry_warning}\n\n{text}"
     if quota_warning:
         text = f"{quota_warning}\n\n{text}"
+    
+    # Emit chat.token event with full final text for non-streaming
+    try:
+        publish("chat.token", {
+            "session_id": session_id,
+            "request_id": message_id,
+            "trace_id": trace_id,
+            "token": text,
+        })
+    except Exception:
+        pass  # Never crash the request
+    
     rendered_text = result.get("rendered_text")
     payload_data = result.get("data")
     payload_meta = result.get("meta")

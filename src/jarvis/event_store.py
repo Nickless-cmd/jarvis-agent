@@ -62,6 +62,10 @@ class EventStore:
                 "last_id": last_id,
             }
 
+    def get_events_snapshot(self, after: Optional[int] = None, limit: Optional[int] = None) -> Dict[str, Any]:
+        """Non-blocking snapshot of current events. No wait() or Condition usage."""
+        return self.get_events(after=after, limit=limit)
+
     def _reset_for_tests(self) -> None:
         with self._lock:
             self._events.clear()

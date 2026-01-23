@@ -12,9 +12,23 @@ DATA_DIR = os.path.abspath(os.getenv("JARVIS_DATA_DIR", DEFAULT_DATA_DIR))
 DB_PATH = os.path.abspath(os.getenv("JARVIS_DB_PATH", os.path.join(DATA_DIR, "jarvis.db")))
 
 
+def get_db_path() -> str:
+    """Runtime-safe DB path that respects env overrides after import."""
+    global DB_PATH
+    try:
+        from jarvis.config import load_config
+
+        cfg = load_config()
+        DB_PATH = os.path.abspath(cfg.db_path)
+    except Exception:
+        pass
+    return DB_PATH
+
+
 def _ensure_db():
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    with sqlite3.connect(DB_PATH) as conn:
+    path = get_db_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with sqlite3.connect(path) as conn:
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS users (
@@ -356,7 +370,8 @@ def _ensure_setting(conn: sqlite3.Connection, key: str, value: str) -> None:
 
 
 def _connect():
-    conn = sqlite3.connect(DB_PATH, timeout=5.0, isolation_level=None)
+    path = get_db_path()
+    conn = sqlite3.connect(path, timeout=5.0, isolation_level=None)
     conn.row_factory = sqlite3.Row
     try:
         conn.execute("PRAGMA journal_mode=WAL;")

@@ -12,10 +12,10 @@ from threading import Lock
 from typing import Any, Deque, Dict, List, Optional
 
 from jarvis import events
+from jarvis.config import is_test_mode, load_config
 
 def _get_lock_class():
-    import os
-    if os.getenv("JARVIS_TEST_MODE") == "1":
+    if is_test_mode():
         class DummyLock:
             def __enter__(self):
                 pass
@@ -116,7 +116,8 @@ _bus_unsubscribe = None
 def get_event_store() -> EventStore:
     global _store
     if _store is None:
-        _store = EventStore()
+        cfg = load_config()
+        _store = EventStore(max_size=cfg.event_backlog_maxlen)
     return _store
 
 

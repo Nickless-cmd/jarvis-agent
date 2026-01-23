@@ -155,8 +155,12 @@ class PollingRepoWatcher:
 
 
 def _is_test_mode():
-    import os
-    return os.getenv("JARVIS_TEST_MODE") == "1"
+    try:
+        from jarvis.config import is_test_mode as cfg_test
+        return cfg_test()
+    except Exception:
+        import os
+        return os.getenv("JARVIS_TEST_MODE") == "1"
 
 
 def start_repo_watcher_if_enabled() -> PollingRepoWatcher | None:

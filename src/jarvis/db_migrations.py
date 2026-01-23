@@ -1,9 +1,10 @@
 import sqlite3
-from jarvis.db import DB_PATH
+from jarvis.db import get_db_path
 
 
 def migrate():
-    with sqlite3.connect(DB_PATH) as conn:
+    path = get_db_path()
+    with sqlite3.connect(path) as conn:
         # Existing additive migrations
         try:
             conn.execute("ALTER TABLE sessions ADD COLUMN last_city TEXT")

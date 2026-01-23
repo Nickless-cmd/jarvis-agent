@@ -385,7 +385,6 @@ let currentSessionId = null;
 let sessionsCache = [];
 let lastSent = { text: "", ts: 0 };
 let isAdminUser = false;
-let adminPanelsLocked = false;
 let tooltipEl = null;
 let ticketsCache = [];
 let searchSeq = 0;

@@ -150,7 +150,11 @@ if not _req_logger.handlers:
 _req_logger.setLevel(logging.INFO)
 _last_log_cleanup = 0.0
 def is_test_mode():
-    return os.getenv("JARVIS_TEST_MODE", "0") == "1"
+    try:
+        from jarvis.config import is_test_mode as cfg_test
+        return cfg_test()
+    except Exception:
+        return os.getenv("JARVIS_TEST_MODE", "0") == "1"
 _PROMPT_CACHE: dict[str, str] = {}
 _EXPOSE_SYSTEM_PROMPT = os.getenv("JARVIS_EXPOSE_SYSTEM_PROMPT", "0") == "1"
 _PROMPT_MANAGER = get_prompt_manager()

@@ -64,14 +64,16 @@ def ensure_no_background_threads():
 def reset_events_and_store():
     """Reset EventBus/EventStore state between tests to avoid leakage/hangs."""
     from jarvis import events
-    from jarvis.event_store import get_event_store
+    from jarvis.event_store import get_event_store, wire_event_store_to_bus
 
     events.reset_for_tests()
     store = get_event_store()
     store.clear()
+    wire_event_store_to_bus()
     yield
     try:
         events.reset_for_tests()
         store.clear()
+        wire_event_store_to_bus()
     except Exception:
         pass

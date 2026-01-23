@@ -196,15 +196,14 @@ def test_user_endpoints_work_with_cookie():
 def test_events_endpoint():
     """Test /v1/events endpoint returns EventBus events."""
     from jarvis import server
-    from jarvis.events import publish, subscribe_all
+    from jarvis.events import publish
     from jarvis.event_store import get_event_store
     
     client = TestClient(server.app)
     
-    # Clear event store and manually subscribe (in case lifespan doesn't run in TestClient)
+    # Clear event store
     event_store = get_event_store()
     event_store.clear()
-    unsubscribe = subscribe_all(lambda event_type, payload: event_store.append(event_type, payload))
     
     # Register and login to get token
     try:
@@ -252,7 +251,7 @@ def test_events_endpoint():
     assert data2["events"][0]["type"] == "test.event2"
     
     # Cleanup
-    unsubscribe()
+    pass
 
 
 def test_chat_events():
@@ -275,10 +274,9 @@ def test_chat_events():
     # Set cookie for auth
     client.cookies.set("jarvis_token", token)
     
-    # Clear event store and manually subscribe
+    # Clear event store
     event_store = get_event_store()
     event_store.clear()
-    unsubscribe = subscribe("*", lambda event_type, payload: event_store.append(event_type, payload))
     
     # Test the subscription
     publish("test.event", {"test": "data"})
@@ -316,20 +314,7 @@ def test_chat_events():
     assert "duration_ms" in assistant_event["payload"]
     
     # Cleanup
-    unsubscribe()
-    
-    user_event = next(e for e in events if e["type"] == "chat.user_message")
-    assert "session_id" in user_event["payload"]
-    assert "message_id" in user_event["payload"]
-    assert user_event["payload"]["text_preview"] == "Hello, how are you?"
-    
-    assistant_event = next(e for e in events if e["type"] == "chat.assistant_message")
-    assert assistant_event["payload"]["ok"] is True
-    assert "text_preview" in assistant_event["payload"]
-    assert "duration_ms" in assistant_event["payload"]
-    
-    # Cleanup
-    unsubscribe()
+    pass
 
 
 def test_chat_token_batching():
@@ -467,7 +452,7 @@ def test_events_stream_filtering():
 def test_tool_events_endpoint():
     """Test tool events endpoint returns only tool.* events and respects limit."""
     from jarvis import server
-    from jarvis.events import publish, subscribe_all
+    from jarvis.events import publish
     from jarvis.event_store import get_event_store
     
     client = TestClient(server.app)
@@ -489,7 +474,6 @@ def test_tool_events_endpoint():
     event_store.clear()
     
     # Manually subscribe event store to events for this test
-    unsubscribe = subscribe_all(lambda et, payload: event_store.append(et, payload))
     
     try:
         # Publish various events including tool events
@@ -530,17 +514,16 @@ def test_tool_events_endpoint():
         # Test limit min (1) and max validation
         resp = client.get("/v1/events/tool?limit=0")
         assert resp.status_code == 422  # Validation error
-        
+
         resp = client.get("/v1/events/tool?limit=201")
         assert resp.status_code == 422  # Validation error
     finally:
-        unsubscribe()
+        pass
 
 
 def test_events_stream_no_match_returns_fast():
     """Stream with non-matching filter should terminate within deadline and return snapshot."""
     from jarvis import server
-    from jarvis.events import subscribe_all
     from jarvis.event_store import get_event_store
 
     client = TestClient(server.app)
@@ -556,21 +539,17 @@ def test_events_stream_no_match_returns_fast():
 
     event_store = get_event_store()
     event_store.clear()
-    unsubscribe = subscribe_all(lambda et, payload: event_store.append(et, payload))
 
-    try:
-        resp = client.get("/v1/events/stream?types=no.such.type&max_ms=200&max_events=1")
-        assert resp.status_code == 200
-        # Snapshot path should at least include heartbeat to keep SSE format valid
-        assert resp.text.startswith(": heartbeat")
-    finally:
-        unsubscribe()
+    resp = client.get("/v1/events/stream?types=no.such.type&max_ms=200&max_events=1")
+    assert resp.status_code == 200
+    # Snapshot path should at least include heartbeat to keep SSE format valid
+    assert resp.text.startswith(": heartbeat")
 
 
 def test_events_stream_filtering():
     """Test events stream filtering and deterministic termination."""
     from jarvis import server
-    from jarvis.events import publish, subscribe_all
+    from jarvis.events import publish
     from jarvis.event_store import get_event_store
     
     client = TestClient(server.app)
@@ -592,7 +571,6 @@ def test_events_stream_filtering():
     event_store.clear()
     
     # Manually subscribe event store to events for this test
-    unsubscribe = subscribe_all(lambda et, payload: event_store.append(et, payload))
     
     try:
         # Publish various events
@@ -663,4 +641,4 @@ def test_events_stream_filtering():
         assert elapsed < 1.0
         
     finally:
-        unsubscribe()
+        pass

@@ -31,7 +31,6 @@ def test_events_endpoint_returns_bus_events():
 
     store = get_event_store()
     store._reset_for_tests()
-    unsubscribe = events.subscribe_all(lambda et, payload: store.append(et, payload))
 
     # Ensure user/token
     try:
@@ -51,7 +50,7 @@ def test_events_endpoint_returns_bus_events():
         data = resp.json()
         assert "events" in data
         assert any(ev["type"] == "agent.started" for ev in data["events"])
-    unsubscribe()
+    pass
 
 
 def test_events_endpoint_returns_tool_events():
@@ -60,7 +59,6 @@ def test_events_endpoint_returns_tool_events():
 
     store = get_event_store()
     store._reset_for_tests()
-    unsubscribe = events.subscribe_all(lambda et, payload: store.append(et, payload))
 
     # Register a test tool
     def test_tool():
@@ -102,7 +100,7 @@ def test_events_endpoint_returns_tool_events():
         assert len(ok_events) == 1
         assert ok_events[0]["payload"]["tool"] == "test_tool"
         assert "duration_ms" in ok_events[0]["payload"]
-    unsubscribe()
+    pass
 
 
 def test_events_endpoint_returns_agent_events(monkeypatch):
@@ -113,7 +111,6 @@ def test_events_endpoint_returns_agent_events(monkeypatch):
 
     store = get_event_store()
     store._reset_for_tests()
-    unsubscribe = events.subscribe_all(lambda et, payload: store.append(et, payload))
 
     # Ensure user/token
     try:
@@ -145,7 +142,7 @@ def test_events_endpoint_returns_agent_events(monkeypatch):
         # Check for agent.done
         done_events = [ev for ev in agent_events if ev["type"] == "agent.done"]
         assert len(done_events) >= 1
-    unsubscribe()
+    pass
 
 
 @pytest.mark.skip(reason="non-deterministic hang in TestClient teardown; covered by session fixture checks")

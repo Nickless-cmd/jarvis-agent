@@ -54,7 +54,7 @@ from jarvis.db import get_conn, log_login_session
 from jarvis.personality import SYSTEM_PROMPT
 from jarvis.prompts.system_prompts import SYSTEM_PROMPT_USER, SYSTEM_PROMPT_ADMIN
 from jarvis.prompt_manager import get_prompt_manager
-from jarvis.event_store import get_event_store
+from jarvis.event_store import get_event_store, wire_event_store_to_bus
 from jarvis.events import subscribe_all
 from jarvis.memory import purge_user_memory
 from jarvis.files import (
@@ -193,13 +193,11 @@ async def lifespan(app: FastAPI):
     if not is_test_mode():
         _repo_watcher = start_repo_watcher_if_enabled()
     
-    # Subscribe EventStore to EventBus
+    # Subscribe EventStore to EventBus (always, even in test mode) so /v1/events works in tests
     event_store = get_event_store()
-    if not is_test_mode():
-        unsubscribe_events = subscribe_all(lambda et, payload: event_store.append(et, payload))
-    else:
-        unsubscribe_events = lambda: None
-    
+    wire_event_store_to_bus()
+    unsubscribe_events = lambda: None  # kept for symmetry
+
     # Handle project root override and static file mounting at startup
     global ROOT, UI_DIR, APP_HTML
     EXPECTED_ROOT = Path(os.getenv("JARVIS_PROJECT_ROOT", "/home/bs/vscode/jarvis-agent"))

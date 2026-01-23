@@ -101,6 +101,7 @@ class EventStore:
 
 
 _store: Optional[EventStore] = None
+_bus_unsubscribe = None
 
 
 def get_event_store() -> EventStore:
@@ -108,3 +109,18 @@ def get_event_store() -> EventStore:
     if _store is None:
         _store = EventStore()
     return _store
+
+
+def wire_event_store_to_bus() -> None:
+    """Ensure the global EventStore is subscribed to the EventBus."""
+    global _bus_unsubscribe
+    if _bus_unsubscribe:
+        try:
+            _bus_unsubscribe()
+        except Exception:
+            pass
+    store = get_event_store()
+    try:
+        _bus_unsubscribe = events.subscribe_all(lambda et, payload: store.append(et, payload))
+    except Exception:
+        _bus_unsubscribe = None

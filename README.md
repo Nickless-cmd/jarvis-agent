@@ -1,41 +1,55 @@
+
 # Jarvis — Lokal AI-assistent
 
-Jarvis er en lokal AI‑assistent bygget på FastAPI + Ollama med værktøjer, hukommelse, billedanalyse og et web‑UI.
+Jarvis er en lokal AI-assistent bygget på FastAPI + Ollama med værktøjer, hukommelse, billedanalyse og et web-UI.
 
-## 🚀 **Nyeste Features**
-- **Billedanalyse** med avanceret hallucination-beskyttelse
-- **Vision-modeller** (moondream:1.8b, llava:7b, llava:13b)
-- **Hallucination-detektion** med sprog-filtrering og sikkerhedstjek
-- **Debug-logging** for billedanalyse (`JARVIS_DEBUG_IMAGE=1`)
+## 🚀 Quickstart
 
-## Hurtig start
 ```bash
-uvicorn jarvis.server:app --host 127.0.0.1 --port 8000
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+PYTHONPATH=src python -m jarvis.server
 ```
 
-Åbn: `http://127.0.0.1:8000/login`
+Åbn: http://127.0.0.1:8000/app
 
-## Demo‑bruger
-- Brugernavn: `demo`
-- Email: `demo@example.com`
-- Password: `demo`
+## Demo-bruger
+- Brugernavn: demo
+- Email: demo@example.com
+- Password: demo
+
+## Tests
+
+Kør alle tests:
+
+```bash
+PYTHONPATH=src pytest -q
+```
+
+Med timeout (anbefalet for CI eller lange tests):
+
+```bash
+timeout 600s bash -lc 'PYTHONPATH=src pytest -q'
+# eller
+timeout 600s env PYTHONPATH=src pytest -q
+```
+
+## Konfiguration
+
+Se [docs/configuration.md](docs/configuration.md) for alle miljøvariabler og typiske værdier.
+
+## Troubleshooting
+
+Se [docs/troubleshooting.md](docs/troubleshooting.md) for fejlsøgning af test-hæng, 401-fejl, cookie-problemer og streaming.
+
+## Arkitektur
+
+Se [docs/architecture.md](docs/architecture.md) for et hurtigt overblik over systemet.
 
 ## Dokumentation
-Se `docs/README.md` for funktioner, kommandoer og UI‑ruter.
 
-## Database (skrivbar)
-Hvis du vil bruge en anden DB‑placering:
-```
-JARVIS_DB_PATH=/tmp/jarvis.db
-```# jarvis-agent
-
-## Development tip
-
-When developing locally make sure the running server uses the repository workspace UI. Start with:
-
-```bash
-# from your workspace root
-JARVIS_PROJECT_ROOT=/home/bs/vscode/jarvis-agent PYTHONPATH=src uvicorn jarvis.server:app --reload --host 127.0.0.1 --port 8000
-```
-
-This ensures the server mounts `ui/` and `ui/static/` from the repository path and exposes runtime info at `/v1/info` for quick verification.
+- [docs/running.md](docs/running.md) — Sådan starter du projektet
+- [docs/testing.md](docs/testing.md) — Test og CI
+- [docs/configuration.md](docs/configuration.md) — Miljøvariabler
+- [docs/troubleshooting.md](docs/troubleshooting.md) — Fejlsøgning
+- [docs/architecture.md](docs/architecture.md) — Arkitektur

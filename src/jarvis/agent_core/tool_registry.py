@@ -271,24 +271,20 @@ class ToolRunner:
                     output_summary = type(result).__name__
             
             event_type = "tool.ok" if success else ("tool.timeout" if error_obj and error_obj.get("type") == "TimeoutError" else "tool.error")
-            publish_event(event_type, {
+            payload = {
                 "tool": name,
                 "trace_id": trace_id,
                 "duration_ms": duration_ms,
                 "output_summary": output_summary,
                 "error": error_obj,
-                "session_id": session_id,
-            })
-            publish_event("tool.end", {
-                "tool": name,
-                "trace_id": trace_id,
-                "ok": success,
-                "duration_ms": duration_ms,
-                "error": error_obj,
-                "output_summary": output_summary,
                 "args": redacted_args,
                 "session_id": session_id,
-            })
+            }
+            publish_event(event_type, payload)
+            # Always emit tool.error for failures (including timeouts) for easy filtering
+            if not success:
+                publish_event("tool.error", payload)
+            publish_event("tool.end", payload | {"ok": success})
         except Exception:
             # EventBus unavailable, continue silently
             pass

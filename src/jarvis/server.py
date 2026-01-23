@@ -2901,6 +2901,17 @@ async def chat(
             })
         except Exception:
             pass  # EventBus unavailable, continue
+        # Emit chat.start event for non-stream flow
+        try:
+            publish("chat.start", {
+                "session_id": session_id,
+                "request_id": message_id,
+                "trace_id": trace_id,
+                "model": model,
+                "ts": start_time,
+            })
+        except Exception:
+            pass
         
         try:
             result = run_agent(
@@ -2933,10 +2944,30 @@ async def chat(
             })
         except Exception:
             pass  # EventBus unavailable, continue
+        try:
+            publish("chat.end", {
+                "session_id": session_id,
+                "request_id": message_id,
+                "trace_id": trace_id,
+                "ok": True,
+                "duration_ms": duration_ms,
+            })
+        except Exception:
+            pass
         
         # Publish chat.assistant_message event
         if prompt:
             text_preview = result.get("text", "")[:120]
+            try:
+                # Emit a single chat.token for non-streaming flow (preview only)
+                publish("chat.token", {
+                    "session_id": session_id,
+                    "request_id": message_id,
+                    "trace_id": trace_id,
+                    "token": text_preview,
+                })
+            except Exception:
+                pass
             publish("chat.assistant_message", {
                 "session_id": session_id,
                 "message_id": message_id,
@@ -2960,12 +2991,23 @@ async def chat(
         
         # Publish chat.error event
         if prompt:
-            publish("chat.error", {
-                "session_id": session_id,
-                "message_id": message_id,
-                "error": str(exc),
-                "stage": "agent_processing",
-            })
+            try:
+                publish("chat.error", {
+                    "session_id": session_id,
+                    "request_id": message_id,
+                    "trace_id": trace_id,
+                    "error": str(exc),
+                    "stage": "agent_processing",
+                })
+                publish("chat.end", {
+                    "session_id": session_id,
+                    "request_id": message_id,
+                    "trace_id": trace_id,
+                    "ok": False,
+                    "duration_ms": int((time.time() - start_time) * 1000),
+                })
+            except Exception:
+                pass
         raise
     if note_reminder:
         text = f"{note_reminder}\n\n{text}"

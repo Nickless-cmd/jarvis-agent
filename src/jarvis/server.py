@@ -58,6 +58,7 @@ from jarvis.event_store import get_event_store, wire_event_store_to_bus
 from jarvis.events import subscribe_all
 from jarvis.config import load_config
 from jarvis.memory import purge_user_memory
+from jarvis.settings_store import get_setting as settings_get, set_setting as settings_set, list_settings as settings_list, reset_for_tests as settings_reset_for_tests
 from jarvis.files import (
     safe_path,
     save_upload,

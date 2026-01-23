@@ -18,8 +18,6 @@ def test_admin_endpoint_without_auth_is_401():
 
 def test_admin_endpoint_with_devkey_allowed(monkeypatch):
     monkeypatch.setenv("JARVIS_TEST_MODE", "1")
-    import jarvis.server as srv
-    srv._TEST_MODE = True
     client = TestClient(server.app)
     resp = client.post("/v1/dev/run-tests", headers={"Authorization": "Bearer devkey"})
     # handler returns ok even if tests not run synchronously

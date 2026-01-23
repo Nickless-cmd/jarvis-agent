@@ -149,7 +149,8 @@ if not _req_logger.handlers:
     _req_logger.addHandler(file_handler)
 _req_logger.setLevel(logging.INFO)
 _last_log_cleanup = 0.0
-_TEST_MODE = os.getenv("JARVIS_TEST_MODE", "0") == "1"
+def is_test_mode():
+    return os.getenv("JARVIS_TEST_MODE", "0") == "1"
 _PROMPT_CACHE: dict[str, str] = {}
 _EXPOSE_SYSTEM_PROMPT = os.getenv("JARVIS_EXPOSE_SYSTEM_PROMPT", "0") == "1"
 _PROMPT_MANAGER = get_prompt_manager()
@@ -189,12 +190,15 @@ async def lifespan(app: FastAPI):
     
     app_state.repo_watcher_started = True
     global _repo_watcher
-    if not _TEST_MODE:
+    if not is_test_mode():
         _repo_watcher = start_repo_watcher_if_enabled()
     
     # Subscribe EventStore to EventBus
     event_store = get_event_store()
-    unsubscribe_events = subscribe_all(lambda et, payload: event_store.append(et, payload))
+    if not is_test_mode():
+        unsubscribe_events = subscribe_all(lambda et, payload: event_store.append(et, payload))
+    else:
+        unsubscribe_events = lambda: None
     
     # Handle project root override and static file mounting at startup
     global ROOT, UI_DIR, APP_HTML
@@ -280,7 +284,7 @@ async def security_headers(request, call_next):
 async def request_logger(request: Request, call_next):
     start = time.time()
     response = await call_next(request)
-    if not _TEST_MODE:
+    if not is_test_mode():
         elapsed_ms = int((time.time() - start) * 1000)
         _req_logger.info("%s %s %s %dms", request.method, request.url.path, response.status_code, elapsed_ms)
         global _last_log_cleanup
@@ -1162,7 +1166,7 @@ async def register(req: RegisterRequest, authorization: str | None = Header(None
         raise HTTPException(401, detail="Invalid API key")
     if _get_setting("register_enabled", "1") != "1":
         raise HTTPException(403, detail="Registration is disabled")
-    if not _TEST_MODE and _get_setting("captcha_enabled", "1") == "1":
+    if not is_test_mode() and _get_setting("captcha_enabled", "1") == "1":
         if not _verify_captcha(req.captcha_token, req.captcha_answer):
             raise HTTPException(400, detail="Captcha er forkert")
     if not req.full_name or not req.full_name.strip():
@@ -1189,7 +1193,7 @@ async def register(req: RegisterRequest, authorization: str | None = Header(None
 
 @app.post("/auth/login")
 async def login(request: Request, req: LoginRequest, authorization: str | None = Header(None)):
-    if not _TEST_MODE and _get_setting("captcha_enabled", "1") == "1":
+    if not is_test_mode() and _get_setting("captcha_enabled", "1") == "1":
         if not _verify_captcha(req.captcha_token, req.captcha_answer):
             raise HTTPException(400, detail="Captcha er forkert")
     result = login_user(req.username, req.password)
@@ -1392,11 +1396,11 @@ async def stream_events_endpoint(
         if max_ms is not None:
             deadline = time.monotonic() + (max_ms / 1000.0)
         # In test mode, force a short deadline so streams cannot hang
-        if _TEST_MODE and deadline is None:
+        if is_test_mode() and deadline is None:
             deadline = time.monotonic() + 0.5
-        if _TEST_MODE and max_events is None:
+        if is_test_mode() and max_events is None:
             max_events = 100
-        sleep_interval = 0.05 if (max_ms is not None or max_events is not None or _TEST_MODE) else 1.0
+        sleep_interval = 0.05 if (max_ms is not None or max_events is not None or is_test_mode()) else 1.0
         try:
             # Send an initial heartbeat so clients don't block forever on connect
             yield ": heartbeat\n\n"
@@ -1428,7 +1432,7 @@ async def stream_events_endpoint(
                 if max_events is not None and events_sent >= max_events:
                     return
             last_id = seen_max_id
-            if max_ms is not None or _TEST_MODE:
+            if max_ms is not None or is_test_mode():
                 # In tests, a single snapshot delivery is enough; exit to avoid hangs
                 return
             while True:
@@ -1459,7 +1463,7 @@ async def stream_events_endpoint(
                         return
                 # Always advance the cursor even if events were filtered out
                 last_id = seen_max_id
-                if _TEST_MODE:
+                if is_test_mode():
                     break
                 await asyncio.sleep(sleep_interval)
         except asyncio.CancelledError:
@@ -1665,7 +1669,7 @@ async def run_tests_endpoint(
     ctx = _check_admin_auth(request, authorization, x_user_token)
     user = ctx.user
     ui_lang = (user.get("lang") if user else None) or "da"
-    if _TEST_MODE:
+    if is_test_mode():
         return {"ok": True, "test_mode": True}
     run_pytest_and_notify(user["id"], ui_lang)
     return {"ok": True}

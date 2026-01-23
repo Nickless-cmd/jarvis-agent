@@ -448,9 +448,9 @@ def is_admin_user(user: dict | None) -> bool:
     return False
 
 
-def _check_admin_auth(request: Request, authorization: str | None, x_user_token: str | None) -> AuthContext:
-    cookie_token = request.cookies.get("jarvis_token")
-    ctx = build_auth_context(authorization, x_user_token, cookie_token)
+def _check_admin_auth(request: Request, authorization: str | None, token: str | None) -> AuthContext:
+    cookie_token = token or request.cookies.get("jarvis_token")
+    ctx = build_auth_context(authorization, None, cookie_token)
     if not ctx.is_authenticated:
         raise HTTPException(401, detail={"ok": False, "error": {"type": "AuthRequired", "message": "auth required"}})
     admin_ok = ctx.is_admin or is_admin_user(ctx.user)
@@ -1698,9 +1698,9 @@ async def mark_all_notifications_read_endpoint(
 async def run_tests_endpoint(
     request: Request,
     authorization: str | None = Header(None),
-    x_user_token: str | None = Header(None),
+    token: str | None = Depends(_resolve_token),
 ):
-    ctx = _check_admin_auth(request, authorization, x_user_token)
+    ctx = _check_admin_auth(request, authorization, token)
     user = ctx.user
     ui_lang = (user.get("lang") if user else None) or "da"
     if is_test_mode():
@@ -2072,9 +2072,9 @@ def _require_admin(user: dict):
 async def admin_list_users(
     request: Request,
     authorization: str | None = Header(None),
-    x_user_token: str | None = Header(None),
+    token: str | None = Depends(_resolve_token),
 ):
-    _check_admin_auth(request, authorization, x_user_token)
+    _check_admin_auth(request, authorization, token)
     return {"users": []}
 
 
@@ -2083,10 +2083,10 @@ async def admin_update_user(
     username: str,
     request: Request,
     authorization: str | None = Header(None),
-    x_user_token: str | None = Header(None),
+    token: str | None = Depends(_resolve_token),
     payload: dict = None,
 ):
-    _check_admin_auth(request, authorization, x_user_token)
+    _check_admin_auth(request, authorization, token)
     payload = payload or {}
     disabled = payload.get("disabled")
     is_admin = payload.get("is_admin")
@@ -2138,9 +2138,9 @@ async def admin_delete_user_by_name(
     username: str,
     request: Request,
     authorization: str | None = Header(None),
-    x_user_token: str | None = Header(None),
+    token: str | None = Depends(_resolve_token),
 ):
-    ctx = _check_admin_auth(request, authorization, x_user_token)
+    ctx = _check_admin_auth(request, authorization, token)
     if ctx.user["username"] == username:
         raise HTTPException(400, detail={"ok": False, "error": {"type": "BadRequest", "message": "Cannot delete yourself"}})
     with get_conn() as conn:
@@ -2158,9 +2158,9 @@ async def admin_list_sessions(
     request: Request,
     username: str | None = None,
     authorization: str | None = Header(None),
-    x_user_token: str | None = Header(None),
+    token: str | None = Depends(_resolve_token),
 ):
-    ctx = _check_admin_auth(request, authorization, x_user_token)
+    ctx = _check_admin_auth(request, authorization, token)
     with get_conn() as conn:
         target = username or ctx.user["username"]
         row = conn.execute("SELECT id FROM users WHERE username = ?", (target,)).fetchone()
@@ -2187,9 +2187,9 @@ async def admin_list_sessions(
 async def admin_online_users(
     request: Request,
     authorization: str | None = Header(None),
-    x_user_token: str | None = Header(None),
+    token: str | None = Depends(_resolve_token),
 ):
-    _check_admin_auth(request, authorization, x_user_token)
+    _check_admin_auth(request, authorization, token)
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=5)
     with get_conn() as conn:
         rows = conn.execute(
@@ -2211,9 +2211,9 @@ async def admin_delete_session(
     session_id: str,
     request: Request,
     authorization: str | None = Header(None),
-    x_user_token: str | None = Header(None),
+    token: str | None = Depends(_resolve_token),
 ):
-    _check_admin_auth(request, authorization, x_user_token)
+    _check_admin_auth(request, authorization, token)
     with get_conn() as conn:
         conn.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
         conn.execute("DELETE FROM session_state WHERE session_id = ?", (session_id,))
@@ -2226,9 +2226,9 @@ async def admin_delete_session(
 async def admin_rename_empty_sessions(
     request: Request,
     authorization: str | None = Header(None),
-    x_user_token: str | None = Header(None),
+    token: str | None = Depends(_resolve_token),
 ):
-    _check_admin_auth(request, authorization, x_user_token)
+    _check_admin_auth(request, authorization, token)
     with get_conn() as conn:
         user_ids = [row["id"] for row in conn.execute("SELECT id FROM users").fetchall()]
     updated = 0
@@ -2242,9 +2242,9 @@ async def admin_create_user(
     payload: AdminCreateRequest,
     request: Request,
     authorization: str | None = Header(None),
-    x_user_token: str | None = Header(None),
+    token: str | None = Depends(_resolve_token),
 ):
-    _check_admin_auth(request, authorization, x_user_token)
+    _check_admin_auth(request, authorization, token)
     try:
         created = register_user(
             payload.username,
@@ -2268,9 +2268,9 @@ async def admin_disable_user(
     payload: AdminDisableRequest,
     request: Request,
     authorization: str | None = Header(None),
-    x_user_token: str | None = Header(None),
+    token: str | None = Depends(_resolve_token),
 ):
-    _check_admin_auth(request, authorization, x_user_token)
+    _check_admin_auth(request, authorization, token)
     with get_conn() as conn:
         conn.execute(
             "UPDATE users SET is_disabled = ? WHERE id = ?",
@@ -2285,9 +2285,9 @@ async def admin_delete_user(
     user_id: int,
     request: Request,
     authorization: str | None = Header(None),
-    x_user_token: str | None = Header(None),
+    token: str | None = Depends(_resolve_token),
 ):
-    ctx = _check_admin_auth(request, authorization, x_user_token)
+    ctx = _check_admin_auth(request, authorization, token)
     if ctx.user and ctx.user["id"] == user_id:
         raise HTTPException(400, detail={"ok": False, "error": {"type": "BadRequest", "message": "Cannot delete yourself"}})
     with get_conn() as conn:
@@ -2300,9 +2300,9 @@ async def admin_delete_user(
 async def dev_run_tests(
     request: Request,
     authorization: str | None = Header(None),
-    x_user_token: str | None = Header(None),
+    token: str | None = Depends(_resolve_token),
 ):
-    ctx = _check_admin_auth(request, authorization, x_user_token)
+    ctx = _check_admin_auth(request, authorization, token)
     user = ctx.user
     run_pytest_and_notify(user["id"], ui_lang=user.get("lang") or "da")
     return {"ok": True}
@@ -3320,11 +3320,11 @@ async def account_quota(
 async def update_account_profile(
     payload: AccountUpdateRequest,
     authorization: str | None = Header(None),
-    x_user_token: str | None = Header(None),
+    token: str | None = Depends(_resolve_token),
 ):
     if not _auth_ok(authorization):
         raise HTTPException(401, detail="Invalid API key")
-    user = get_user_by_token(x_user_token)
+    user = get_user_by_token(token)
     if not user:
         raise HTTPException(401, detail="Missing or invalid user token")
     if user.get("is_disabled"):
@@ -3444,11 +3444,11 @@ async def v1_info():
 async def create_ticket_endpoint(
     payload: TicketCreateRequest,
     authorization: str | None = Header(None),
-    x_user_token: str | None = Header(None),
+    token: str | None = Depends(_resolve_token),
 ):
     if not _auth_ok(authorization):
         raise HTTPException(401, detail="Invalid API key")
-    user = get_user_by_token(x_user_token)
+    user = get_user_by_token(token)
     if not user:
         raise HTTPException(401, detail="Missing or invalid user token")
     if user.get("is_disabled"):
@@ -3461,11 +3461,11 @@ async def create_ticket_endpoint(
 @app.get("/api/tickets")
 async def list_tickets_endpoint(
     authorization: str | None = Header(None),
-    x_user_token: str | None = Header(None),
+    token: str | None = Depends(_resolve_token),
 ):
     if not _auth_ok(authorization):
         raise HTTPException(401, detail="Invalid API key")
-    user = get_user_by_token(x_user_token)
+    user = get_user_by_token(token)
     if not user:
         raise HTTPException(401, detail="Missing or invalid user token")
     if user.get("is_disabled"):
@@ -3477,11 +3477,11 @@ async def list_tickets_endpoint(
 async def get_ticket_endpoint(
     ticket_id: int,
     authorization: str | None = Header(None),
-    x_user_token: str | None = Header(None),
+    token: str | None = Depends(_resolve_token),
 ):
     if not _auth_ok(authorization):
         raise HTTPException(401, detail="Invalid API key")
-    user = get_user_by_token(x_user_token)
+    user = get_user_by_token(token)
     if not user:
         raise HTTPException(401, detail="Missing or invalid user token")
     if user.get("is_disabled"):
@@ -3497,11 +3497,11 @@ async def reply_ticket_endpoint(
     ticket_id: int,
     payload: TicketReplyRequest,
     authorization: str | None = Header(None),
-    x_user_token: str | None = Header(None),
+    token: str | None = Depends(_resolve_token),
 ):
     if not _auth_ok(authorization):
         raise HTTPException(401, detail="Invalid API key")
-    user = get_user_by_token(x_user_token)
+    user = get_user_by_token(token)
     if not user:
         raise HTTPException(401, detail="Missing or invalid user token")
     if user.get("is_disabled"):
@@ -3517,9 +3517,9 @@ async def reply_ticket_endpoint(
 async def admin_list_tickets(
     request: Request,
     authorization: str | None = Header(None),
-    x_user_token: str | None = Header(None),
+    token: str | None = Depends(_resolve_token),
 ):
-    _check_admin_auth(request, authorization, x_user_token)
+    _check_admin_auth(request, authorization, token)
     return {"tickets": list_tickets_admin()}
 
 
@@ -3528,9 +3528,9 @@ async def admin_get_ticket(
     ticket_id: int,
     request: Request,
     authorization: str | None = Header(None),
-    x_user_token: str | None = Header(None),
+    token: str | None = Depends(_resolve_token),
 ):
-    _check_admin_auth(request, authorization, x_user_token)
+    _check_admin_auth(request, authorization, token)
     ticket = get_ticket_admin(ticket_id)
     if not ticket:
         raise HTTPException(404, detail={"ok": False, "error": {"type": "NotFound", "message": "ticket not found"}})
@@ -3543,9 +3543,9 @@ async def admin_update_ticket(
     payload: TicketUpdateRequest,
     request: Request,
     authorization: str | None = Header(None),
-    x_user_token: str | None = Header(None),
+    token: str | None = Depends(_resolve_token),
 ):
-    _check_admin_auth(request, authorization, x_user_token)
+    _check_admin_auth(request, authorization, token)
     update_ticket_admin(ticket_id, payload.status, payload.priority)
     return {"ok": True}
 
@@ -3556,9 +3556,9 @@ async def admin_reply_ticket(
     payload: TicketReplyRequest,
     request: Request,
     authorization: str | None = Header(None),
-    x_user_token: str | None = Header(None),
+    token: str | None = Depends(_resolve_token),
 ):
-    ctx = _check_admin_auth(request, authorization, x_user_token)
+    ctx = _check_admin_auth(request, authorization, token)
     user = ctx.user
     add_ticket_message(ticket_id, user["id"], "admin", payload.message)
     return {"ok": True}
@@ -3588,9 +3588,9 @@ async def google_callback():
 async def admin_get_env(
     request: Request,
     authorization: str | None = Header(None),
-    x_user_token: str | None = Header(None),
+    token: str | None = Depends(_resolve_token),
 ):
-    _check_admin_auth(request, authorization, x_user_token)
+    _check_admin_auth(request, authorization, token)
     env_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
     if not os.path.exists(env_path):
         return {"content": ""}
@@ -3607,9 +3607,9 @@ async def admin_update_env(
     payload: EnvUpdateRequest,
     request: Request,
     authorization: str | None = Header(None),
-    x_user_token: str | None = Header(None),
+    token: str | None = Depends(_resolve_token),
 ):
-    _check_admin_auth(request, authorization, x_user_token)
+    _check_admin_auth(request, authorization, token)
     env_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
     os.makedirs(os.path.dirname(env_path), exist_ok=True)
     content = payload.content.replace("\r\n", "\n")
@@ -3713,9 +3713,9 @@ async def delete_note_endpoint(
 async def admin_settings(
     request: Request,
     authorization: str | None = Header(None),
-    x_user_token: str | None = Header(None),
+    token: str | None = Depends(_resolve_token),
 ):
-    _check_admin_auth(request, authorization, x_user_token)
+    _check_admin_auth(request, authorization, token)
     settings = _get_settings(
         [
             "footer_text",
@@ -3778,9 +3778,9 @@ async def admin_update_settings(
     payload: FooterSettingsRequest,
     request: Request,
     authorization: str | None = Header(None),
-    x_user_token: str | None = Header(None),
+    token: str | None = Depends(_resolve_token),
 ):
-    _check_admin_auth(request, authorization, x_user_token)
+    _check_admin_auth(request, authorization, token)
     with get_conn() as conn:
         conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", ("footer_text", payload.text))
         conn.execute(
@@ -3900,9 +3900,9 @@ def _safe_log_path(name: str) -> Path:
 async def admin_logs(
     request: Request,
     authorization: str | None = Header(None),
-    x_user_token: str | None = Header(None),
+    token: str | None = Depends(_resolve_token),
 ):
-    _check_admin_auth(request, authorization, x_user_token)
+    _check_admin_auth(request, authorization, token)
     _enforce_log_limits()
     return {"files": _list_log_files()}
 
@@ -3912,9 +3912,9 @@ async def admin_log_read(
     name: str,
     request: Request,
     authorization: str | None = Header(None),
-    x_user_token: str | None = Header(None),
+    token: str | None = Depends(_resolve_token),
 ):
-    _check_admin_auth(request, authorization, x_user_token)
+    _check_admin_auth(request, authorization, token)
     path = _safe_log_path(name)
     try:
         with open(path, "rb") as f:
@@ -3933,9 +3933,9 @@ async def admin_log_delete(
     name: str,
     request: Request,
     authorization: str | None = Header(None),
-    x_user_token: str | None = Header(None),
+    token: str | None = Depends(_resolve_token),
 ):
-    _check_admin_auth(request, authorization, x_user_token)
+    _check_admin_auth(request, authorization, token)
     path = _safe_log_path(name)
     path.unlink(missing_ok=True)
     return {"ok": True}

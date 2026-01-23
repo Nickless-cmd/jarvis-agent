@@ -1321,6 +1321,8 @@ async def stream_events_endpoint(
     since_id: Optional[int] = Query(None, description="Stream events after this ID"),
     topics: Optional[str] = Query(None, description="Comma-separated list of event types to filter by"),
     session_id: Optional[str] = Query(None, description="Filter events by session_id"),
+    max_events: Optional[int] = Query(None, description="Stop stream after N events (for testing)"),
+    max_ms: Optional[int] = Query(None, description="Stop stream after T milliseconds (for testing)"),
     authorization: str | None = Header(None),
     token: str | None = Depends(_resolve_token),
 ):
@@ -1343,11 +1345,19 @@ async def stream_events_endpoint(
 
     async def event_generator():
         nonlocal last_id
+        events_sent = 0
+        deadline = None
+        if max_ms is not None:
+            deadline = time.monotonic() + (max_ms / 1000.0)
         try:
             # Send an initial heartbeat so clients don't block forever on connect
             yield ": heartbeat\n\n"
             while True:
                 if await request.is_disconnected():
+                    break
+                if deadline and time.monotonic() > deadline:
+                    break
+                if max_events is not None and events_sent >= max_events:
                     break
                 new_events = event_store.get_events(after=last_id, limit=1000)["events"]
                 for ev in new_events:
@@ -1357,7 +1367,13 @@ async def stream_events_endpoint(
                         continue
                     last_id = max(last_id, ev["id"])
                     yield f"event: {ev['type']}\ndata: {json.dumps(ev)}\nid: {ev['id']}\n\n"
+                    events_sent += 1
+                    if max_events is not None and events_sent >= max_events:
+                        return
                 await asyncio.sleep(1.0)
+        except asyncio.CancelledError:
+            # Handle client disconnect gracefully
+            pass
         finally:
             return
 
@@ -2423,10 +2439,32 @@ async def chat(
                 except Exception:
                     pass  # EventBus unavailable, continue
 
-                yield _status_event("thinking", trace_id=trace_id, session_id=session_id)
+                # Emit status via EventBus so the stream reads only from EventBus
+                try:
+                    publish(
+                        "agent.stream.status",
+                        {
+                            "status": "thinking",
+                            "trace_id": trace_id,
+                            "session_id": session_id,
+                        },
+                    )
+                except Exception:
+                    pass
                 tool_hint = choose_tool(prompt, allowed_tools=allowed_tools)
                 if tool_hint in {"news", "search", "weather", "currency"}:
-                    yield _status_event("using_tool", tool_hint, trace_id=trace_id, session_id=session_id)
+                    try:
+                        publish(
+                            "agent.stream.status",
+                            {
+                                "status": "using_tool",
+                                "tool": tool_hint,
+                                "trace_id": trace_id,
+                                "session_id": session_id,
+                            },
+                        )
+                    except Exception:
+                        pass
                 
                 # Start agent in background task
                 agent_task = None

@@ -6,6 +6,181 @@ var authStore = window.authStore;
 // Global arrays for polling and streams
 let pollingIntervals = [];
 let openStreams = [];
+let eventClient = null;
+let lastEventId = 0;
+
+function handleBusEvent(evt) {
+  const payload = evt?.payload || {};
+  // Track cursor
+  if (evt?.id) {
+    lastEventId = Math.max(lastEventId, evt.id);
+  }
+  // Only render banner-like events that have body/title
+  const body = payload.body || payload.message || "";
+  const title = payload.title || "";
+  if (!body && !title) return;
+  appendEventBanners([
+    {
+      id: evt.id || payload.id || 0,
+      body,
+      title,
+      created_utc: payload.created_utc || payload.ts,
+      meta: payload.meta,
+    },
+  ]);
+}
+
+function startEventsStream() {
+  if (!NOTIFY_ENABLED) return;
+  if (!getToken()) return;
+  if (!eventClient) {
+    eventClient = new EventClient(handleBusEvent, { maxMs: 1200 });
+  }
+  eventClient.start();
+}
+
+function stopEventsStream() {
+  if (eventClient) {
+    eventClient.stop();
+    eventClient = null;
+  }
+}
+
+// --- Event streaming client (deterministic short pulls) ---
+class EventClient {
+  constructor(onEvent, opts = {}) {
+    this.onEvent = onEvent;
+    this.maxMs = opts.maxMs || 1000;
+    this.filterType = opts.filterType;
+    this.filterSession = opts.filterSession;
+    this.running = false;
+    this.abortController = null;
+    this.backoffMs = 250;
+    this.lastId = 0;
+    this.seen = [];
+    this.seenLimit = 500;
+    this.visibilityHandler = () => {
+      if (document.hidden) {
+        this.stop();
+      } else if (authStore.isAuthenticated) {
+        this.start();
+      }
+    };
+  }
+
+  _markSeen(id) {
+    if (!id) return false;
+    if (this.seen.includes(id)) return true;
+    this.seen.push(id);
+    if (this.seen.length > this.seenLimit) {
+      this.seen.shift();
+    }
+    return false;
+  }
+
+  stop() {
+    this.running = false;
+    if (this.abortController) {
+      this.abortController.abort();
+    }
+    document.removeEventListener("visibilitychange", this.visibilityHandler);
+  }
+
+  async start() {
+    if (this.running || !authStore.isAuthenticated) return;
+    this.running = true;
+    document.addEventListener("visibilitychange", this.visibilityHandler);
+    while (this.running) {
+      try {
+        await this._pollOnce();
+        this.backoffMs = 250;
+      } catch (err) {
+        if (!this.running) break;
+        await this._sleep(this.backoffMs);
+        this.backoffMs = Math.min(this.backoffMs * 2, 5000);
+      }
+      if (this.running) {
+        await this._sleep(10);
+      }
+    }
+  }
+
+  async _pollOnce() {
+    const params = new URLSearchParams();
+    params.set("since_id", this.lastId || 0);
+    params.set("max_ms", this.maxMs);
+    if (this.filterType) params.set("type", this.filterType);
+    if (this.filterSession) params.set("session_id", this.filterSession);
+
+    this.abortController = new AbortController();
+    const res = await fetch(`/v1/events/stream?${params.toString()}`, {
+      method: "GET",
+      signal: this.abortController.signal,
+      credentials: "same-origin",
+    });
+
+    if (res.status === 401 || res.status === 403) {
+      this.stop();
+      return;
+    }
+    if (!res.ok || !res.body) {
+      return;
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (this.running) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const parts = buffer.split("\n\n");
+      buffer = parts.pop() || "";
+      for (const block of parts) {
+        this._handleBlock(block);
+      }
+    }
+    this.abortController = null;
+  }
+
+  _handleBlock(block) {
+    const lines = block.split("\n");
+    let dataStr = "";
+    let idVal = null;
+    let evtName = null;
+    for (const line of lines) {
+      if (line.startsWith("data:")) {
+        dataStr += line.slice(5).trim();
+      } else if (line.startsWith("id:")) {
+        const val = parseInt(line.slice(3).trim(), 10);
+        if (!isNaN(val)) idVal = val;
+      } else if (line.startsWith("event:")) {
+        evtName = line.slice(6).trim();
+      }
+    }
+    if (idVal !== null) {
+      this.lastId = Math.max(this.lastId, idVal);
+      if (this._markSeen(idVal)) return;
+    }
+    if (!dataStr) return;
+    try {
+      const payload = JSON.parse(dataStr);
+      const eventObj = {
+        id: idVal || payload.id || 0,
+        type: evtName || payload.type || "",
+        payload,
+        ts: payload.ts || Date.now() / 1000,
+      };
+      if (this.onEvent) this.onEvent(eventObj);
+    } catch (err) {
+      // ignore malformed payloads
+    }
+  }
+
+  _sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+}
 
 // Centralized auth check using authStore
 function checkAuthAndRedirect() {
@@ -35,9 +210,11 @@ function hideSessionExpiryBanner() {
 function onAuthLost(reason) {
   if (authLostLatch) return;
   authLostLatch = true;
+  stopEventsStream();
   stopAllPolling();
   closeAllStreams();
   showSessionExpiryBanner();
+  console.warn("[auth] onAuthLost triggered: ", reason);
   // Optionally: set UI state to logged out, disable inputs, etc.
 }
 
@@ -68,6 +245,9 @@ if (authStore && typeof authStore.onChange === 'function') {
   authStore.onChange(() => {
     if (!authStore.isAuthenticated) {
       onAuthLost('authStore');
+      stopEventsStream();
+    } else {
+      startEventsStream();
     }
   });
 }
@@ -232,7 +412,7 @@ let sessionPromptClear = null;
 let noteContentInput = null;
 let notificationsCache = [];
 let notificationsLastId = null;
-let lastEventId = null;
+// lastEventId declared near event client section
 const NOTIFY_ENABLED = false; // temporary: disable notifications without removing code
 
 function storeCurrentSession() {
@@ -711,32 +891,9 @@ function appendEventBanners(events) {
 async function dismissEvent(eventId) {
   try {
     await apiFetch(`/v1/events/${eventId}/dismiss`, { method: "POST" });
-    await pollEvents();
   } catch (err) {
     console.error("Failed to dismiss event:", err);
   }
-}
-
-async function pollEvents() {
-  if (!NOTIFY_ENABLED) return;
-  if (!getToken()) return;
-  const url = "/v1/events" + (lastEventId ? `?since_id=${lastEventId}` : "");
-  const res = await apiFetch(url, { method: "GET" });
-  if (!res) return;
-  try {
-    const data = await res.json();
-    appendEventBanners(data.events || []);
-  } catch (err) {
-    console.error("Failed to read events:", err);
-  }
-}
-
-function startEventPolling() {
-// Duplicate definition removed
-  if (!NOTIFY_ENABLED) return;
-  pollEvents();
-  const id = setInterval(pollEvents, 8000);
-  pollingIntervals.push(id);
 }
 
 function normalizeText(value) {
@@ -2498,6 +2655,7 @@ document.getElementById("adminBtn").addEventListener("click", () => {
 });
 document.getElementById("logoutBtn").addEventListener("click", () => {
   clearToken();
+  stopEventsStream();
   window.location.href = "/login";
 });
 document.getElementById("accountBtn").addEventListener("click", () => {
@@ -3060,9 +3218,9 @@ async function initUI() {
 
   // Start polling and background tasks — wrapped to avoid throw-through
   try {
-    startEventPolling();
+    startEventsStream();
   } catch (err) {
-    console.warn("startEventPolling failed", err);
+    console.warn("events stream failed", err);
   }
   try {
     startNotificationPolling();
@@ -3095,3 +3253,6 @@ async function initUI() {
 }
 
 document.addEventListener("DOMContentLoaded", initUI);
+window.addEventListener("beforeunload", () => {
+  stopEventsStream();
+});

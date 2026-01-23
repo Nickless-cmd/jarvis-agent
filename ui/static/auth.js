@@ -22,21 +22,18 @@ function deleteCookie(name) {
 }
 
 function getToken() {
-  return (
-    localStorage.getItem(TOKEN_KEY) ||
-    sessionStorage.getItem(TOKEN_SESSION_KEY) ||
-    getCookie("jarvis_token")
-  );
+  const token = getCookie("jarvis_token");
+  if (token) {
+    console.debug("[auth] getToken: jarvis_token cookie present");
+  } else {
+    console.debug("[auth] getToken: jarvis_token cookie missing");
+  }
+  return token;
 }
 
 function setToken(token, remember = true) {
-  if (remember) {
-    localStorage.setItem(TOKEN_KEY, token);
-    sessionStorage.removeItem(TOKEN_SESSION_KEY);
-  } else {
-    sessionStorage.setItem(TOKEN_SESSION_KEY, token);
-    localStorage.removeItem(TOKEN_KEY);
-  }
+  setCookie("jarvis_token", token, remember ? 365 : 1);
+  console.info("[auth] setToken: jarvis_token set (remember=" + remember + ")");
 }
 
 
@@ -47,12 +44,9 @@ if (typeof window !== 'undefined') {
 }
 
 function clearToken() {
-  localStorage.removeItem(TOKEN_KEY);
-  sessionStorage.removeItem(TOKEN_SESSION_KEY);
-  sessionStorage.removeItem("jarvisConsentSession");
-  sessionStorage.removeItem("jarvisThemeSession");
   deleteCookie("jarvis_token");
-  authStore.reset();
+  console.warn("[auth] clearToken: jarvis_token cleared");
+  if (window.authStore) window.authStore.reset();
 }
 
 function setLastPath(path) {

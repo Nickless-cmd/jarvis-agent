@@ -69,6 +69,7 @@ function onAdminAuthLost(reason) {
   adminAuthLostLatch = true;
   stopAllAdminPolling();
   showAdminSessionExpiryBanner();
+  console.warn("[auth] onAdminAuthLost triggered: ", reason);
 }
 window.onAuthLost = onAdminAuthLost;
 window.addEventListener('apiAuthError', (e) => {
@@ -227,7 +228,10 @@ function formatDate(value) {
 async function loadLogs() {
   if (!logFiles || !isAdminAuthed()) return;
   const res = await apiFetch("/admin/logs", { method: "GET" });
-  if (!res) return;
+  if (!res || res.adminDenied) {
+    logFiles.innerHTML = '<div class="small">Admin kræves</div>';
+    return;
+  }
   const data = await res.json();
   const files = data.files || [];
   logFiles.innerHTML = "";
@@ -253,7 +257,10 @@ async function loadLogs() {
 async function loadLogContent(name) {
   if (!logContent || !isAdminAuthed()) return;
   const res = await apiFetch(`/admin/logs/${encodeURIComponent(name)}`, { method: "GET" });
-  if (!res) return;
+  if (!res || res.adminDenied) {
+    logContent.value = "Admin kræves";
+    return;
+  }
   const data = await res.json();
   logContent.value = data.content || "";
 }
@@ -333,7 +340,10 @@ async function renameChatsForAll() {
 async function loadTicketsAdmin() {
   if (!isAdminAuthed()) return;
   const res = await apiFetch("/admin/tickets", { method: "GET" });
-  if (!res) return;
+  if (!res || res.adminDenied) {
+    if (ticketsAdminList) ticketsAdminList.innerHTML = '<div class="small">Admin kræves</div>';
+    return;
+  }
   const data = await res.json();
   if (!ticketsAdminList) return;
   ticketsAdminList.innerHTML = "";

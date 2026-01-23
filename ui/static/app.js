@@ -8,6 +8,8 @@ let pollingIntervals = [];
 let openStreams = [];
 let eventClient = null;
 let adminPanelsLocked = false;
+let adminUnavailable = false;
+let adminIntervals = [];
 let lastEventId = 0;
 
 function handleBusEvent(evt) {
@@ -45,6 +47,22 @@ function stopEventsStream() {
     eventClient.stop();
     eventClient = null;
   }
+}
+
+function hideAdminPanels() {
+  const adminEls = document.querySelectorAll(".admin-only, #rightTicketsPanel");
+  adminEls.forEach((el) => el.classList.add("hidden"));
+}
+
+function stopAdminPolling() {
+  adminIntervals.forEach((id) => clearInterval(id));
+  adminIntervals = [];
+}
+
+function stopAllPolling() {
+  stopAdminPolling();
+  pollingIntervals.forEach(clearInterval);
+  pollingIntervals = [];
 }
 
 // --- Event streaming client (deterministic short pulls) ---
@@ -783,22 +801,21 @@ async function loadRightTickets() {
   const rightTicketsBody = document.getElementById("rightTicketsBody");
   const rightTicketsTitle = document.getElementById("rightTicketsTitle");
   const rightTicketsPanel = document.getElementById("rightTicketsPanel");
-  if (!isAdminUser) {
+  const noAdminMsg = `<div class="muted">${getUiLang() === "en" ? "Admin access required." : "Admin kræver adgang."}</div>`;
+  if (!isAdminUser || adminPanelsLocked || adminUnavailable) {
     if (rightTicketsPanel) rightTicketsPanel.classList.add("panel-disabled");
-    if (rightTicketsBody) rightTicketsBody.innerHTML = `<div class="muted">${getUiLang() === "en" ? "Admin access required." : "Admin kræver adgang."}</div>`;
-    return;
-  }
-  if (adminPanelsLocked) {
-    if (rightTicketsPanel) rightTicketsPanel.classList.add("panel-disabled");
-    if (rightTicketsBody) rightTicketsBody.innerHTML = `<div class="muted">${getUiLang() === "en" ? "Admin access required." : "Admin kræver adgang."}</div>`;
+    if (rightTicketsBody) rightTicketsBody.innerHTML = noAdminMsg;
     return;
   }
   if (!rightTicketsBody || !rightTicketsPanel) return;
   const data = await safeJson("/admin/tickets", { method: "GET" }, {});
   if (data && data.adminDenied) {
     adminPanelsLocked = true;
+    adminUnavailable = true;
+    stopAdminPolling();
+    hideAdminPanels();
     rightTicketsPanel.classList.add("panel-disabled");
-    rightTicketsBody.innerHTML = `<div class="muted">${getUiLang() === "en" ? "Admin access required." : "Admin kræver adgang."}</div>`;
+    rightTicketsBody.innerHTML = noAdminMsg;
     return;
   }
   let all = [];
@@ -828,21 +845,20 @@ async function loadRightTickets() {
 
 async function loadRightLogs() {
   const statusPanel = document.getElementById("statusPanel");
-  if (!isAdminUser) {
+  const noAdminMsg = `<div class="muted">${getUiLang() === "en" ? "Admin access required." : "Admin kræver adgang."}</div>`;
+  if (!isAdminUser || adminPanelsLocked || adminUnavailable) {
     if (statusPanel) statusPanel.classList.add("panel-disabled");
-    if (statusPanel) statusPanel.innerHTML = `<div class="muted">${getUiLang() === "en" ? "Admin access required." : "Admin kræver adgang."}</div>`;
-    return;
-  }
-  if (adminPanelsLocked) {
-    if (statusPanel) statusPanel.classList.add("panel-disabled");
-    if (statusPanel) statusPanel.innerHTML = `<div class="muted">${getUiLang() === "en" ? "Admin access required." : "Admin kræver adgang."}</div>`;
+    if (statusPanel) statusPanel.innerHTML = noAdminMsg;
     return;
   }
   const data = await safeJson("/admin/logs", { method: "GET" }, {});
   if (data && data.adminDenied) {
     adminPanelsLocked = true;
+    adminUnavailable = true;
+    stopAdminPolling();
+    hideAdminPanels();
     if (statusPanel) statusPanel.classList.add("panel-disabled");
-    if (statusPanel) statusPanel.innerHTML = `<div class="muted">${getUiLang() === "en" ? "Admin access required." : "Admin kræver adgang."}</div>`;
+    if (statusPanel) statusPanel.innerHTML = noAdminMsg;
     return;
   }
   if (!data) return;
@@ -3334,12 +3350,13 @@ async function initUI() {
   }
 
   // periodic refreshers
-  setInterval(loadStatus, 30000);
-  setInterval(loadFiles, 15000);
-  setInterval(loadRightPanels, 60000);
-  setInterval(loadRightNotes, 60000);
-  setInterval(loadRightLogs, 60000);
-  setInterval(loadRightTickets, 15000);
+  pollingIntervals.push(setInterval(loadStatus, 30000));
+  pollingIntervals.push(setInterval(loadFiles, 15000));
+  pollingIntervals.push(setInterval(loadRightPanels, 60000));
+  pollingIntervals.push(setInterval(loadRightNotes, 60000));
+  pollingIntervals.push(setInterval(loadRightLogs, 60000));
+  adminIntervals.push(setInterval(loadRightTickets, 15000));
+  adminIntervals.push(setInterval(loadRightLogs, 60000));
   setInterval(() => renderRightPanels(window.__updatesLog || "", window.__commandsList || []), 1000);
 
   // Final UI touches

@@ -156,6 +156,8 @@ class PollingRepoWatcher:
 
 def start_repo_watcher_if_enabled() -> PollingRepoWatcher | None:
     """Start watcher if env flag is enabled."""
+    if os.getenv("JARVIS_TEST_MODE") == "1":
+        return None
     if os.getenv("JARVIS_ENABLE_WATCHERS") != "1":
         return None
     repo_root = Path(os.getenv("JARVIS_REPO_ROOT") or DEFAULT_REPO_ROOT)

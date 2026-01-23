@@ -129,6 +129,20 @@ def test_repo_watcher_rate_limit(monkeypatch, tmp_path):
     assert events.count("code_changed") == 2
 
 
+def test_repo_watcher_disabled_in_test_mode(monkeypatch):
+    monkeypatch.setenv("JARVIS_TEST_MODE", "1")
+    monkeypatch.setenv("JARVIS_ENABLE_WATCHERS", "1")
+    watcher = repo_watcher.start_repo_watcher_if_enabled()
+    assert watcher is None
+
+
+def test_test_watcher_disabled_in_test_mode(monkeypatch):
+    monkeypatch.setenv("JARVIS_TEST_MODE", "1")
+    monkeypatch.setenv("JARVIS_ENABLE_TEST_WATCHER", "1")
+    watcher = test_watcher.start_test_watcher_if_enabled()
+    assert watcher is None
+
+
 def test_test_watcher_success(monkeypatch):
     events = []
 

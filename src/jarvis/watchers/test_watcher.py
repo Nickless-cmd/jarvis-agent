@@ -206,10 +206,13 @@ class PollingTestWatcher:
 
 def start_test_watcher_if_enabled() -> None:
     """Start test watcher if env flag is enabled."""
+    if os.getenv("JARVIS_TEST_MODE") == "1":
+        return None
     if os.getenv("JARVIS_ENABLE_TEST_WATCHER") != "1":
-        return
+        return None
     repo_root = Path(os.getenv("JARVIS_REPO_ROOT") or DEFAULT_REPO_ROOT)
     interval = int(os.getenv("JARVIS_TEST_WATCHER_INTERVAL_SEC", "60") or 60)
     user_id = int(os.getenv("JARVIS_WATCHER_USER_ID", "1"))
     watcher = PollingTestWatcher(repo_root=repo_root, user_id=user_id, interval_sec=interval)
     watcher.start()
+    return watcher

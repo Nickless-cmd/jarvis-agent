@@ -2454,6 +2454,7 @@ async def chat(
             deadline = time.monotonic() + MAX_STREAM_SECONDS
             done_sent = False
             agent_start_time = time.time()
+            chat_start_time = time.time()
             
             # Subscribe to agent.stream events for this trace_id
             event_queue = await subscribe_async(
@@ -2462,6 +2463,17 @@ async def chat(
             )
             
             try:
+                # Emit chat.start
+                try:
+                    publish("chat.start", {
+                        "session_id": session_id,
+                        "trace_id": trace_id,
+                        "request_id": stream_id,
+                        "model": model,
+                        "ts": chat_start_time,
+                    })
+                except Exception:
+                    pass
                 # Emit agent.start event
                 try:
                     publish("agent.start", {
@@ -2613,6 +2625,17 @@ async def chat(
                                 "choices": [{"index": 0, "delta": {"content": payload["token"]}, "finish_reason": None}],
                             }
                             yield f"data: {json.dumps(data)}\n\n"
+                            # Emit chat.token (small payload)
+                            try:
+                                publish("chat.token", {
+                                    "session_id": session_id,
+                                    "trace_id": trace_id,
+                                    "request_id": stream_id,
+                                    "token": payload.get("token"),
+                                    "sequence": payload.get("sequence"),
+                                })
+                            except Exception:
+                                pass
                         
                         elif event_type == "agent.stream.status":
                             # Yield status event for tool usage
@@ -2638,6 +2661,16 @@ async def chat(
                             yield f"data: {json.dumps(tail)}\n\n"
                             yield "data: [DONE]\n\n"
                             done_sent = True
+                            try:
+                                publish("chat.end", {
+                                    "session_id": session_id,
+                                    "trace_id": trace_id,
+                                    "request_id": stream_id,
+                                    "ok": True,
+                                    "duration_ms": int((time.time() - chat_start_time) * 1000),
+                                })
+                            except Exception:
+                                pass
                             break
                         
                         elif event_type == "agent.stream.error":
@@ -2648,6 +2681,22 @@ async def chat(
                                 session_id,
                             )
                             yield "data: [DONE]\n\n"
+                            try:
+                                publish("chat.error", {
+                                    "session_id": session_id,
+                                    "trace_id": trace_id,
+                                    "request_id": stream_id,
+                                    "error": payload,
+                                })
+                                publish("chat.end", {
+                                    "session_id": session_id,
+                                    "trace_id": trace_id,
+                                    "request_id": stream_id,
+                                    "ok": False,
+                                    "duration_ms": int((time.time() - chat_start_time) * 1000),
+                                })
+                            except Exception:
+                                pass
                             return
                             
                     except asyncio.TimeoutError:

@@ -31,6 +31,10 @@ def test_stream_events_happy_path(monkeypatch, tmp_path):
     types = [e["type"] for e in events]
     assert "agent.stream.start" in types
     assert "agent.stream.final" in types
+    assert "chat.start" in types
+    assert "chat.end" in types
+    token_events = [e for e in events if e["type"] == "chat.token"]
+    assert token_events, "expected chat.token events"
     # Delta events sequence should increase
     deltas = [e for e in events if e["type"] == "agent.stream.delta"]
     assert deltas

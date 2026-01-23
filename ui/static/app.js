@@ -385,6 +385,7 @@ let currentSessionId = null;
 let sessionsCache = [];
 let lastSent = { text: "", ts: 0 };
 let isAdminUser = false;
+let adminPanelsLocked = false;
 let tooltipEl = null;
 let ticketsCache = [];
 let searchSeq = 0;
@@ -718,14 +719,24 @@ async function loadRightNotes() {
 }
 
 async function loadRightTickets() {
-  if (!isAdminUser || adminPanelsLocked) return;
   const rightTicketsBody = document.getElementById("rightTicketsBody");
   const rightTicketsTitle = document.getElementById("rightTicketsTitle");
   const rightTicketsPanel = document.getElementById("rightTicketsPanel");
+  if (!isAdminUser) {
+    if (rightTicketsPanel) rightTicketsPanel.classList.add("panel-disabled");
+    if (rightTicketsBody) rightTicketsBody.innerHTML = `<div class="muted">${getUiLang() === "en" ? "Admin access required." : "Admin kræver adgang."}</div>`;
+    return;
+  }
+  if (adminPanelsLocked) {
+    if (rightTicketsPanel) rightTicketsPanel.classList.add("panel-disabled");
+    if (rightTicketsBody) rightTicketsBody.innerHTML = `<div class="muted">${getUiLang() === "en" ? "Admin access required." : "Admin kræver adgang."}</div>`;
+    return;
+  }
   if (!rightTicketsBody || !rightTicketsPanel) return;
   const data = await safeJson("/admin/tickets", { method: "GET" }, {});
   if (data && data.adminDenied) {
     adminPanelsLocked = true;
+    rightTicketsPanel.classList.add("panel-disabled");
     rightTicketsBody.innerHTML = `<div class="muted">${getUiLang() === "en" ? "Admin access required." : "Admin kræver adgang."}</div>`;
     return;
   }
@@ -755,23 +766,28 @@ async function loadRightTickets() {
 }
 
 async function loadRightLogs() {
-  if (!isAdminUser || adminPanelsLocked) return;
+  const statusPanel = document.getElementById("statusPanel");
+  if (!isAdminUser) {
+    if (statusPanel) statusPanel.classList.add("panel-disabled");
+    if (statusPanel) statusPanel.innerHTML = `<div class="muted">${getUiLang() === "en" ? "Admin access required." : "Admin kræver adgang."}</div>`;
+    return;
+  }
+  if (adminPanelsLocked) {
+    if (statusPanel) statusPanel.classList.add("panel-disabled");
+    if (statusPanel) statusPanel.innerHTML = `<div class="muted">${getUiLang() === "en" ? "Admin access required." : "Admin kræver adgang."}</div>`;
+    return;
+  }
   const data = await safeJson("/admin/logs", { method: "GET" }, {});
   if (data && data.adminDenied) {
     adminPanelsLocked = true;
-    const statusPanel = document.getElementById("statusPanel");
-    if (statusPanel) {
-      statusPanel.innerHTML = `<div class="muted">${getUiLang() === "en" ? "Admin access required." : "Admin kræver adgang."}</div>`;
-    }
+    if (statusPanel) statusPanel.classList.add("panel-disabled");
+    if (statusPanel) statusPanel.innerHTML = `<div class="muted">${getUiLang() === "en" ? "Admin access required." : "Admin kræver adgang."}</div>`;
     return;
   }
   if (!data) return;
   const files = data.files || [];
-  const statusPanel = document.getElementById("statusPanel");
-  if (!statusPanel) return;
-  const lang = getUiLang();
   if (!files.length) {
-    statusPanel.innerHTML = `<div class="muted">${lang === "en" ? "No logs yet." : "Ingen logs endnu."}</div>`;
+    if (statusPanel) statusPanel.innerHTML = `<div class="muted">${getUiLang() === "en" ? "No logs yet." : "Ingen logs endnu."}</div>`;
     return;
   }
   const latest = files[0]?.name;
@@ -779,7 +795,7 @@ async function loadRightLogs() {
   const payload = await safeJson(`/admin/logs/${latest}`, { method: "GET" }, {});
   const content = (payload.content || "").trim();
   const lines = content.split("\n").slice(-12).join("\n");
-  statusPanel.innerHTML = `<pre>${lines || (lang === "en" ? "No logs yet." : "Ingen logs endnu.")}</pre>`;
+  if (statusPanel) statusPanel.innerHTML = `<pre>${lines || (getUiLang() === "en" ? "No logs yet." : "Ingen logs endnu.")}</pre>`;
 }
 
 function updatePromptPlaceholder() {

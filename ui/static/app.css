@@ -1,3 +1,9 @@
+/* Disabled admin panel state */
+.panel-disabled {
+  opacity: 0.5;
+  pointer-events: none;
+  filter: grayscale(0.7);
+}
 /* Session expiry banner */
 .session-expiry-banner {
   display: flex;

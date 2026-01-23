@@ -423,14 +423,31 @@ def _resolve_token(
     return request.cookies.get("jarvis_token")
 
 
+def is_admin_user(user: dict | None) -> bool:
+    """Normalize admin detection across payloads."""
+    if not user:
+        return False
+    flag = user.get("is_admin")
+    if isinstance(flag, bool):
+        return flag
+    if isinstance(flag, (int, str)):
+        if str(flag).lower() in {"1", "true", "yes", "y", "on"}:
+            return True
+    role = user.get("role")
+    if isinstance(role, str) and role.lower() == "admin":
+        return True
+    return False
+
+
 def _check_admin_auth(request: Request, authorization: str | None, x_user_token: str | None) -> AuthContext:
     cookie_token = request.cookies.get("jarvis_token")
     ctx = build_auth_context(authorization, x_user_token, cookie_token)
     if not ctx.is_authenticated:
         raise HTTPException(401, detail={"ok": False, "error": {"type": "AuthRequired", "message": "auth required"}})
-    if not ctx.is_admin:
+    admin_ok = ctx.is_admin or is_admin_user(ctx.user)
+    if not admin_ok:
         raise HTTPException(403, detail={"ok": False, "error": {"type": "AdminRequired", "message": "admin required"}})
-    return ctx
+    return AuthContext(user=ctx.user, is_authenticated=ctx.is_authenticated, is_admin=admin_ok, token_source=ctx.token_source)
 
 
 def _clean_expired_captcha() -> None:
@@ -2036,7 +2053,7 @@ async def delete_file(
 
 
 def _require_admin(user: dict):
-    if not user.get("is_admin"):
+    if not is_admin_user(user):
         raise HTTPException(403, detail="Admin access required")
 
 

@@ -449,14 +449,20 @@ def is_admin_user(user: dict | None) -> bool:
 
 
 def _check_admin_auth(request: Request, authorization: str | None, token: str | None) -> AuthContext:
-    cookie_token = token or request.cookies.get("jarvis_token")
-    ctx = build_auth_context(authorization, None, cookie_token)
-    if not ctx.is_authenticated:
+    if not _auth_or_token_ok(authorization, token):
         raise HTTPException(401, detail={"ok": False, "error": {"type": "AuthRequired", "message": "auth required"}})
-    admin_ok = ctx.is_admin or is_admin_user(ctx.user)
-    if not admin_ok:
+    if _auth_ok(authorization):
+        user = get_or_create_default_user()
+        user["is_admin"] = True
+    else:
+        user = get_user_by_token(token)
+    if not user:
+        raise HTTPException(401, detail={"ok": False, "error": {"type": "AuthRequired", "message": "auth required"}})
+    if user.get("is_disabled"):
         raise HTTPException(403, detail={"ok": False, "error": {"type": "AdminRequired", "message": "admin required"}})
-    return AuthContext(user=ctx.user, is_authenticated=ctx.is_authenticated, is_admin=admin_ok, token_source=ctx.token_source)
+    if not is_admin_user(user):
+        raise HTTPException(403, detail={"ok": False, "error": {"type": "AdminRequired", "message": "admin required"}})
+    return AuthContext(user=user, is_authenticated=True, is_admin=True, token_source="devkey" if _auth_ok(authorization) else "token")
 
 
 def _clean_expired_captcha() -> None:

@@ -448,6 +448,71 @@ def is_admin_user(user: dict | None) -> bool:
     return False
 
 
+# ---- Chat event contract helpers -------------------------------------------------
+
+def _emit_event(event_type: str, payload: dict) -> None:
+    """Best-effort publish wrapper."""
+    try:
+        publish(event_type, payload)
+    except Exception:
+        pass
+
+
+def emit_chat_start(session_id: str | None, request_id: str, model: str, trace_id: str | None = None) -> None:
+    _emit_event("chat.start", {
+        "session_id": session_id,
+        "request_id": request_id,
+        "model": model,
+        "ts": time.time(),
+        "trace_id": trace_id,
+    })
+
+
+def emit_chat_user_message(session_id: str | None, request_id: str, text_preview: str | None, trace_id: str | None = None) -> None:
+    if text_preview is None:
+        return
+    _emit_event("chat.user_message", {
+        "session_id": session_id,
+        "message_id": request_id,
+        "request_id": request_id,
+        "text_preview": text_preview,
+        "ts": time.time(),
+        "trace_id": trace_id,
+    })
+
+
+def emit_chat_token(session_id: str | None, request_id: str, token: str, sequence: int | None = None, trace_id: str | None = None) -> None:
+    _emit_event("chat.token", {
+        "session_id": session_id,
+        "message_id": request_id,
+        "request_id": request_id,
+        "token": token,
+        "sequence": sequence,
+        "ts": time.time(),
+        "trace_id": trace_id,
+    })
+
+
+def emit_chat_end(session_id: str | None, request_id: str, ok: bool = True, trace_id: str | None = None, error: dict | None = None) -> None:
+    if not ok:
+        _emit_event("chat.error", {
+            "session_id": session_id,
+            "message_id": request_id,
+            "request_id": request_id,
+            "ts": time.time(),
+            "trace_id": trace_id,
+            "error": error or {},
+        })
+    _emit_event("chat.end", {
+        "session_id": session_id,
+        "message_id": request_id,
+        "request_id": request_id,
+        "ts": time.time(),
+        "trace_id": trace_id,
+        "ok": ok,
+    })
+
+
 def _check_admin_auth(request: Request, authorization: str | None, token: str | None) -> AuthContext:
     if not _auth_or_token_ok(authorization, token):
         raise HTTPException(401, detail={"ok": False, "error": {"type": "AuthRequired", "message": "auth required"}})
@@ -646,6 +711,7 @@ def _stream_text_events(
     text: str,
     model: str,
     stream_id: str,
+    request_id: str | None = None,
     trace_id: str | None = None,
     session_id: str | None = None,
 ):
@@ -658,15 +724,13 @@ def _stream_text_events(
     text_buffer: list[str] = []
 
     # Emit agent.stream.start
-    try:
-        publish("agent.stream.start", {
-            "session_id": session_id,
-            "message_id": stream_id,
-            "trace_id": trace_id,
-            "started_at": started_at,
-        })
-    except Exception:
-        pass
+    _emit_event("agent.stream.start", {
+        "session_id": session_id,
+        "message_id": stream_id,
+        "request_id": request_id or stream_id,
+        "trace_id": trace_id,
+        "started_at": started_at,
+    })
 
     head = {
         "id": stream_id,
@@ -683,17 +747,15 @@ def _stream_text_events(
     for part in _chunk_text(text):
         text_buffer.append(part)
         # Emit agent.stream.delta event
-        try:
-            publish("agent.stream.delta", {
-                "message_id": stream_id,
-                "sequence": sequence,
-                "token": part,
-                "role": "assistant",
-                "trace_id": trace_id,
-                "session_id": session_id,
-            })
-        except Exception:
-            pass  # EventBus unavailable, continue
+        _emit_event("agent.stream.delta", {
+            "message_id": stream_id,
+            "request_id": request_id or stream_id,
+            "sequence": sequence,
+            "token": part,
+            "role": "assistant",
+            "trace_id": trace_id,
+            "session_id": session_id,
+        })
         
         data = {
             "id": stream_id,
@@ -701,6 +763,7 @@ def _stream_text_events(
             "created": created,
             "model": model,
             "trace_id": trace_id,
+            "request_id": request_id or stream_id,
             "session_id": session_id,
             "choices": [{"index": 0, "delta": {"content": part}, "finish_reason": None}],
         }
@@ -713,6 +776,7 @@ def _stream_text_events(
         "created": created,
         "model": model,
         "trace_id": trace_id,
+        "request_id": request_id or stream_id,
         "session_id": session_id,
         "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
     }
@@ -720,18 +784,18 @@ def _stream_text_events(
     yield "data: [DONE]\n\n"
 
     # Emit agent.stream.final
-    try:
-        duration_ms = int((time.time() - started_at) * 1000)
-        publish("agent.stream.final", {
-            "session_id": session_id,
-            "message_id": stream_id,
-            "trace_id": trace_id,
-            "text": "".join(text_buffer),
-            "duration_ms": duration_ms,
-            "parts": sequence,
-        })
-    except Exception:
-        pass
+    duration_ms = int((time.time() - started_at) * 1000)
+    _emit_event("agent.stream.final", {
+        "session_id": session_id,
+        "message_id": stream_id,
+        "request_id": request_id or stream_id,
+        "trace_id": trace_id,
+        "text": "".join(text_buffer),
+        "duration_ms": duration_ms,
+        "parts": sequence,
+    })
+    # Always emit a chat.token at least once (final text) to satisfy contract
+    emit_chat_token(session_id, request_id or stream_id, "".join(text_buffer), sequence=sequence, trace_id=trace_id)
 
 
 def _stream_chunks(
@@ -2347,17 +2411,10 @@ async def chat(
     
     # Publish chat.user_message event
     message_id = f"chatcmpl-{uuid.uuid4().hex}"
+    request_id = message_id
     if prompt:
         text_preview = prompt[:120] if len(prompt) > 120 else prompt
-        try:
-            publish("chat.user_message", {
-                "session_id": session_id,
-                "message_id": message_id,
-                "text_preview": text_preview,
-                "ts": time.time(),
-            })
-        except Exception:
-            pass
+        emit_chat_user_message(session_id, message_id, text_preview)
     
     if prompt and _contains_sensitive(prompt):
         if session_id:
@@ -2584,11 +2641,12 @@ async def chat(
             from jarvis.events import subscribe_async
             
             trace_id = uuid.uuid4().hex
-            stream_id = f"chatcmpl-{uuid.uuid4().hex}"
+            stream_id = request_id
             deadline = time.monotonic() + MAX_STREAM_SECONDS
             done_sent = False
             agent_start_time = time.time()
             chat_start_time = time.time()
+            emit_chat_start(session_id, stream_id, model, trace_id=trace_id)
             
             # Subscribe to agent.stream events for this trace_id
             event_queue = await subscribe_async(
@@ -2609,14 +2667,12 @@ async def chat(
                 except Exception:
                     pass
                 # Emit agent.start event
-                try:
-                    publish("agent.start", {
-                        "session_id": session_id,
-                        "trace_id": trace_id,
-                        "prompt_preview": (prompt or "")[:120] if prompt else "",
-                    })
-                except Exception:
-                    pass  # EventBus unavailable, continue
+                _emit_event("agent.start", {
+                    "session_id": session_id,
+                    "trace_id": trace_id,
+                    "request_id": stream_id,
+                    "prompt_preview": (prompt or "")[:120] if prompt else "",
+                })
 
                 # Emit status via EventBus so the stream reads only from EventBus
                 try:
@@ -2694,6 +2750,7 @@ async def chat(
                             text_stream,
                             model,
                             stream_id=stream_id,
+                            request_id=stream_id,
                             trace_id=trace_id,
                             session_id=session_id,
                         )))
@@ -2742,6 +2799,7 @@ async def chat(
                                 "created": created,
                                 "model": model,
                                 "trace_id": trace_id,
+                                "request_id": stream_id,
                                 "session_id": session_id,
                                 "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
                             }
@@ -2756,21 +2814,13 @@ async def chat(
                                 "created": created,
                                 "model": model,
                                 "trace_id": trace_id,
+                                "request_id": stream_id,
                                 "session_id": session_id,
                                 "choices": [{"index": 0, "delta": {"content": payload["token"]}, "finish_reason": None}],
                             }
                             yield f"data: {json.dumps(data)}\n\n"
                             # Emit chat.token (small payload)
-                            try:
-                                publish("chat.token", {
-                                    "session_id": session_id,
-                                    "trace_id": trace_id,
-                                    "request_id": stream_id,
-                                    "token": payload.get("token"),
-                                    "sequence": payload.get("sequence"),
-                                })
-                            except Exception:
-                                pass
+                            emit_chat_token(session_id, stream_id, payload.get("token") or "", sequence=payload.get("sequence"), trace_id=trace_id)
                             tokens_emitted = True
                         
                         elif event_type == "agent.stream.status":
@@ -2785,17 +2835,7 @@ async def chat(
                         elif event_type == "agent.stream.final":
                             if not tokens_emitted:
                                 # Ensure at least one chat.token event for streaming (guarantees chat.token before chat.end)
-                                try:
-                                    publish("chat.token", {
-                                        "session_id": session_id,
-                                        "trace_id": trace_id,
-                                        "request_id": stream_id,
-                                        "token": payload.get("text") or "",
-                                        "sequence": payload.get("parts"),
-                                        "final": True,
-                                    })
-                                except Exception:
-                                    pass
+                                emit_chat_token(session_id, stream_id, payload.get("text") or "", sequence=payload.get("parts"), trace_id=trace_id)
                             # Yield tail chunk and DONE
                             created = int(time.time())
                             tail = {
@@ -2804,22 +2844,14 @@ async def chat(
                                 "created": created,
                                 "model": model,
                                 "trace_id": trace_id,
+                                "request_id": stream_id,
                                 "session_id": session_id,
                                 "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
                             }
                             yield f"data: {json.dumps(tail)}\n\n"
                             yield "data: [DONE]\n\n"
                             done_sent = True
-                            try:
-                                publish("chat.end", {
-                                    "session_id": session_id,
-                                    "trace_id": trace_id,
-                                    "request_id": stream_id,
-                                    "ok": True,
-                                    "duration_ms": int((time.time() - chat_start_time) * 1000),
-                                })
-                            except Exception:
-                                pass
+                            emit_chat_end(session_id, stream_id, ok=True, trace_id=trace_id)
                             break
                         
                         elif event_type == "agent.stream.error":
@@ -2830,22 +2862,13 @@ async def chat(
                                 session_id,
                             )
                             yield "data: [DONE]\n\n"
-                            try:
-                                publish("chat.error", {
-                                    "session_id": session_id,
-                                    "trace_id": trace_id,
-                                    "request_id": stream_id,
-                                    "error": payload,
-                                })
-                                publish("chat.end", {
-                                    "session_id": session_id,
-                                    "trace_id": trace_id,
-                                    "request_id": stream_id,
-                                    "ok": False,
-                                    "duration_ms": int((time.time() - chat_start_time) * 1000),
-                                })
-                            except Exception:
-                                pass
+                            emit_chat_end(
+                                session_id,
+                                stream_id,
+                                ok=False,
+                                trace_id=trace_id,
+                                error=payload,
+                            )
                             return
                             
                     except asyncio.TimeoutError:
@@ -3039,25 +3062,14 @@ async def chat(
     trace_id = uuid.uuid4().hex
     try:
         # Emit agent.start event
-        try:
-            publish("agent.start", {
-                "session_id": session_id,
-                "trace_id": trace_id,
-                "prompt_preview": (prompt or "")[:120] if prompt else "",
-            })
-        except Exception:
-            pass  # EventBus unavailable, continue
+        _emit_event("agent.start", {
+            "session_id": session_id,
+            "trace_id": trace_id,
+            "request_id": message_id,
+            "prompt_preview": (prompt or "")[:120] if prompt else "",
+        })
         # Emit chat.start event for non-stream flow
-        try:
-            publish("chat.start", {
-                "session_id": session_id,
-                "request_id": message_id,
-                "trace_id": trace_id,
-                "model": model,
-                "ts": start_time,
-            })
-        except Exception:
-            pass
+        emit_chat_start(session_id, message_id, model, trace_id=trace_id)
         
         try:
             result = run_agent(
@@ -3082,44 +3094,21 @@ async def chat(
         duration_ms = int((time.time() - start_time) * 1000)
         
         # Emit agent.done event
-        try:
-            publish("agent.done", {
-                "session_id": session_id,
-                "trace_id": trace_id,
-                "duration_ms": duration_ms,
-            })
-        except Exception:
-            pass  # EventBus unavailable, continue
+        _emit_event("agent.done", {
+            "session_id": session_id,
+            "trace_id": trace_id,
+            "request_id": message_id,
+            "duration_ms": duration_ms,
+        })
         
         # Process the response text
         text = _butlerize_text(result.get("text", ""), user)
         
-        # Emit chat.token event with full text for non-streaming (ensures at least one chat.token before chat.end)
-        try:
-            publish("chat.token", {
-                "session_id": session_id,
-                "request_id": message_id,
-                "trace_id": trace_id,
-                "token": text,
-            })
-        except Exception:
-            pass  # Never crash the request
-        
-        try:
-            publish("chat.end", {
-                "session_id": session_id,
-                "request_id": message_id,
-                "trace_id": trace_id,
-                "ok": True,
-                "duration_ms": duration_ms,
-            })
-        except Exception:
-            pass
-        
         # Publish chat.assistant_message event
         if prompt:
-            publish("chat.assistant_message", {
+            _emit_event("chat.assistant_message", {
                 "session_id": session_id,
+                "request_id": message_id,
                 "message_id": message_id,
                 "ok": True,
                 "text_preview": text_preview,
@@ -3139,23 +3128,13 @@ async def chat(
         
         # Publish chat.error event
         if prompt:
-            try:
-                publish("chat.error", {
-                    "session_id": session_id,
-                    "request_id": message_id,
-                    "trace_id": trace_id,
-                    "error": str(exc),
-                    "stage": "agent_processing",
-                })
-                publish("chat.end", {
-                    "session_id": session_id,
-                    "request_id": message_id,
-                    "trace_id": trace_id,
-                    "ok": False,
-                    "duration_ms": int((time.time() - start_time) * 1000),
-                })
-            except Exception:
-                pass
+            emit_chat_end(
+                session_id,
+                message_id,
+                ok=False,
+                trace_id=trace_id,
+                error={"message": str(exc), "stage": "agent_processing"},
+            )
         raise
     if note_reminder:
         text = f"{note_reminder}\n\n{text}"
@@ -3165,15 +3144,8 @@ async def chat(
         text = f"{quota_warning}\n\n{text}"
     
     # Emit chat.token event with full final text for non-streaming
-    try:
-        publish("chat.token", {
-            "session_id": session_id,
-            "request_id": message_id,
-            "trace_id": trace_id,
-            "token": text,
-        })
-    except Exception:
-        pass  # Never crash the request
+    emit_chat_token(session_id, message_id, text, trace_id=trace_id)
+    emit_chat_end(session_id, message_id, ok=True, trace_id=trace_id)
     
     rendered_text = result.get("rendered_text")
     payload_data = result.get("data")

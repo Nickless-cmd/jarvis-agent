@@ -34,6 +34,8 @@ def test_streaming_emits_agent_events(monkeypatch, tmp_path):
         events = events_resp.json().get("events", [])
         types = {e["type"] for e in events}
         assert {"agent.start", "agent.done", "agent.stream.start", "agent.stream.delta", "agent.stream.final", "chat.token"}.issubset(types)
+        req_ids = {e.get("request_id") for e in events if "request_id" in e}
+        assert len(req_ids) == 1
 
 
 def test_streaming_chat_token_even_without_delta(monkeypatch, tmp_path):
@@ -65,6 +67,8 @@ def test_streaming_chat_token_even_without_delta(monkeypatch, tmp_path):
         events = events_resp.json().get("events", [])
         types = {e["type"] for e in events}
         assert "chat.token" in types
+        req_ids = {e.get("request_id") for e in events if "request_id" in e}
+        assert len(req_ids) == 1
 
 
 def test_streaming_response_from_events(monkeypatch, tmp_path):

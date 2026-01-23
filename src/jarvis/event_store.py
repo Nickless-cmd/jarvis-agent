@@ -36,6 +36,21 @@ class StoredEvent:
     session_id: Optional[str] = None
 
 
+def _format_event(ev: StoredEvent) -> Dict[str, Any]:
+    data = {
+        "id": ev.id,
+        "type": ev.type,
+        "ts": ev.ts,
+        "payload": ev.payload,
+        "session_id": ev.session_id,
+    }
+    # Bubble up common identifiers for easier consumption
+    for key in ("request_id", "message_id", "trace_id"):
+        if key in ev.payload:
+            data[key] = ev.payload[key]
+    return data
+
+
 class EventStore:
     """Bounded in-memory event store."""
 
@@ -65,14 +80,7 @@ class EventStore:
             last_id = items[-1].id if items else (after or 0)
             return {
                 "events": [
-                    {
-                        "id": ev.id,
-                        "type": ev.type,
-                        "ts": ev.ts,
-                        "payload": ev.payload,
-                        "session_id": ev.session_id,
-                    }
-                    for ev in items
+                    _format_event(ev) for ev in items
                 ],
                 "last_id": last_id,
             }

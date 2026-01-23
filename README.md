@@ -1,14 +1,15 @@
 
+
 # Jarvis Agent
 
-Jarvis Agent is a local-first FastAPI service with a lightweight web UI (/app) that wraps LLM chat, tools, events/SSE streaming, and an admin surface. It runs on SQLite with no paid services required.
+Jarvis Agent is a local-first FastAPI service with a lightweight web UI (`/app`) that wraps LLM chat, tools, EventBus/EventStore streaming, and an Admin dashboard. It runs on SQLite with no paid services required.
 
 ## Features
 - Chat UI with streaming and session history
-- Admin UI for tickets, logs, users, and settings
+- Admin dashboard for tickets, logs, users, and SettingsStore
 - Tools: weather/news/web search, system/process info, files/notes, etc.
-- Events pipeline (`/v1/events`, `/v1/events/stream`) for live updates
-- DB-backed settings store with public/admin scopes
+- EventBus/EventStore pipeline (`/v1/events`, `/v1/events/stream`) for live updates
+- DB-backed SettingsStore with public/admin scopes
 - Local SQLite storage (configurable path)
 
 ## Quickstart (dev)
@@ -20,31 +21,31 @@ PYTHONPATH=src uvicorn jarvis.server:app --reload --host 0.0.0.0 --port 8000
 ```
 Open: http://127.0.0.1:8000/app
 
-Run tests:
+Run tests (recommended):
 ```bash
-PYTHONPATH=src pytest -q
+bash -lc 'PYTHONPATH=src pytest -q'
 ```
 
 ## Configuration
-- Env vars (key ones):
+- **Environment variables:**
   - `JARVIS_DB_PATH` — SQLite DB path (default: ./data/jarvis.db)
-  - `JARVIS_DEVKEY` — dev key for bearer access (default: devkey)
+  - `JARVIS_DEVKEY` — dev key for bearer access (default: devkey; change for production)
   - `JARVIS_TEST_MODE` — `1` to disable watchers/background threads in tests
   - `JARVIS_EVENT_BACKLOG` — in-memory event backlog (default 1000)
   - Cookie flags: `JARVIS_COOKIE_NAME`, `JARVIS_COOKIE_SECURE`, `JARVIS_COOKIE_SAMESITE`, `JARVIS_COOKIE_TTL_SECONDS`
-- Settings store (SQLite `settings` table):
+- **SettingsStore** (SQLite `settings` table):
   - Scopes: `public` (exposed via `/settings/public`), `admin` (admin-only)
   - Admin endpoints: `GET /admin/settings`, `PUT /admin/settings` (auth required)
-- Auth:
+- **Auth:**
   - Demo/default user auto-created in dev
-  - Admin: set `is_admin=1` on a user (DB or admin UI)
+  - Admin: set `is_admin=1` on a user (DB or Admin UI)
   - Session cookie `jarvis_token` stays valid; admin 401 does **not** clear it
 
 ## Troubleshooting
-- 401 on admin endpoints: ensure user is admin; session remains valid.
+- 401 on Admin endpoints: ensure user is admin; session remains valid.
 - “jarvis_token missing”: confirm login and cookie acceptance (SameSite=Lax).
-- SSE/events: `/v1/events/stream` uses `max_ms` for deterministic termination; clients back off on errors.
-- Test hangs: set `JARVIS_TEST_MODE=1` and run `PYTHONPATH=src pytest -q`, or wrap with:
+- EventBus/EventStore: `/v1/events/stream` uses `max_ms` for deterministic termination; clients back off on errors.
+- Test hangs: set `JARVIS_TEST_MODE=1` and run `bash -lc 'PYTHONPATH=src pytest -q'`, or wrap with:
   ```bash
   timeout 600s bash -lc 'PYTHONPATH=src pytest -q'
   ```
@@ -55,3 +56,15 @@ PYTHONPATH=src pytest -q
 - [docs/API.md](docs/API.md)
 - [docs/OPERATIONS.md](docs/OPERATIONS.md)
 - [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)
+
+## Roadmap / Next tasks
+- **UI redesign:** Align UI/UX with backend capabilities and SettingsStore (theme, language, streaming, notifications)
+- **Admin dashboard:** Expand scope for user management, logs, and settings
+- **Notifications UX:** Improve notification delivery and controls (currently may be disabled by default)
+- **Config management:** Add per-user settings, migrations, and safer config flows
+
+---
+**Security:**
+- Do not use default dev keys in production (`JARVIS_DEVKEY`).
+- Always use HTTPS in production and set `JARVIS_COOKIE_SECURE=1`.
+- No secrets or unsafe defaults are exposed in public endpoints or documentation.

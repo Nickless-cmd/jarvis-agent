@@ -500,20 +500,27 @@ def emit_chat_end(session_id: str | None, request_id: str, ok: bool = True, trac
 
 
 def _check_admin_auth(request: Request, authorization: str | None, token: str | None) -> AuthContext:
+    # Unified admin auth: accept devkey OR valid admin cookie token
     if not _auth_or_token_ok(authorization, token):
+        _req_logger.info("ADMIN AUTH FAIL unauthenticated path=%s", request.url.path)
         raise HTTPException(401, detail={"ok": False, "error": {"type": "AuthRequired", "message": "auth required"}})
     if _auth_ok(authorization):
         user = get_or_create_default_user()
         user["is_admin"] = True
+        token_source = "devkey"
     else:
         user = get_user_by_token(token)
+        token_source = "token"
     if not user:
+        _req_logger.info("ADMIN AUTH FAIL no-user path=%s", request.url.path)
         raise HTTPException(401, detail={"ok": False, "error": {"type": "AuthRequired", "message": "auth required"}})
     if user.get("is_disabled"):
+        _req_logger.info("ADMIN AUTH FAIL disabled user=%s path=%s", user.get("username"), request.url.path)
         raise HTTPException(403, detail={"ok": False, "error": {"type": "AdminRequired", "message": "admin required"}})
     if not is_admin_user(user):
+        _req_logger.info("ADMIN AUTH FAIL not-admin user=%s path=%s", user.get("username"), request.url.path)
         raise HTTPException(403, detail={"ok": False, "error": {"type": "AdminRequired", "message": "admin required"}})
-    return AuthContext(user=user, is_authenticated=True, is_admin=True, token_source="devkey" if _auth_ok(authorization) else "token")
+    return AuthContext(user=user, is_authenticated=True, is_admin=True, token_source=token_source)
 
 
 def _clean_expired_captcha() -> None:
@@ -1302,6 +1309,7 @@ async def login(request: Request, req: LoginRequest, authorization: str | None =
             secure=secure,
             samesite=samesite,
         )
+    _req_logger.info("LOGIN success user=%s is_admin=%s source=%s", user["username"] if user else "unknown", is_admin_user(user) if user else False, "devkey" if _auth_ok(authorization) else "password")
     return response
 
 
@@ -1338,6 +1346,7 @@ async def admin_login(request: Request, req: LoginRequest, authorization: str | 
             secure=secure,
             samesite=samesite,
         )
+    _req_logger.info("ADMIN LOGIN success user=%s is_admin=%s", user["username"], is_admin_user(user))
     return response
 
 

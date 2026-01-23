@@ -355,11 +355,22 @@ def _ensure_setting(conn: sqlite3.Connection, key: str, value: str) -> None:
     conn.execute("INSERT INTO settings (key, value) VALUES (?, ?)", (key, value))
 
 
+def _connect():
+    conn = sqlite3.connect(DB_PATH, timeout=5.0, isolation_level=None)
+    conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA busy_timeout=5000;")
+    except Exception:
+        # Best-effort pragmas; ignore if not supported
+        pass
+    return conn
+
+
 @contextmanager
 def get_conn():
     _ensure_db()
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+    conn = _connect()
     try:
         yield conn
     finally:

@@ -39,12 +39,20 @@ function setToken(token, remember = true) {
   }
 }
 
+
+// If running in browser, attach helpers to window for legacy/global use
+if (typeof window !== 'undefined') {
+  window.getToken = getToken;
+  window.authHeaders = authHeaders;
+}
+
 function clearToken() {
   localStorage.removeItem(TOKEN_KEY);
   sessionStorage.removeItem(TOKEN_SESSION_KEY);
   sessionStorage.removeItem("jarvisConsentSession");
   sessionStorage.removeItem("jarvisThemeSession");
   deleteCookie("jarvis_token");
+  authStore.reset();
 }
 
 function setLastPath(path) {
@@ -78,11 +86,8 @@ function authHeaders(extra = {}) {
   return { ...headers, ...extra };
 }
 
-function requireAuth() {
-  if (!getToken()) {
-    window.location.href = "/login";
-  }
-}
+
+// requireAuth is now handled by authStore and app.js
 
 function getCookieConsent() {
   return localStorage.getItem("jarvisCookieConsent") || getCookie("jarvis_consent");

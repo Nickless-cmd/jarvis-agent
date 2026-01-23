@@ -193,6 +193,11 @@ async def lifespan(app: FastAPI):
     if not is_test_mode():
         _repo_watcher = start_repo_watcher_if_enabled()
     
+    # Reset event bus state between test runs to ensure subscriptions can be re-established
+    try:
+        events.reset_for_tests()
+    except Exception:
+        pass
     # Subscribe EventStore to EventBus (always, even in test mode) so /v1/events works in tests
     event_store = get_event_store()
     wire_event_store_to_bus()

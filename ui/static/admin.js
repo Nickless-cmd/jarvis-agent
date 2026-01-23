@@ -1,14 +1,82 @@
-requireAuth();
 
+import authStore from './authStore.js';
+
+// Centralized admin check using authStore
 async function ensureAdmin() {
   const res = await apiFetch("/account/profile", { method: "GET" });
-  if (!res) return;
+  if (!res) {
+    window.location.href = "/admin-login";
+    return false;
+  }
   const data = await res.json();
   if (!data.is_admin) {
-    clearToken();
     window.location.href = "/admin-login";
+    return false;
   }
+  authStore.updateFromProfile(data);
+  return true;
 }
+
+function isAdminAuthed() {
+  return authStore.isAuthenticated === true && authStore.isAdmin === true;
+}
+
+function showAdminRequired() {
+  const msg = "Admin kræver adgang.";
+  const panels = [
+    usersContainer,
+    onlineUsersContainer,
+    sessionsContainer,
+    ticketsAdminList,
+    ticketAdminDetail,
+    logFiles,
+    logContent,
+    envEditor,
+  ];
+  panels.forEach((el) => {
+    if (el) {
+      el.innerHTML = msg;
+    }
+  });
+}
+
+
+// --- Single-flight admin auth/session failure handler ---
+let adminAuthLostLatch = false;
+let adminPollingIntervals = [];
+function stopAllAdminPolling() {
+  adminPollingIntervals.forEach((id) => clearInterval(id));
+  adminPollingIntervals = [];
+}
+function showAdminSessionExpiryBanner() {
+  let banner = document.getElementById('adminSessionExpiryBanner');
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'adminSessionExpiryBanner';
+    banner.className = 'session-expiry-banner';
+    banner.innerHTML = '<span>Session udløbet — log ind igen</span> <button id="adminSessionExpiryBtn" class="secondary">Gå til login</button>';
+    document.body.appendChild(banner);
+    document.getElementById('adminSessionExpiryBtn').onclick = () => {
+      banner.classList.add('hidden');
+      if (window.authStore) window.authStore.reset();
+      window.location.href = "/admin-login";
+    };
+  }
+  banner.classList.remove('hidden');
+}
+function onAdminAuthLost(reason) {
+  if (adminAuthLostLatch) return;
+  adminAuthLostLatch = true;
+  stopAllAdminPolling();
+  showAdminSessionExpiryBanner();
+}
+window.onAuthLost = onAdminAuthLost;
+window.addEventListener('apiAuthError', (e) => {
+  if (window.location.pathname.startsWith('/admin')) {
+    onAdminAuthLost(e?.detail?.status || '401');
+  }
+});
+// initAdmin at bottom handles auth flow
 
 const usersContainer = document.getElementById("users");
 const sessionsContainer = document.getElementById("sessions");
@@ -88,7 +156,7 @@ function setEnvValue(content, key, value) {
 }
 
 async function loadModelsAdmin() {
-  if (!modelSelectAdmin) return;
+  if (!modelSelectAdmin || !isAdminAuthed()) return;
   const [modelsRes, configRes] = await Promise.all([
     apiFetch("/models", { method: "GET" }),
     apiFetch("/config", { method: "GET" }),
@@ -110,7 +178,7 @@ async function loadModelsAdmin() {
 }
 
 async function saveModelSetting() {
-  if (!modelSelectAdmin) return;
+  if (!modelSelectAdmin || !isAdminAuthed()) return;
   const model = modelSelectAdmin.value;
   let content = envEditor?.value || "";
   if (!content) {
@@ -157,7 +225,7 @@ function formatDate(value) {
 }
 
 async function loadLogs() {
-  if (!logFiles) return;
+  if (!logFiles || !isAdminAuthed()) return;
   const res = await apiFetch("/admin/logs", { method: "GET" });
   if (!res) return;
   const data = await res.json();
@@ -183,7 +251,7 @@ async function loadLogs() {
 }
 
 async function loadLogContent(name) {
-  if (!logContent) return;
+  if (!logContent || !isAdminAuthed()) return;
   const res = await apiFetch(`/admin/logs/${encodeURIComponent(name)}`, { method: "GET" });
   if (!res) return;
   const data = await res.json();
@@ -247,6 +315,7 @@ function renderOnlineUsers(users) {
 }
 
 async function renameChatsForAll() {
+  if (!isAdminAuthed()) return;
   if (footerStatus) footerStatus.textContent = "Opdaterer chat-navne...";
   const res = await apiFetch("/admin/sessions/rename-empty", { method: "POST" });
   const data = res ? await res.json().catch(() => ({})) : {};
@@ -262,6 +331,7 @@ async function renameChatsForAll() {
 }
 
 async function loadTicketsAdmin() {
+  if (!isAdminAuthed()) return;
   const res = await apiFetch("/admin/tickets", { method: "GET" });
   if (!res) return;
   const data = await res.json();
@@ -285,6 +355,7 @@ async function loadTicketsAdmin() {
 }
 
 async function openTicketAdmin(id) {
+  if (!isAdminAuthed()) return;
   const res = await apiFetch(`/admin/tickets/${id}`, { method: "GET" });
   if (!res) return;
   const data = await res.json();
@@ -307,7 +378,7 @@ async function openTicketAdmin(id) {
 }
 
 async function saveTicketAdmin() {
-  if (!currentTicketId) return;
+  if (!currentTicketId || !isAdminAuthed()) return;
   const payload = {
     status: ticketAdminStatus?.value,
     priority: ticketAdminPriority?.value,
@@ -317,7 +388,7 @@ async function saveTicketAdmin() {
 }
 
 async function replyTicketAdmin() {
-  if (!currentTicketId) return;
+  if (!currentTicketId || !isAdminAuthed()) return;
   const message = ticketAdminReply?.value?.trim();
   if (!message) return;
   await apiFetch(`/admin/tickets/${currentTicketId}/reply`, { method: "POST", body: JSON.stringify({ message }) });
@@ -326,6 +397,7 @@ async function replyTicketAdmin() {
 }
 
 async function loadUsers() {
+  if (!isAdminAuthed()) return;
   const res = await apiFetch("/admin/users", { method: "GET" });
   if (!res) return;
   if (res.status === 403) {
@@ -345,6 +417,7 @@ async function loadUsers() {
 }
 
 async function loadOnlineUsers() {
+  if (!isAdminAuthed()) return;
   const res = await apiFetch("/admin/online-users", { method: "GET" });
   if (!res) return;
   const data = await res.json();
@@ -352,6 +425,7 @@ async function loadOnlineUsers() {
 }
 
 async function loadFooterSettings() {
+  if (!isAdminAuthed()) return;
   const res = await apiFetch("/admin/settings", { method: "GET" });
   if (!res) return;
   const data = await res.json();
@@ -394,6 +468,7 @@ async function loadFooterSettings() {
 }
 
 async function saveFooterSettings() {
+  if (!isAdminAuthed()) return;
   const payload = {
     text: document.getElementById("footerTextInput").value.trim(),
     support_url: document.getElementById("footerSupportInput").value.trim(),
@@ -424,6 +499,7 @@ async function saveFooterSettings() {
 }
 
 async function loadEnv() {
+  if (!isAdminAuthed()) return;
   const res = await apiFetch("/admin/env", { method: "GET" });
   if (!res) return;
   const data = await res.json();
@@ -431,7 +507,7 @@ async function loadEnv() {
 }
 
 async function saveEnv() {
-  if (!envEditor) return;
+  if (!envEditor || !isAdminAuthed()) return;
   const res = await apiFetch("/admin/env", {
     method: "PATCH",
     body: JSON.stringify({ content: envEditor.value }),
@@ -441,6 +517,7 @@ async function saveEnv() {
 }
 
 async function createUser() {
+  if (!isAdminAuthed()) return;
   const username = document.getElementById("createUsername").value.trim();
   const password = document.getElementById("createPassword").value.trim();
   const isAdmin = document.getElementById("createIsAdmin").checked;
@@ -479,6 +556,7 @@ async function createUser() {
 }
 
 async function toggleUser(username, isDisabled) {
+  if (!isAdminAuthed()) return;
   await apiFetch(`/admin/users/${encodeURIComponent(username)}`, {
     method: "PATCH",
     body: JSON.stringify({ disabled: !isDisabled }),
@@ -487,11 +565,13 @@ async function toggleUser(username, isDisabled) {
 }
 
 async function deleteUser(username) {
+  if (!isAdminAuthed()) return;
   await apiFetch(`/admin/users/${encodeURIComponent(username)}`, { method: "DELETE" });
   loadUsers();
 }
 
 async function loadSessions() {
+  if (!isAdminAuthed()) return;
   const username = document.getElementById("sessionUser").value.trim();
   const query = username ? `?username=${encodeURIComponent(username)}` : "";
   const res = await apiFetch(`/admin/sessions${query}`, { method: "GET" });
@@ -525,6 +605,7 @@ async function loadSessions() {
 }
 
 async function loadStatus() {
+  if (!isAdminAuthed()) return;
   const res = await apiFetch("/status", { method: "GET" });
   if (!res) return;
   const data = await res.json();
@@ -629,23 +710,41 @@ document.getElementById("backBtn").addEventListener("click", () => {
   window.location.href = "/app";
 });
 
-ensureAdmin();
-loadUsers();
-loadOnlineUsers();
-loadFooterSettings();
-loadEnv();
-loadStatus();
-loadTicketsAdmin();
-
-setInterval(() => {
-  if (currentPanel === "panel-tickets") {
-    loadTicketsAdmin();
+async function initAdmin() {
+  const ok = await ensureAdmin();
+  if (!ok) {
+    showAdminRequired();
+    return;
   }
-}, 15000);
-loadLogs();
-loadModelsAdmin();
-setInterval(loadStatus, 15000);
-setInterval(loadOnlineUsers, 15000);
+
+  loadUsers();
+  loadOnlineUsers();
+  loadFooterSettings();
+  loadEnv();
+  loadStatus();
+  loadTicketsAdmin();
+  loadLogs();
+  loadModelsAdmin();
+
+  adminPollingIntervals.push(
+    setInterval(() => {
+      if (!isAdminAuthed() || adminAuthLostLatch) return;
+      if (currentPanel === "panel-tickets") {
+        loadTicketsAdmin();
+      }
+    }, 15000),
+    setInterval(() => {
+      if (!isAdminAuthed() || adminAuthLostLatch) return;
+      loadStatus();
+    }, 15000),
+    setInterval(() => {
+      if (!isAdminAuthed() || adminAuthLostLatch) return;
+      loadOnlineUsers();
+    }, 15000)
+  );
+}
+
+initAdmin();
 
 if (logFiles) {
   logFiles.addEventListener("click", async (e) => {
@@ -749,6 +848,7 @@ if (initialPanel) {
 }
 
 function applyGlobalSearch() {
+  if (!isAdminAuthed()) return;
   const query = (adminSearchAll?.value || "").trim();
   if (!adminSearchResults) return;
   adminSearchResults.innerHTML = "";

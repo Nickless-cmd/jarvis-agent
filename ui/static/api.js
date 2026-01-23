@@ -1,3 +1,9 @@
+
+// If running in browser, attach authStore to window for legacy/global use
+if (typeof window !== 'undefined') {
+  window.authStore = window.authStore || undefined;
+}
+
 function safeAuthHeaders(extra = {}) {
   try {
     if (typeof authHeaders === "function") {
@@ -17,9 +23,11 @@ function safeAuthHeaders(extra = {}) {
   return { ...base, ...extra };
 }
 
+
 function isAuthCriticalEndpoint(path) {
   return path.startsWith("/v1/") && !path.startsWith("/v1/status") && !path.startsWith("/v1/settings/public");
 }
+
 
 async function apiFetch(path, options = {}) {
   const headersObj = safeAuthHeaders(options.headers || {});
@@ -34,21 +42,24 @@ async function apiFetch(path, options = {}) {
   try {
     const res = await fetch(path, fetchOptions);
     if (res.status === 401 || res.status === 403) {
-      if (isAuthCriticalEndpoint(path)) {
-        clearToken();
-        window.location.href = "/login";
-        return null;
-      } else if (path.startsWith("/admin/")) {
-        console.warn("Admin endpoint forbidden (expected for non-admin)");
-        // Return response so caller can handle (e.g., hide admin panels)
-      } else {
-        // For other non-critical endpoints, return null
-        return null;
+      if (typeof window.onAuthLost === 'function') window.onAuthLost('401');
+      authStore.reset();
+      window.dispatchEvent(new CustomEvent('apiAuthError', { detail: { path, status: res.status } }));
+      return null;
+    }
+    // On successful response, if this is a profile or session check, update authStore
+    if (path === "/account/profile" && res.ok) {
+      try {
+        const data = await res.clone().json();
+        authStore.updateFromProfile(data);
+      } catch (e) {
+        // ignore
       }
     }
     return res;
   } catch (err) {
     console.warn("apiFetch failed:", path, err);
+    window.dispatchEvent(new CustomEvent('apiFetchError', { detail: { path, error: err } }));
     return null;
   }
 }

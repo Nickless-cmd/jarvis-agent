@@ -254,3 +254,8 @@ def reset_for_tests() -> None:
     _wildcard_subs.clear()
     with _chat_token_lock:
         _chat_token_buffers.clear()
+
+
+def shutdown() -> None:
+    """Alias for close() to make lifecycle naming explicit."""
+    close()

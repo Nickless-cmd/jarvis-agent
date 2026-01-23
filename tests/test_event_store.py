@@ -145,7 +145,6 @@ def test_events_endpoint_returns_agent_events(monkeypatch):
     pass
 
 
-@pytest.mark.skip(reason="non-deterministic hang in TestClient teardown; covered by session fixture checks")
 def test_no_background_threads_after_test():
     """Ensure no non-daemon threads are left running after tests and chat completion."""
     import threading

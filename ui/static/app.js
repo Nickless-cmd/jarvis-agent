@@ -1,7 +1,75 @@
-if (typeof requireAuth === "function") {
-  requireAuth();
-} else {
-  window.location.href = "/login";
+
+
+// If running in browser, attach authStore to window for legacy/global use
+var authStore = window.authStore;
+
+// Global arrays for polling and streams
+let pollingIntervals = [];
+let openStreams = [];
+
+// Centralized auth check using authStore
+function checkAuthAndRedirect() {
+  if (!authStore.isAuthenticated) {
+    window.location.href = "/login";
+  }
+}
+
+
+// Session expiry banner logic
+
+
+function showSessionExpiryBanner() {
+  const banner = document.getElementById('sessionExpiryBanner');
+  if (banner) {
+    banner.classList.remove('hidden');
+  }
+}
+
+function hideSessionExpiryBanner() {
+  const banner = document.getElementById('sessionExpiryBanner');
+  if (banner) {
+    banner.classList.add('hidden');
+  }
+}
+
+function onAuthLost(reason) {
+  if (authLostLatch) return;
+  authLostLatch = true;
+  stopAllPolling();
+  closeAllStreams();
+  showSessionExpiryBanner();
+  // Optionally: set UI state to logged out, disable inputs, etc.
+}
+
+window.addEventListener('apiAuthError', (e) => {
+  if (!window.location.pathname.startsWith('/admin')) {
+    onAuthLost(e?.detail?.status || '401');
+  }
+});
+
+document.addEventListener('DOMContentLoaded', () => {
+  const btn = document.getElementById('sessionExpiryConfirmBtn');
+  if (btn) {
+    btn.addEventListener('click', () => {
+      hideSessionExpiryBanner();
+      if (window.authStore) window.authStore.reset();
+      window.location.href = "/login";
+    });
+  }
+});
+
+// Initial check (do not auto-redirect, just show banner if not authenticated)
+if (authStore && !authStore.isAuthenticated) {
+  onAuthLost('not-authenticated');
+}
+
+// Listen for authStore changes to update UI (do not auto-redirect)
+if (authStore && typeof authStore.onChange === 'function') {
+  authStore.onChange(() => {
+    if (!authStore.isAuthenticated) {
+      onAuthLost('authStore');
+    }
+  });
 }
 
 // Safe DOM access helpers
@@ -664,9 +732,11 @@ async function pollEvents() {
 }
 
 function startEventPolling() {
+// Duplicate definition removed
   if (!NOTIFY_ENABLED) return;
   pollEvents();
-  setInterval(pollEvents, 8000);
+  const id = setInterval(pollEvents, 8000);
+  pollingIntervals.push(id);
 }
 
 function normalizeText(value) {
@@ -2945,10 +3015,17 @@ function clampDropdown() {
   }
 }
 
+// Only one startNotificationPolling and registerStream should exist
 function startNotificationPolling() {
   loadNotifications();
-  setInterval(loadNotifications, 12000); // Poll every 12 seconds
-  setInterval(updateNotificationsBadge, 10000); // Poll badge every 10 seconds
+  const id1 = setInterval(loadNotifications, 12000);
+  const id2 = setInterval(updateNotificationsBadge, 10000);
+  pollingIntervals.push(id1, id2);
+}
+
+function registerStream(stream) {
+  openStreams.push(stream);
+  return stream;
 }
 
 // Initialize UI in a safe, deterministic order. Any single failure will be logged

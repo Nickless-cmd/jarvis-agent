@@ -1370,7 +1370,7 @@ async def stream_events_endpoint(
                     events_sent += 1
                     if max_events is not None and events_sent >= max_events:
                         return
-                await asyncio.sleep(1.0)
+                await asyncio.sleep(0.2 if max_events or max_ms else 1.0)
         except asyncio.CancelledError:
             # Handle client disconnect gracefully
             pass

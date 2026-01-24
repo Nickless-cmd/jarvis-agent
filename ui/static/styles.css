@@ -144,8 +144,21 @@ html, body {
   margin: 0;
   display: flex;
   flex-direction: column;
+header.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 20px;
+  position: relative;
+  gap: 12px;
+}
+.topbar-left { display:flex; align-items:center; gap:8px; flex: 0 0 auto; }
+.topbar-center { position: absolute; left: 50%; transform: translateX(-50%); display:flex; align-items:center; justify-content:center; pointer-events: none; width: 60%; max-width: 720px; }
+.topbar-right { display:flex; align-items:center; gap:8px; flex: 0 0 auto; margin-left: auto; }
+.brand { display:flex; align-items:center; gap:8px; }
   gap: var(--spacing-2);
 }
+#statusBadge { display: none; }
 
 .nav-list a,
 .rail-btn {
@@ -165,6 +178,7 @@ html, body {
 }
 .nav-pill:hover {
   background: var(--bg-secondary);
+  /* Additional styles can be added here */
   border-color: var(--border);
 }
 

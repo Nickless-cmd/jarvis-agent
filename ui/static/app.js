@@ -1,3 +1,26 @@
+function getStreamToggle() { return document.getElementById('streamToggle'); }
+function initTheme() {
+  // Stub: implement theme initialization if needed
+}
+function renderRightPanels(updatesLog, commandsList) {
+  // Stub: implement right panel rendering if needed
+  // This prevents ReferenceError and allows UI to function
+}
+function getResponseModeSelect() { return document.getElementById('responseModeSelect'); }
+function getStatusInline() { return document.getElementById('statusInline'); }
+function getStatusBadge() { return document.getElementById('statusBadge'); }
+function getModeSelect() { return document.getElementById('modeSelect'); }
+function getModelSelect() { return document.getElementById('modelSelect'); }
+function getUploadBtn() { return document.getElementById('uploadBtn'); }
+function getUploadSidebarBtn() { return document.getElementById('uploadSidebarBtn'); }
+function getImageUploadBtn() { return document.getElementById('imageUploadBtn'); }
+function getImageUploadInput() { return document.getElementById('imageUploadInput'); }
+function getUploadInput() { return document.getElementById('uploadInput'); }
+function getNewChatInline() { return document.getElementById('newChatInline'); }
+function getToolsSummary() { return document.getElementById('toolsSummary'); }
+function getGlobalSearch() { return document.getElementById('globalSearch'); }
+function getGlobalSearchResults() { return document.getElementById('globalSearchResults'); }
+function getQuotaBar() { return document.getElementById('quotaBar'); }
 // --- UI polish: empty state, composer, settings modal skeleton ---
 function updateEmptyState() {
   const chat = document.getElementById('chat');
@@ -118,27 +141,90 @@ function setupAdminNav() {
   });
 }
 
+
+// --- Unified SPA router for all views ---
 function handleHashChange() {
   const hash = window.location.hash;
-  if (hash.startsWith('#admin/')) {
-    // Hide chat UI, show admin view
-    document.querySelector('.chat-pane').style.display = 'block';
-    document.querySelector('.composer').style.display = 'none';
-    showAdminView(hash.split('#admin/')[1] || 'dashboard');
-  } else {
-    // Show chat UI, hide admin view
-    document.querySelector('.chat-pane').style.display = 'block';
-    document.querySelector('.composer').style.display = '';
-    // Optionally, re-render chat/session if needed
+  const main = document.querySelector('.chat-pane .main-column');
+  if (!main) return;
+  // Helper: 403 panel
+  function render403() {
+    main.innerHTML = '<div class="forbidden-panel"><h2>403 – Ingen adgang</h2><p>Du har ikke adgang til denne side.</p></div>';
   }
+  // Admin views
+  if (hash.startsWith('#admin/')) {
+    if (!window.authStore?.isAdmin) {
+      render403();
+      hideAdminPanels();
+      return;
+    }
+    showAdminPanels();
+    showAdminView(hash.split('#admin/')[1] || 'dashboard');
+    return;
+  }
+  // Docs view
+  if (hash === '#docs') {
+    main.innerHTML = '<div class="docs-panel"><h2>Dokumentation</h2><div id="docsContent">Indlæser…</div></div>';
+    apiFetch('/docs').then(r => r && r.ok ? r.text() : 'Ingen dokumentation.').then(html => {
+      document.getElementById('docsContent').innerHTML = html;
+    });
+    return;
+  }
+  // Tickets view
+  if (hash === '#tickets' || hash === '#/tickets') {
+    main.innerHTML = '<div class="tickets-panel"><h2>Tickets</h2><div id="ticketsContent">Indlæser…</div></div>';
+    apiFetch('/tickets').then(r => r && r.ok ? r.text() : 'Ingen tickets.').then(html => {
+      document.getElementById('ticketsContent').innerHTML = html;
+    });
+    return;
+  }
+  // Account view
+  if (hash === '#account' || hash === '#/account') {
+    main.innerHTML = '<div class="account-panel"><h2>Konto</h2><div id="accountContent">Indlæser…</div></div>';
+    apiFetch('/account/profile').then(r => r && r.ok ? r.text() : 'Ingen konto-info.').then(html => {
+      document.getElementById('accountContent').innerHTML = html;
+    });
+    return;
+  }
+  // Default: chat view
+  main.innerHTML = '';
+  // Optionally re-render chat/session UI if needed
 }
 
 window.addEventListener('hashchange', handleHashChange);
-document.addEventListener('DOMContentLoaded', () => {
+
+function setupUnifiedUIEvents() {
   setupAdminNav();
+  // Hide admin menu if not admin
+  if (!window.authStore?.isAdmin) {
+    document.querySelectorAll('.admin-only').forEach(el => el.style.display = 'none');
+  }
+  handleHashChange();
+  // Modal: settings
+  const modal = document.getElementById('settingsModal');
+  const closeBtn = document.getElementById('closeSettings');
+  if (closeBtn && modal) {
+    closeBtn.onclick = () => { modal.style.display = 'none'; };
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') modal.style.display = 'none';
+    });
+  }
+  // Settings modal open (if button exists)
+  const openSettingsBtn = document.getElementById('openSettingsBtn');
+  if (openSettingsBtn && modal) {
+    openSettingsBtn.onclick = () => { modal.style.display = ''; };
+  }
+}
+
+document.addEventListener('DOMContentLoaded', setupUnifiedUIEvents);
+window.addEventListener('authStateChanged', () => {
+  if (!window.authStore?.isAdmin) {
+    document.querySelectorAll('.admin-only').forEach(el => el.style.display = 'none');
+  } else {
+    document.querySelectorAll('.admin-only').forEach(el => el.style.display = '');
+  }
   handleHashChange();
 });
-
 
 // If running in browser, attach authStore to window for legacy/global use
 var authStore = window.authStore;
@@ -427,8 +513,7 @@ function scrollChatToBottom() {
 // --- Sessions sidebar logic ---
 function getSessionList() { return gid("sessionList"); }
 function getSessionSearch() { return gid("sessionSearch"); }
-let sessionsCache = [];
-let currentSessionId = null;
+// (removed duplicate declaration of sessionsCache and currentSessionId)
 let sessionSearchValue = "";
 
 async function loadSessions() {
@@ -571,14 +656,6 @@ const authState = {
   adminUnavailable: false, // Set to true if /admin/* returns 401
   token: null
 };
-    if (!isAdminUser) {
-      hideAdminPanels();
-      stopAdminPolling();
-  authState.isAdmin = !!window.authStore.isAdmin;
-  authState.isLoggedIn = !!window.authStore.isAuthenticated;
-  authState.token = window.getToken ? window.getToken() : null;
-  });
-}
 
 function hideAdminPanels() {
   document.querySelectorAll('.admin-only, #rightTicketsPanel, #statusPanel').forEach(el => {
@@ -826,96 +903,63 @@ function applyUiTheme(value) {
   }
   const themeSelect = getThemeSelect();
   if (themeSelect) themeSelect.value = want;
-    if (!authState.isAdmin || authState.adminUnavailable) return;
-    const rightTicketsBody = document.getElementById("rightTicketsBody");
-    const rightTicketsTitle = document.getElementById("rightTicketsTitle");
-    const rightTicketsPanel = document.getElementById("rightTicketsPanel");
-    if (!rightTicketsBody || !rightTicketsPanel) return;
-    const data = await safeJson("/admin/tickets", { method: "GET" }, {});
-    if (data && data.adminDenied) {
-      setAdminUnavailable();
-      return;
-    }
-    let all = [];
-    if (data) {
-      all = data.tickets || [];
-    }
-    const activeCount = all.filter((t) => t.status !== "closed" && t.status !== "fixed").length;
-    if (rightTicketsTitle) {
-      rightTicketsTitle.textContent =
-        getUiLang() === "en" ? `Tickets (${activeCount} active)` : `Tickets (${activeCount} aktive)`;
-    }
-    const list = all.slice(0, 5);
-    if (!list.length) {
-      rightTicketsBody.innerHTML = `<div class="muted">${getUiLang() === "en" ? "No tickets." : "Ingen tickets."}</div>`;
-      return;
-    }
-    const statusLabel = (s) => (s || "").toLowerCase();
-    const items = list.map((t) => {
-      const status = statusLabel(t.status);
-      const priority = (t.priority || "").toLowerCase();
-      const statusCls = status === "open" ? "status-green" : status === "pending" ? "status-yellow" : "status-red";
-      const prioCls = priority === "kritisk" ? "status-red" : priority === "moderat" ? "status-yellow" : "status-green";
-      return `<li><a class="ticket-link" href="/admin#tickets">#${t.id} ${t.title}</a><span class="ticket-status ${statusCls}">${t.status}</span><span class="ticket-priority ${prioCls}">${priority || "ukendt"}</span></li>`;
-    }).join("");
-    rightTicketsBody.innerHTML = `<ul class="ticket-list">${items}</ul>`;
-      updatesPanel.innerHTML = `<ul>${items}</ul>`;
-    }
-  }
-    if (!authState.isAdmin || authState.adminUnavailable) return;
-    const statusPanel = document.getElementById("statusPanel");
-    const data = await safeJson("/admin/logs", { method: "GET" }, {});
-    if (data && data.adminDenied) {
-      setAdminUnavailable();
-      return;
-    }
-    if (!data) return;
-    const files = data.files || [];
-    if (!files.length) {
-      if (statusPanel) statusPanel.innerHTML = `<div class="muted">${getUiLang() === "en" ? "No logs yet." : "Ingen logs endnu."}</div>`;
-      return;
-    }
-    const latest = files[0]?.name;
-    if (!latest) return;
-    const payload = await safeJson(`/admin/logs/${latest}`, { method: "GET" }, {});
-    const content = (payload.content || "").trim();
-    const lines = content.split("\n").slice(-12).join("\n");
-    if (statusPanel) statusPanel.innerHTML = `<pre>${lines || (getUiLang() === "en" ? "No logs yet." : "Ingen logs endnu.")}</pre>`;
-  if (notifWrap) {
-    if (data.notify_enabled) {
-      notifWrap.classList.remove("hidden");
-    const res = await apiFetch("/account/profile", { method: "GET" });
-    if (!res) return;
-    const data = await res.json();
-    // Only update via authStore
-    if (window.authStore) {
-      window.authStore.setAuthState({
-        isAuthenticated: true,
-        isAdmin: !!data.is_admin,
-        lastAuthCheckAt: Date.now(),
-      });
-    }
-    updateAuthStateFromStore();
-    if (!authState.isAdmin) {
-      stopAdminPolling();
-      hideAdminPanels();
-    } else if (!authState.adminUnavailable) {
-      showAdminPanels();
-      startAdminPolling();
-    }
-    updateToolsSummary();
-    updateToolDots();
-    loadQuotaBar();
-    if (quotaBar) quotaBar.style.display = authState.isAdmin ? "none" : "block";
-    if (quotaRequestBtn) quotaRequestBtn.style.display = authState.isAdmin ? "none" : "block";
+  // After theme is set, update admin panels if needed
+  updateAdminPanelsAfterTheme();
+}
+
+async function updateAdminPanelsAfterTheme() {
+  if (!authState.isAdmin || authState.adminUnavailable) return;
+  const rightTicketsBody = document.getElementById("rightTicketsBody");
+  const rightTicketsTitle = document.getElementById("rightTicketsTitle");
+  const rightTicketsPanel = document.getElementById("rightTicketsPanel");
+  if (!rightTicketsBody || !rightTicketsPanel) return;
+  const data = await safeJson("/admin/tickets", { method: "GET" }, {});
+  if (data && data.adminDenied) {
+    setAdminUnavailable();
     return;
   }
-  const list = items.slice(0, 5).map((n) => {
-    const title = n.title || n.content || "";
-    const label = title.length > 80 ? `${title.slice(0, 77)}...` : title;
-    return `<li>${label}</li>`;
+  let all = [];
+  if (data) {
+    all = data.tickets || [];
+  }
+  const activeCount = all.filter((t) => t.status !== "closed" && t.status !== "fixed").length;
+  if (rightTicketsTitle) {
+    rightTicketsTitle.textContent =
+      getUiLang() === "en" ? `Tickets (${activeCount} active)` : `Tickets (${activeCount} aktive)`;
+  }
+  const list = all.slice(0, 5);
+  if (!list.length) {
+    rightTicketsBody.innerHTML = `<div class="muted">${getUiLang() === "en" ? "No tickets." : "Ingen tickets."}</div>`;
+    return;
+  }
+  const statusLabel = (s) => (s || "").toLowerCase();
+  const items = list.map((t) => {
+    const status = statusLabel(t.status);
+    const priority = (t.priority || "").toLowerCase();
+    const statusCls = status === "open" ? "status-green" : status === "pending" ? "status-yellow" : "status-red";
+    const prioCls = priority === "kritisk" ? "status-red" : priority === "moderat" ? "status-yellow" : "status-green";
+    return `<li><a class="ticket-link" href="/admin#tickets">#${t.id} ${t.title}</a><span class="ticket-status ${statusCls}">${t.status}</span><span class="ticket-priority ${prioCls}">${priority || "ukendt"}</span></li>`;
   }).join("");
-  rightNotesBody.innerHTML = `<ul>${list}</ul>`;
+  rightTicketsBody.innerHTML = `<ul class="ticket-list">${items}</ul>`;
+  // Optionally update logs/statusPanel as well
+  const statusPanel = document.getElementById("statusPanel");
+  const logsData = await safeJson("/admin/logs", { method: "GET" }, {});
+  if (logsData && logsData.adminDenied) {
+    setAdminUnavailable();
+    return;
+  }
+  if (!logsData) return;
+  const files = logsData.files || [];
+  if (!files.length) {
+    if (statusPanel) statusPanel.innerHTML = `<div class="muted">${getUiLang() === "en" ? "No logs yet." : "Ingen logs endnu."}</div>`;
+    return;
+  }
+  const latest = files[0]?.name;
+  if (!latest) return;
+  const payload = await safeJson(`/admin/logs/${latest}`, { method: "GET" }, {});
+  const content = (payload.content || "").trim();
+  const lines = content.split("\n").slice(-12).join("\n");
+  if (statusPanel) statusPanel.innerHTML = `<pre>${lines || (getUiLang() === "en" ? "No logs yet." : "Ingen logs endnu.")}</pre>`;
 }
 
 async function loadRightTickets() {

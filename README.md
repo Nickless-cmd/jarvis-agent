@@ -75,10 +75,13 @@ bash -lc 'PYTHONPATH=src pytest -q'
 - [docs/UI_REFACTOR_PLAN.md](docs/UI_REFACTOR_PLAN.md)
 
 ## UI development
-- Main entrypoint: `ui/app.html` (chat UI). Admin: `ui/admin.html`.
-- Static assets: `ui/static/app.js`, `app.css`, `api.js`, `authStore.js`, `admin.js`.
-- No build step: vanilla HTML/CSS/JS. Serve via `uvicorn jarvis.server:app` and open `/app` or `/admin`.
-- Auth: jarvis_token cookie; admin pages require `is_admin`. 401 on admin routes should not clear session.
+
+- Main entrypoint: `ui/index.html` (all UI: chat, admin, account, etc.)
+- Static assets: `ui/static/app.js`, `index-app.js`, `app.css`, `app-fix.css`, `api.js`, `auth.js`, `authStore.js`, `admin.js`
+- All base CSS variables and typography are in `app.css` (see comments in `styles.css`)
+- No build step: vanilla HTML/CSS/JS. Serve via `uvicorn jarvis.server:app` and open `/app` (or `/index.html`)
+- Minimal JS state: `index-app.js` fetches `/me` (or `/auth/me`) and tracks `is_admin` for UI logic
+- Auth: `jarvis_token` cookie; admin features require `is_admin`. 401 on admin routes does **not** clear session.
 
 ## Security
 - Do not use default dev keys in production (`JARVIS_DEVKEY`).

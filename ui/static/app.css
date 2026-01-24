@@ -39,7 +39,9 @@
 .session-expiry-banner button.secondary:hover {
   background: #ffeaea;
 }
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600&family=Fraunces:wght@600&display=swap");
 :root {
+  /* Base color palette */
   --bg: #0b0f17;
   --panel: #111827;
   --sidebar: #0f172a;
@@ -47,11 +49,18 @@
   --text: #e5e7eb;
   --muted: #94a3b8;
   --accent: #3b82f6;
+  --accent-2: #d86a42;
+  --card: #fff9f2;
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
   --fade: rgba(6, 10, 18, 0.9);
+  /* Layout and spacing */
   --panel-gap: 10px;
   --bar-height: 56px;
   --content-max: 1120px;
   --content-pad: 24px;
+  /* Typography */
+  --font-sans: "Space Grotesk", "Segoe UI", sans-serif;
+  --font-serif: "Fraunces", serif;
 }
 /* utility hidden class (use !important to avoid accidental overrides) */
 .hidden { display: none !important; }
@@ -195,7 +204,14 @@ html[data-theme="light"] {
 body {
   background: var(--bg);
   color: var(--text);
+  font-family: var(--font-sans);
   overflow: hidden;
+}
+
+h1, h2, h3, h4, h5 {
+  font-family: var(--font-serif);
+  font-weight: 600;
+}
 }
 header.topbar {
   padding: 12px 20px;

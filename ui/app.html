@@ -94,8 +94,6 @@
             <li><a class="nav-pill" href="#/search">Søg i chats</a></li>
             <li><a class="nav-pill" href="#/images">Billeder</a></li>
             <li><a class="nav-pill" href="#/apps">Apps</a></li>
-            <li><a class="nav-pill" href="#/codex">Codex</a></li>
-            <li><a class="nav-pill" href="#/gpts">GPT'er</a></li>
             <li><a class="nav-pill" href="#/projects">Projekter</a></li>
           </ul>
         </nav>
@@ -103,21 +101,11 @@
           <div class="session-group-title">Dine chats</div>
           <input id="sessionSearch" placeholder="Søg chats..." />
           <button id="newChatInline" class="secondary">Start ny chat</button>
-          <div id="quotaBar" class="quota-bar">
-            <div class="quota-label">
-              <span>Kvota</span>
-              <span id="quotaText">0/0 MB</span>
-            </div>
-            <div class="quota-track">
-              <div id="quotaFill" class="quota-fill"></div>
-            </div>
-          </div>
           <div id="expiryNotice" class="small"></div>
           <div class="sidebar-panel" id="notesPanel">
             <div class="session-group-title">Noter</div>
             <div id="notesList" class="mini-list"></div>
           </div>
-          <button id="quotaRequestBtn" class="secondary quota-btn">Anmod om mere plads</button>
           <nav class="session-scroll" aria-label="Tidligere chats">
             <div id="sessionList" class="session-list"></div>
             <div class="small" id="sessionStatus"></div>
@@ -238,6 +226,19 @@
           <section class="modal__panel" id="settingsPanel">
             <h2>Indstillinger</h2>
             <p>Vælg en sektion i venstre menu.</p>
+            <div class="settings-section" id="settingsAccount">
+              <h3>Konto & kvota</h3>
+              <div id="quotaBar" class="quota-bar">
+                <div class="quota-label">
+                  <span>Kvota</span>
+                  <span id="quotaText">0/0 MB</span>
+                </div>
+                <div class="quota-track">
+                  <div id="quotaFill" class="quota-fill"></div>
+                </div>
+              </div>
+              <button id="quotaRequestBtn" class="secondary quota-btn">Anmod om mere plads</button>
+            </div>
           </section>
         </div>
       </div>
@@ -260,12 +261,17 @@
 
     </section>
 
-    <aside class="rightbar">
+    <aside class="rightbar admin-only hidden" aria-label="Admin panel">
       <div class="panel right-panel no-border">
         <div class="panel-header">
-          <span id="updatesClock" class="right-panel-clock"></span>
-          <span class="right-panel-sep">·</span>
-          <span id="rightbarCity" class="right-panel-city"></span>
+          <div class="rightbar-row">
+            <div>
+              <span id="updatesClock" class="right-panel-clock"></span>
+              <span class="right-panel-sep">·</span>
+              <span id="rightbarCity" class="right-panel-city"></span>
+            </div>
+            <button id="rightbarToggle" class="rail-btn" title="Skjul panel" aria-label="Skjul panel">⇤</button>
+          </div>
         </div>
       </div>
       <div class="panel right-panel">
@@ -279,6 +285,12 @@
           <div class="right-panel-title">Nye kommandoer</div>
         </div>
         <div id="commandsPanel" class="panel-body right-panel-body"></div>
+      </div>
+      <div class="panel right-panel admin-only">
+        <div class="panel-header">
+          <div class="right-panel-title">Admin</div>
+        </div>
+        <div id="adminViewHost" class="panel-body right-panel-body"></div>
       </div>
       <div class="panel right-panel admin-only" id="rightTicketsPanel">
         <div class="panel-header">

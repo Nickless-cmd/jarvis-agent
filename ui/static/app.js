@@ -54,12 +54,11 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 // --- Admin views: dashboard, users, sessions, logs, tickets, tools, config ---
 function showAdminView(view) {
-  // Find main content area (reuse chat-pane for SPA)
-  const main = document.querySelector('.chat-pane .main-column');
-  if (!main) return;
-  main.innerHTML = '';
+  const host = document.getElementById('adminViewHost') || document.querySelector('.chat-pane .main-column');
+  if (!host) return;
+  host.innerHTML = '';
   if (view === 'dashboard') {
-    main.innerHTML = `<h2>Admin Dashboard</h2>
+    host.innerHTML = `<h2>Admin Dashboard</h2>
       <div class="admin-cards">
         <div class="admin-card">Users<br><span id="adminUsersCount">…</span></div>
         <div class="admin-card">Sessions<br><span id="adminSessionsCount">…</span></div>
@@ -78,7 +77,7 @@ function showAdminView(view) {
     return;
   }
   if (view === 'users') {
-    main.innerHTML = `<h2>Users</h2><div id="adminUsersTable">Indlæser…</div>`;
+    host.innerHTML = `<h2>Users</h2><div id="adminUsersTable">Indlæser…</div>`;
     apiFetch('/admin/users').then(r => r && r.ok ? r.json() : null).then(d => {
       const users = d?.users || [];
       const table = document.getElementById('adminUsersTable');
@@ -88,7 +87,7 @@ function showAdminView(view) {
     return;
   }
   if (view === 'sessions') {
-    main.innerHTML = `<h2>Sessions</h2><div id="adminSessionsTable">Indlæser…</div>`;
+    host.innerHTML = `<h2>Sessions</h2><div id="adminSessionsTable">Indlæser…</div>`;
     apiFetch('/admin/sessions').then(r => r && r.ok ? r.json() : null).then(d => {
       const sessions = d?.sessions || [];
       const table = document.getElementById('adminSessionsTable');
@@ -98,7 +97,7 @@ function showAdminView(view) {
     return;
   }
   if (view === 'logs') {
-    main.innerHTML = `<h2>Logs</h2><div id="adminLogs">Indlæser…</div>`;
+    host.innerHTML = `<h2>Logs</h2><div id="adminLogs">Indlæser…</div>`;
     apiFetch('/admin/logs').then(r => r && r.ok ? r.json() : null).then(d => {
       const files = d?.files || [];
       const logs = document.getElementById('adminLogs');
@@ -108,7 +107,7 @@ function showAdminView(view) {
     return;
   }
   if (view === 'tickets') {
-    main.innerHTML = `<h2>Tickets</h2><div id="adminTickets">Indlæser…</div>`;
+    host.innerHTML = `<h2>Tickets</h2><div id="adminTickets">Indlæser…</div>`;
     apiFetch('/admin/tickets').then(r => r && r.ok ? r.json() : null).then(d => {
       const tickets = d?.tickets || [];
       const el = document.getElementById('adminTickets');
@@ -118,14 +117,14 @@ function showAdminView(view) {
     return;
   }
   if (view === 'tools') {
-    main.innerHTML = `<h2>Tools</h2><div>coming soon</div>`;
+    host.innerHTML = `<h2>Tools</h2><div>coming soon</div>`;
     return;
   }
   if (view === 'config') {
-    main.innerHTML = `<h2>Config</h2><div>coming soon</div>`;
+    host.innerHTML = `<h2>Config</h2><div>coming soon</div>`;
     return;
   }
-  main.innerHTML = '<div>Ukendt admin view</div>';
+  host.innerHTML = '<div>Ukendt admin view</div>';
 }
 
 // --- Admin nav and hash routing ---
@@ -187,8 +186,9 @@ function handleHashChange() {
     return;
   }
   // Default: chat view
-  main.innerHTML = '';
-  // Optionally re-render chat/session UI if needed
+  setRightbarVisibility(isAdminUser && !authState.adminUnavailable);
+  updateEmptyState();
+  // Leave chat layout intact for default view
 }
 
 window.addEventListener('hashchange', handleHashChange);
@@ -736,7 +736,21 @@ const authState = {
   token: null
 };
 
+function setRightbarVisibility(show) {
+  const layout = document.querySelector(".chat-layout");
+  const right = document.querySelector(".rightbar");
+  if (!layout || !right) return;
+  if (show) {
+    layout.classList.add("has-rightbar");
+    right.classList.remove("hidden");
+  } else {
+    layout.classList.remove("has-rightbar");
+    right.classList.add("hidden");
+  }
+}
+
 function hideAdminPanels() {
+  setRightbarVisibility(false);
   document.querySelectorAll('.admin-only, #rightTicketsPanel, #statusPanel').forEach(el => {
     el.classList.add('panel-disabled');
     if (el.id === 'rightTicketsPanel' || el.id === 'statusPanel') {
@@ -746,6 +760,7 @@ function hideAdminPanels() {
 }
 
 function showAdminPanels() {
+  setRightbarVisibility(true);
   document.querySelectorAll('.admin-only, #rightTicketsPanel, #statusPanel').forEach(el => {
     el.classList.remove('panel-disabled');
   });
@@ -766,6 +781,16 @@ function startAdminPolling() {
   // Example: poll tickets/logs every 15s
   window.adminPollingIntervals.push(setInterval(loadRightTickets, 15000));
   window.adminPollingIntervals.push(setInterval(loadRightLogs, 15000));
+}
+
+function bindRightbarToggle() {
+  const toggle = document.getElementById("rightbarToggle");
+  if (!toggle) return;
+  toggle.addEventListener("click", () => {
+    const right = document.querySelector(".rightbar");
+    const isVisible = right && !right.classList.contains("hidden");
+    setRightbarVisibility(!isVisible);
+  });
 }
 
 // Initial state
@@ -3571,6 +3596,7 @@ async function initUI() {
   sessionPromptSave = getSessionPromptSave();
   sessionPromptClear = getSessionPromptClear();
   noteContentInput = getNoteContentInput();
+  bindRightbarToggle();
   
   // Non-critical but useful steps
   await safe(loadModel, "loadModel");
@@ -3609,6 +3635,7 @@ async function initUI() {
   if (typeof initCookieBanner === "function") {
     try { initCookieBanner(); } catch (err) { console.warn("initCookieBanner failed", err); }
   }
+  setRightbarVisibility(isAdminUser && !authState.adminUnavailable);
   
   // Mark UI as ready (used by CSS to reveal non-essential UI parts)
   document.body.classList.add("ui-ready");

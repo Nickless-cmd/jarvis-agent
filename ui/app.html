@@ -163,7 +163,48 @@
 
     <section class="chat-pane" role="main">
       <div class="main-column">
-        <!-- Content panels (chat, admin, docs, tickets, account, 403) renderes her af routeren i app.js -->
+        <!-- Default chat layout; JS can swap panels, but IDs stay stable -->
+        <section class="chat-feed conversation-log" aria-label="Chatbeskeder" aria-live="polite">
+          <div id="emptyState" class="empty-state hidden">
+            <h1>Velkommen til Jarvis</h1>
+            <p>Start en ny samtale eller vælg en tidligere chat i venstre side.</p>
+          </div>
+          <div id="chat" class="chat-feed-inner"></div>
+          <div id="greetingBanner" class="greeting-banner"></div>
+        </section>
+        <section class="status-row" aria-label="Status for samtale">
+          <div id="streamChip" class="chip-toggle">
+            <span id="streamDot" class="tool-dot"></span>
+            <span>Streaming</span>
+          </div>
+          <div id="personaChip" class="chip-toggle">
+            <span>Personlighed</span>
+          </div>
+          <input type="checkbox" id="streamToggle" checked class="hidden" />
+          <div id="chatStatusInline" class="status-line">Jarvis – Klar.</div>
+        </section>
+        <section class="composer-wrap" aria-label="Chat input">
+          <div class="composer-input">
+            <div class="tools-btn-wrap">
+              <button id="toolsBtn" class="composer-btn" title="Værktøjer" aria-label="Værktøjer">+</button>
+            </div>
+            <textarea id="prompt" placeholder="Skriv en besked eller brug /kommando…" rows="1"></textarea>
+            <button id="micBtn" class="composer-btn" title="Tale til Jarvis" aria-label="Tale til Jarvis">🎤</button>
+            <button id="sendBtn" class="composer-btn send-btn" title="Send">↑</button>
+          </div>
+          <div id="toolsDropdown" class="tools-dropdown hidden">
+            <div class="tools-grid">
+              <label><input type="checkbox" id="toolNews" checked /> Nyheder</label>
+              <label><input type="checkbox" id="toolWeather" checked /> Vejr</label>
+              <label><input type="checkbox" id="toolSearch" checked /> Web</label>
+              <label><input type="checkbox" id="toolCurrency" checked /> Valuta</label>
+              <label><input type="checkbox" id="toolImage" checked /> Billede</label>
+              <label class="admin-only"><input type="checkbox" id="toolSystem" checked /> System</label>
+              <label class="admin-only"><input type="checkbox" id="toolPing" checked /> Ping</label>
+              <label class="admin-only"><input type="checkbox" id="toolProcess" checked /> Processer</label>
+            </div>
+          </div>
+        </section>
       </div>
       <!-- Settings modal: 2-column layout -->
       <div id="settingsModal" class="modal hidden" aria-modal="true" role="dialog">

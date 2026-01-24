@@ -66,8 +66,8 @@
     </div>
   </header>
 
-  <main class="shell app-main">
-    <aside class="sidebar">
+  <main class="shell app-main chat-layout">
+    <aside class="sidebar" role="navigation" aria-label="Chats og navigation">
       <div class="sidebar-header">
         <div class="rail-logo">
           <span class="logo-short" id="brandShort">J</span>
@@ -81,28 +81,30 @@
           <button id="uploadSidebarBtn" class="rail-btn" title="Upload" aria-label="Upload">⤴</button>
         </div>
       </div>
-      <input id="sessionSearch" placeholder="Søg chats..." />
-      <button id="newChatInline" class="secondary">Start ny chat</button>
-      <div id="quotaBar" class="quota-bar">
-        <div class="quota-label">
-          <span>Kvota</span>
-          <span id="quotaText">0/0 MB</span>
+      <div class="sidebar-body">
+        <input id="sessionSearch" placeholder="Søg chats..." />
+        <button id="newChatInline" class="secondary">Start ny chat</button>
+        <div id="quotaBar" class="quota-bar">
+          <div class="quota-label">
+            <span>Kvota</span>
+            <span id="quotaText">0/0 MB</span>
+          </div>
+          <div class="quota-track">
+            <div id="quotaFill" class="quota-fill"></div>
+          </div>
         </div>
-        <div class="quota-track">
-          <div id="quotaFill" class="quota-fill"></div>
+        <div class="sidebar-panel">
         </div>
-      </div>
-      <div class="sidebar-panel">
-      </div>
-      <div id="expiryNotice" class="small"></div>
-      <div class="sidebar-panel" id="notesPanel">
-        <div class="session-group-title">Noter</div>
-        <div id="notesList" class="mini-list"></div>
-      </div>
-      <button id="quotaRequestBtn" class="secondary quota-btn">Anmod om mere plads</button>
-      <div class="session-scroll">
-        <div id="sessionList" class="session-list"></div>
-        <div class="small" id="sessionStatus"></div>
+        <div id="expiryNotice" class="small"></div>
+        <div class="sidebar-panel" id="notesPanel">
+          <div class="session-group-title">Noter</div>
+          <div id="notesList" class="mini-list"></div>
+        </div>
+        <button id="quotaRequestBtn" class="secondary quota-btn">Anmod om mere plads</button>
+        <nav class="session-scroll" aria-label="Tidligere chats">
+          <div id="sessionList" class="session-list"></div>
+          <div class="small" id="sessionStatus"></div>
+        </nav>
       </div>
       <div class="sidebar-footer">
         <button id="ticketsBtn" class="rail-btn rail-wide" title="Tickets" aria-label="Tickets">
@@ -117,7 +119,7 @@
           <span class="rail-icon">👤</span>
           <span class="rail-label">Min konto</span>
         </button>
-        <button id="adminBtn" class="rail-btn rail-wide" title="Admin" aria-label="Admin">
+        <button id="adminBtn" class="rail-btn rail-wide admin-only" title="Admin" aria-label="Admin">
           <span class="rail-icon">⚙</span>
           <span class="rail-label">Admin settings</span>
         </button>
@@ -128,13 +130,13 @@
       </div>
     </aside>
 
-    <section class="chat-pane">
+    <section class="chat-pane" role="main">
       <div class="main-column">
-        <section class="chat-feed">
+        <section class="chat-feed conversation-log" aria-label="Chatbeskeder" aria-live="polite">
           <div id="chat" class="chat-feed-inner chat-feed"></div>
           <div id="greetingBanner" class="greeting-banner"></div>
         </section>
-        <section class="status-row">
+        <section class="status-row" aria-label="Status for samtale">
           <div id="streamChip" class="chip-toggle">
             <span id="streamDot" class="tool-dot"></span>
             <span>Streaming</span>
@@ -145,7 +147,7 @@
           <input type="checkbox" id="streamToggle" checked class="hidden" />
           <div id="chatStatusInline" class="status-line">Jarvis – Klar.</div>
         </section>
-        <section class="composer-wrap">
+        <section class="composer-wrap" aria-label="Chat input">
           <div class="composer-input">
             <div class="tools-btn-wrap">
               <button id="toolsBtn" class="composer-btn" title="Værktøjer" aria-label="Værktøjer">+</button>

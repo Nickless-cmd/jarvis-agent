@@ -8,6 +8,7 @@ ui/static/
 comfyui/
 data/
 comfyui/
+ui_dist/
 
 data/
 src/data/

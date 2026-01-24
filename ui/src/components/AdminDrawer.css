@@ -1,0 +1,47 @@
+.admin-drawer {
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  padding: 16px;
+  display: none;
+  flex-direction: column;
+}
+
+.admin-drawer.open {
+  display: flex;
+}
+
+.admin-drawer__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.admin-drawer__tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.tab {
+  background: #0e1016;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 8px 10px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.tab.active {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.admin-drawer__body {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+  background: #0f1219;
+  min-height: 200px;
+}

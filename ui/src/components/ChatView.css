@@ -1,0 +1,79 @@
+.chat-view {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--bg);
+}
+
+.chat-feed {
+  flex: 1;
+  overflow: auto;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.chat-message {
+  max-width: 680px;
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+}
+
+.chat-message.assistant {
+  background: #111722;
+}
+
+.chat-message.user {
+  background: #0e1016;
+  align-self: flex-end;
+}
+
+.msg-label {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.composer {
+  position: sticky;
+  bottom: 0;
+  background: linear-gradient(180deg, rgba(17,19,24,0) 0%, rgba(17,19,24,0.95) 35%);
+  padding: 16px 24px 20px;
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.composer textarea {
+  flex: 1;
+  background: #0e1016;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 12px 14px;
+  resize: none;
+  min-height: 44px;
+  max-height: 180px;
+}
+
+.composer-btn {
+  border: 1px solid var(--border);
+  background: #0f1219;
+  color: var(--text);
+  border-radius: 12px;
+  padding: 10px 12px;
+  cursor: pointer;
+}
+
+.composer-btn.primary {
+  background: var(--primary);
+  color: #0d1512;
+  border-color: var(--primary);
+}
+
+.composer-actions {
+  display: flex;
+  gap: 8px;
+}

@@ -6,8 +6,6 @@
     <title>Jarvis App</title>
     <link rel="icon" href="/ui/static/favicon.svg?v={{BUILD_ID}}" type="image/svg+xml" />
     <link rel="stylesheet" href="/ui/static/styles.css?v={{BUILD_ID}}" />
-    <link rel="stylesheet" href="/ui/static/app.css?v={{BUILD_ID}}" />
-    <link rel="stylesheet" href="/ui/static/app-fix.css?v={{BUILD_ID}}" />
   </head>
 <body class="app-shell">
   <header class="topbar">
@@ -158,28 +156,38 @@
 
     <section class="chat-pane" role="main">
       <div class="main-column">
+        <!-- Landing state (ChatGPT-like) -->
+        <div class="empty-state" id="landingState">
+          <h1>Velkommen til Jarvis</h1>
+          <p>Start en ny samtale eller vælg en tidligere chat i venstre side.</p>
+          <div class="composer-inline">
+            <div class="composer-input">
+              <button class="composer-btn" title="Vedhæft">＋</button>
+              <textarea id="prompt" placeholder="Skriv en besked eller brug /kommando…" rows="1"></textarea>
+              <button class="composer-btn" title="Tale til Jarvis">🎤</button>
+              <button class="composer-btn send-btn" title="Send">↑</button>
+            </div>
+          </div>
+        </div>
         <!-- Content panels (chat, admin, docs, tickets, account, 403) renderes her af routeren i app.js -->
       </div>
-      <!-- Settings modal skeleton -->
-      <div id="settingsModal" class="modal hidden" aria-modal="true" role="dialog">
+      <!-- Settings modal: 2-column layout -->
+      <div id="settingsModal" class="modal" style="display:none;">
         <div class="modal__dialog">
-          <button id="closeSettings" class="modal__close" aria-label="Luk indstillinger">✕</button>
-          <nav class="modal__nav" aria-label="Indstillinger sektioner">
-            <div class="session-group-title">Indstillinger</div>
-            <ul class="nav-list">
-              <li><a href="#settings/general">Generelt</a></li>
-              <li><a href="#settings/notifications">Notifikationer</a></li>
-              <li><a href="#settings/persona">Personlig tilpasning</a></li>
-              <li><a href="#settings/apps">Apps</a></li>
-              <li><a href="#settings/schedule">Tidsplaner</a></li>
-              <li><a href="#settings/data">Datasikkerhed</a></li>
-              <li><a href="#settings/account">Konto</a></li>
-            </ul>
+          <nav class="modal__nav">
+            <button>General</button>
+            <button>Notifications</button>
+            <button>Personalization</button>
+            <button>Apps</button>
+            <button>Schedules</button>
+            <button>Data</button>
+            <button>Account</button>
           </nav>
-          <div class="modal__panel" id="settingsPanel">
+          <section class="modal__panel">
+            <span class="modal__close" id="closeSettings">&times;</span>
             <h2>Indstillinger</h2>
-            <p>Vælg en sektion i venstre menu.</p>
-          </div>
+            <div>coming soon</div>
+          </section>
         </div>
       </div>
       <div id="sessionPromptRow" class="session-prompt-row hidden">

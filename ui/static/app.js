@@ -292,6 +292,9 @@ let authLostLatch = true;
 let adminIntervals = [];
 let bootstrappingAuth = false;
 let verifyingSession = false;
+let hasUserInteracted = false;
+window.addEventListener("pointerdown", () => { hasUserInteracted = true; }, { once: true });
+window.addEventListener("keydown", () => { hasUserInteracted = true; }, { once: true });
 
 // Session expiry banner logic
 
@@ -3684,7 +3687,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       el.style.display = "";
     }
   });
-  // If hash targets settings, defer opening until after auth success
+  // If hash targets settings, defer opening until after auth success and user interaction
   const loginBtn = document.getElementById("loggedOutLoginBtn");
   if (loginBtn) {
     loginBtn.addEventListener("click", () => { window.location.href = "/login"; });

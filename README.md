@@ -57,14 +57,30 @@ bash -lc 'PYTHONPATH=src pytest -q'
 - [docs/OPERATIONS.md](docs/OPERATIONS.md)
 - [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)
 
-## Roadmap / Next tasks
-- **UI redesign:** Align UI/UX with backend capabilities and SettingsStore (theme, language, streaming, notifications)
-- **Admin dashboard:** Expand scope for user management, logs, and settings
-- **Notifications UX:** Improve notification delivery and controls (currently may be disabled by default)
-- **Config management:** Add per-user settings, migrations, and safer config flows
+## Troubleshooting
+- 401 on admin endpoints: ensure user is admin; session remains valid.
+- “jarvis_token missing”: confirm login and cookie acceptance (SameSite=Lax).
+- SSE/events: `/v1/events/stream` uses `max_ms` for deterministic termination; clients back off on errors.
+- Test hangs: set `JARVIS_TEST_MODE=1` and run `PYTHONPATH=src pytest -q`, or wrap with:
+  ```bash
+  timeout 600s bash -lc 'PYTHONPATH=src pytest -q'
+  ```
+- DB locked: avoid multiple servers on the same DB or set `JARVIS_DB_PATH` to a temp path for tests.
 
----
-**Security:**
+## Documentation
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- [docs/API.md](docs/API.md)
+- [docs/OPERATIONS.md](docs/OPERATIONS.md)
+- [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)
+- [docs/UI_REFACTOR_PLAN.md](docs/UI_REFACTOR_PLAN.md)
+
+## UI development
+- Main entrypoint: `ui/app.html` (chat UI). Admin: `ui/admin.html`.
+- Static assets: `ui/static/app.js`, `app.css`, `api.js`, `authStore.js`, `admin.js`.
+- No build step: vanilla HTML/CSS/JS. Serve via `uvicorn jarvis.server:app` and open `/app` or `/admin`.
+- Auth: jarvis_token cookie; admin pages require `is_admin`. 401 on admin routes should not clear session.
+
+## Security
 - Do not use default dev keys in production (`JARVIS_DEVKEY`).
 - Always use HTTPS in production and set `JARVIS_COOKIE_SECURE=1`.
-- No secrets or unsafe defaults are exposed in public endpoints or documentation.
+- No secrets or unsafe defaults are exposed in public endpoints.

@@ -1,6 +1,6 @@
-const TOKEN_KEY = "jarvisUserToken";
-const TOKEN_SESSION_KEY = "jarvisUserTokenSession";
-const TOKEN_SESSION_LEGACY = "jarvis_token_session"; // fallback name mentioned in logs
+const TOKEN_KEY = "jarvisUserToken"; // legacy persistent key
+const TOKEN_SESSION_KEY = "jarvis_token"; // primary sessionStorage key
+const TOKEN_SESSION_LEGACY = "jarvisUserTokenSession"; // legacy session key
 const API_KEY = "devkey";
 const LAST_PATH_KEY = "jarvisLastPath";
 
@@ -22,51 +22,34 @@ function deleteCookie(name) {
   document.cookie = `${name}=; Max-Age=0; path=/; SameSite=Lax`;
 }
 
-let __jarvisCookieRepaired = false;
 function getToken() {
-  // 1) Prefer cookie (most authoritative)
-  let token = getCookie("jarvis_token") || "";
+  // Primary: sessionStorage
+  let token = sessionStorage.getItem(TOKEN_SESSION_KEY) || sessionStorage.getItem(TOKEN_SESSION_LEGACY) || "";
+  if (token) return token;
+  // Secondary: cookie
+  token = getCookie("jarvis_token") || "";
   if (token) {
-    console.debug("[auth] getToken: found cookie jarvis_token (len=", token.length, ")");
-    // Mirror to session storage for consistency
     sessionStorage.setItem(TOKEN_SESSION_KEY, token);
     return token;
   }
-
-  // 2) Fallback to persistent storage (localStorage)
+  // Tertiary: legacy persistent storage
   token = localStorage.getItem(TOKEN_KEY) || "";
   if (token) {
-    console.info("[auth] repairing jarvis_token from localStorage (len=", token.length, ")");
-    setCookie("jarvis_token", token, 365);
     sessionStorage.setItem(TOKEN_SESSION_KEY, token);
     return token;
   }
-
-  // 3) Fallback to session storage (current or legacy key)
-  token = sessionStorage.getItem(TOKEN_SESSION_KEY) || sessionStorage.getItem(TOKEN_SESSION_LEGACY) || "";
-  if (token) {
-    console.info("[auth] repairing jarvis_token from sessionStorage (len=", token.length, ")");
-    // 1 day is enough for a browser session cookie-equivalent
-    setCookie("jarvis_token", token, 1);
-    sessionStorage.setItem(TOKEN_SESSION_KEY, token);
-    return token;
-  }
-
   return "";
 }
 
 function setToken(token, remember = true) {
-  // Write cookie + storage so future reads are consistent
+  sessionStorage.setItem(TOKEN_SESSION_KEY, token);
+  // Write cookie so server reads it too
   setCookie("jarvis_token", token, remember ? 365 : 1);
   if (remember) {
     localStorage.setItem(TOKEN_KEY, token);
-    sessionStorage.removeItem(TOKEN_SESSION_KEY);
-    sessionStorage.removeItem(TOKEN_SESSION_LEGACY);
   } else {
-    sessionStorage.setItem(TOKEN_SESSION_KEY, token);
     localStorage.removeItem(TOKEN_KEY);
   }
-  console.info("[auth] setToken: jarvis_token set (remember=" + remember + ")");
 }
 
 

@@ -308,6 +308,11 @@ function hideSessionExpiryBanner() {
     banner.classList.add('hidden');
   }
 }
+function hideAuthOverlays() {
+  hideSessionExpiryBanner();
+  const loggedOut = document.getElementById('loggedOutScreen');
+  if (loggedOut) loggedOut.classList.add('hidden');
+}
 function hideAuthBanners() {
   hideSessionExpiryBanner();
   const loggedOut = document.getElementById('loggedOutScreen');
@@ -3587,7 +3592,7 @@ async function ensureAuthState() {
         window.authStore.updateFromProfile(profile);
       }
       authLostLatch = false;
-      hideAuthBanners();
+      hideAuthOverlays();
       // Show/hide admin UI
       document.querySelectorAll('.admin-only').forEach(el => {
         el.classList.toggle('hidden', !profile.is_admin);
@@ -3596,6 +3601,9 @@ async function ensureAuthState() {
       showAppShell();
       document.body.classList.add('ui-ready');
       setRightbarVisibility(!!profile.is_admin && !authState.adminUnavailable);
+      if (window.location.hash === "#admin/login") {
+        window.location.hash = "";
+      }
     } else {
       try {
         const body = await res.clone().text().catch(() => "<no-body>");

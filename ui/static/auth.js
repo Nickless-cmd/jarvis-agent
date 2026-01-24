@@ -24,26 +24,35 @@ function deleteCookie(name) {
 
 let __jarvisCookieRepaired = false;
 function getToken() {
-  // 1) Primary source: session storage (current + legacy)
-  let token = sessionStorage.getItem(TOKEN_SESSION_KEY) || sessionStorage.getItem(TOKEN_SESSION_LEGACY) || "";
-  // 2) Secondary: cookie
-  if (!token) {
-    token = getCookie("jarvis_token") || "";
-    if (token) {
-      sessionStorage.setItem(TOKEN_SESSION_KEY, token);
-    }
+  // 1) Prefer cookie (most authoritative)
+  let token = getCookie("jarvis_token") || "";
+  if (token) {
+    console.debug("[auth] getToken: found cookie jarvis_token (len=", token.length, ")");
+    // Mirror to session storage for consistency
+    sessionStorage.setItem(TOKEN_SESSION_KEY, token);
+    return token;
   }
-  // 3) Optional persistent store
-  if (!token) {
-    token = localStorage.getItem(TOKEN_KEY) || "";
-  }
-  // One-time repair: set cookie if missing
-  if (token && !getCookie("jarvis_token") && !__jarvisCookieRepaired) {
+
+  // 2) Fallback to persistent storage (localStorage)
+  token = localStorage.getItem(TOKEN_KEY) || "";
+  if (token) {
+    console.info("[auth] repairing jarvis_token from localStorage (len=", token.length, ")");
     setCookie("jarvis_token", token, 365);
-    __jarvisCookieRepaired = true;
-    console.info("[auth] repaired jarvis_token cookie from storage");
+    sessionStorage.setItem(TOKEN_SESSION_KEY, token);
+    return token;
   }
-  return token;
+
+  // 3) Fallback to session storage (current or legacy key)
+  token = sessionStorage.getItem(TOKEN_SESSION_KEY) || sessionStorage.getItem(TOKEN_SESSION_LEGACY) || "";
+  if (token) {
+    console.info("[auth] repairing jarvis_token from sessionStorage (len=", token.length, ")");
+    // 1 day is enough for a browser session cookie-equivalent
+    setCookie("jarvis_token", token, 1);
+    sessionStorage.setItem(TOKEN_SESSION_KEY, token);
+    return token;
+  }
+
+  return "";
 }
 
 function setToken(token, remember = true) {

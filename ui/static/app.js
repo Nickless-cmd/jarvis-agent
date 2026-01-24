@@ -3243,6 +3243,13 @@ if (notificationsMarkAllRead) {
   notificationsMarkAllRead.addEventListener("click", markAllNotificationsRead);
 }
 
+// Tools dropdown/button
+const toolsBtn = getToolsBtn();
+const toolsDropdown = getToolsDropdown();
+if (toolsDropdown) {
+  hideEl(toolsDropdown);
+}
+
 // Click outside to close notifications dropdown
 document.addEventListener("click", (e) => {
   const dropdown = getNotificationsDropdown();

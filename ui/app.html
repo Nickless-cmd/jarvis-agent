@@ -15,6 +15,7 @@
     <link rel="stylesheet" href="/ui/static/styles.css?v={{BUILD_ID}}" />
   </head>
 <body class="app-shell">
+  <div id="appRoot">
   <header class="topbar">
     <div class="topbar-left">
       <div class="brand">
@@ -344,5 +345,13 @@
   <script>window.JARVIS_BUILD_ID="{{BUILD_ID}}";</script>
   <script src="/ui/static/app.js?v={{BUILD_ID}}"></script>
   <script type="module" src="/ui/static/main.js?v={{BUILD_ID}}"></script>
+  </div>
+  <div id="loggedOutScreen" class="logged-out hidden">
+    <div class="logged-out-card">
+      <h1>Log ind for at fortsætte</h1>
+      <p>Din session er udløbet eller du er ikke logget ind.</p>
+      <button id="loggedOutLoginBtn">Log ind</button>
+    </div>
+  </div>
 </body>
 </html>

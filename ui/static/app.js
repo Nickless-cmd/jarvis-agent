@@ -212,7 +212,7 @@ function setupUnifiedUIEvents() {
   // Settings modal open (if button exists)
   const openSettingsBtn = document.getElementById('openSettingsBtn');
   if (openSettingsBtn && modal) {
-    openSettingsBtn.onclick = () => { modal.style.display = ''; };
+    openSettingsBtn.onclick = () => { openSettingsModal(); };
   }
 }
 
@@ -223,11 +223,19 @@ window.addEventListener('authStateChanged', () => {
   } else {
     document.querySelectorAll('.admin-only').forEach(el => el.style.display = '');
   }
+  setRightbarVisibility(!!window.authStore?.isAdmin && !authState.adminUnavailable);
   handleHashChange();
 });
 
-// If running in browser, attach authStore to window for legacy/global use
-var authStore = window.authStore;
+// Prevent double execution of app.js (e.g., if loaded twice)
+if (window.__JARVIS_APP_INIT__) {
+  console.warn("[jarvis] app.js already initialized, skipping duplicate load.");
+  return;
+}
+window.__JARVIS_APP_INIT__ = true;
+
+// Defensive: ensure window.authStore exists
+var authStore = window.authStore || {};
 
 // Global arrays for polling and streams
 let pollingIntervals = [];
@@ -426,12 +434,21 @@ function hideSessionExpiryBanner() {
   }
 }
 
+
+function stopEventsStream() {
+  // Safe no-op if not running
+  if (window.eventClient && typeof window.eventClient.close === 'function') {
+    window.eventClient.close();
+    window.eventClient = null;
+  }
+}
+
 function onAuthLost(reason) {
   if (authLostLatch) return;
   authLostLatch = true;
-  stopEventsStream();
-  stopAllPolling();
-  closeAllStreams();
+  if (typeof stopEventsStream === 'function') stopEventsStream();
+  if (typeof stopAllPolling === 'function') stopAllPolling();
+  if (typeof closeAllStreams === 'function') closeAllStreams();
   showSessionExpiryBanner();
   console.warn("[auth] onAuthLost triggered: ", reason);
   // Optionally: set UI state to logged out, disable inputs, etc.
@@ -464,9 +481,9 @@ if (authStore && typeof authStore.onChange === 'function') {
   authStore.onChange(() => {
     if (!authStore.isAuthenticated) {
       onAuthLost('authStore');
-      stopEventsStream();
+      if (typeof stopEventsStream === 'function') stopEventsStream();
     } else {
-      startEventsStream();
+      if (typeof startEventsStream === 'function') startEventsStream();
     }
   });
 }
@@ -736,6 +753,22 @@ const authState = {
   token: null
 };
 
+function showLoggedOutScreen() {
+  const root = document.getElementById("appRoot");
+  const loggedOut = document.getElementById("loggedOutScreen");
+  if (root) root.classList.add("hidden");
+  if (loggedOut) loggedOut.classList.remove("hidden");
+  if (typeof stopAllPolling === "function") stopAllPolling();
+  if (typeof stopEventsStream === "function") stopEventsStream();
+}
+
+function showAppShell() {
+  const root = document.getElementById("appRoot");
+  const loggedOut = document.getElementById("loggedOutScreen");
+  if (root) root.classList.remove("hidden");
+  if (loggedOut) loggedOut.classList.add("hidden");
+}
+
 function setRightbarVisibility(show) {
   const layout = document.querySelector(".chat-layout");
   const right = document.querySelector(".rightbar");
@@ -764,6 +797,14 @@ function showAdminPanels() {
   document.querySelectorAll('.admin-only, #rightTicketsPanel, #statusPanel').forEach(el => {
     el.classList.remove('panel-disabled');
   });
+}
+
+function openSettingsModal() {
+  const modal = document.getElementById('settingsModal');
+  if (modal) {
+    modal.classList.remove('hidden');
+    modal.style.display = '';
+  }
 }
 
 function stopAdminPolling() {
@@ -825,6 +866,13 @@ let notificationsCache = [];
 let notificationsLastId = null;
 // lastEventId declared near event client section
 const NOTIFY_ENABLED = false; // temporary: disable notifications without removing code
+function initNotificationsUI() {
+  const wrap = document.getElementById("notifWrap");
+  const dropdown = getNotificationsDropdown();
+  if (dropdown) dropdown.hidden = true;
+  const enabled = NOTIFY_ENABLED !== false && PUBLIC_SETTINGS.notifications_enabled !== false;
+  if (wrap) wrap.classList.toggle("hidden", !enabled);
+}
 
 function storeCurrentSession() {
   if (currentSessionId) {
@@ -3063,6 +3111,13 @@ if (ticketsBtn) {
     window.location.href = "/tickets";
   });
 }
+const accountBtn = document.getElementById("accountBtn");
+if (accountBtn) {
+  accountBtn.addEventListener("click", (e) => {
+    e.preventDefault();
+    openSettingsModal();
+  });
+}
 if (quotaRequestBtn) {
   quotaRequestBtn.addEventListener("click", async () => {
     const quotaRes = await apiFetch("/account/quota", { method: "GET" });
@@ -3582,6 +3637,7 @@ async function initUI() {
   await applyPublicSettings();
   await safe(loadBrand, "loadBrand");
   await safe(loadSettings, "loadSettings");
+  initNotificationsUI();
   await safe(loadQuotaBar, "loadQuotaBar");
   await safe(loadSessions, "loadSessions");
   await safe(loadStatus, "loadStatus");
@@ -3645,33 +3701,50 @@ async function initUI() {
 }
   
 
+
 // --- Robust auth/session state: always check /account/profile on load ---
 async function ensureAuthState() {
   try {
     const res = await apiFetch("/account/profile", { method: "GET" });
     if (res && res.ok) {
       const profile = await res.json();
-      window.authStore.updateFromProfile(profile);
+      if (window.authStore && typeof window.authStore.updateFromProfile === 'function') {
+        window.authStore.updateFromProfile(profile);
+      }
       // Show/hide admin UI
       document.querySelectorAll('.admin-only').forEach(el => {
         el.classList.toggle('hidden', !profile.is_admin);
       });
       // Show main UI
+      showAppShell();
       document.body.classList.add('ui-ready');
+      setRightbarVisibility(!!profile.is_admin && !authState.adminUnavailable);
     } else {
-      window.authStore.reset();
+      if (window.authStore && typeof window.authStore.reset === 'function') {
+        window.authStore.reset();
+      }
+      showLoggedOutScreen();
       document.body.classList.remove('ui-ready');
     }
   } catch (err) {
-    window.authStore.reset();
+    if (window.authStore && typeof window.authStore.reset === 'function') {
+      window.authStore.reset();
+    }
+    showLoggedOutScreen();
     document.body.classList.remove('ui-ready');
   }
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
+  const loginBtn = document.getElementById("loggedOutLoginBtn");
+  if (loginBtn) {
+    loginBtn.addEventListener("click", () => { window.location.href = "/login"; });
+  }
   await ensureAuthState();
+  // If not authenticated, stop here
+  if (!window.authStore?.isAuthenticated) return;
   await initUI();
 });
 window.addEventListener("beforeunload", () => {
-  stopEventsStream();
+  if (typeof stopEventsStream === 'function') stopEventsStream();
 });

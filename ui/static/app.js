@@ -296,6 +296,7 @@ let hasUserInteracted = false;
 window.addEventListener("pointerdown", () => { hasUserInteracted = true; }, { once: true });
 window.addEventListener("keydown", () => { hasUserInteracted = true; }, { once: true });
 let authBootstrapped = false;
+let authRecheckScheduled = false;
 
 // Session expiry banner logic
 
@@ -318,42 +319,11 @@ function hideAuthOverlays() {
   const loggedOut = document.getElementById('loggedOutScreen');
   if (loggedOut) loggedOut.classList.add('hidden');
 }
-function hideAuthBanners() {
-  hideSessionExpiryBanner();
-  const loggedOut = document.getElementById('loggedOutScreen');
-  if (loggedOut) loggedOut.classList.add('hidden');
-}
-
-async function verifySessionAndMaybeLogout(reasonUrl, statusCode) {
-  if (verifyingSession) return { authenticated: !authLostLatch };
-  verifyingSession = true;
-  try {
-    const res = await fetch("/account/profile", { method: "GET", headers: authHeaders(), credentials: "same-origin" });
-    if (res.ok) {
-      const profile = await res.json().catch(() => ({}));
-      if (window.authStore && typeof window.authStore.updateFromProfile === 'function') {
-        window.authStore.updateFromProfile(profile);
-      }
-      authLostLatch = false;
-      hideAuthOverlays();
-      showAppShell();
-      document.body.classList.add('ui-ready');
-      return { authenticated: true, profile };
-    }
-    clearToken();
-    if (window.authStore && typeof window.authStore.reset === 'function') window.authStore.reset();
-    showLoggedOutScreen();
-    showSessionExpiryBanner();
-    document.body.classList.remove('ui-ready');
-    return { authenticated: false };
-  } catch (err) {
-    return { authenticated: false };
-  } finally {
-    verifyingSession = false;
-  }
-}
-if (typeof window !== "undefined") {
-  window.verifySessionAndMaybeLogout = verifySessionAndMaybeLogout;
+function applyAdminVisibility(isAdmin) {
+  document.querySelectorAll('.admin-only').forEach(el => {
+    el.classList.toggle('hidden', !isAdmin);
+  });
+  setRightbarVisibility(!!isAdmin && !authState.adminUnavailable);
 }
 
 
@@ -377,8 +347,13 @@ function onAuthLost(reason) {
   }
   if (authLostLatch) return;
   authLostLatch = true;
-  // Re-verify session; only ensureAuthState will decide UI
-  ensureAuthState();
+  if (!authRecheckScheduled) {
+    authRecheckScheduled = true;
+    setTimeout(() => {
+      authRecheckScheduled = false;
+      ensureAuthState();
+    }, 0);
+  }
   console.warn("[auth] onAuthLost triggered re-check: ", reason);
 }
 
@@ -3633,10 +3608,7 @@ async function ensureAuthState() {
       }
       authLostLatch = false;
       hideAuthOverlays();
-      // Show/hide admin UI
-      document.querySelectorAll('.admin-only').forEach(el => {
-        el.classList.toggle('hidden', !profile.is_admin);
-      });
+      applyAdminVisibility(!!profile.is_admin);
       // Only probe admin endpoints if user is admin
       if (profile.is_admin) {
         try { probeAdminEndpoints(); } catch (err) { console.warn('probeAdminEndpoints failed', err); }
@@ -3645,11 +3617,14 @@ async function ensureAuthState() {
       }
       // Show main UI
       showAppShell();
+      hideSessionExpiryBanner();
+      const expiryNotice = document.getElementById("expiryNotice");
+      if (expiryNotice) expiryNotice.textContent = "";
       document.body.classList.add('ui-ready');
-      setRightbarVisibility(!!profile.is_admin && !authState.adminUnavailable);
       if (window.location.hash === "#admin/login") {
         window.location.hash = "";
       }
+      console.info("[auth] profile ok -> authenticated");
     } else {
       try {
         const body = await res.clone().text().catch(() => "<no-body>");
@@ -3659,14 +3634,18 @@ async function ensureAuthState() {
         window.authStore.reset();
       }
       showLoggedOutScreen();
+      showSessionExpiryBanner();
       document.body.classList.remove('ui-ready');
+      console.info("[auth] profile failed -> logged out");
     }
   } catch (err) {
     if (window.authStore && typeof window.authStore.reset === 'function') {
       window.authStore.reset();
     }
     showLoggedOutScreen();
+    showSessionExpiryBanner();
     document.body.classList.remove('ui-ready');
+    console.info("[auth] profile failed (exception) -> logged out");
   } finally {
     bootstrappingAuth = false;
     authBootstrapped = true;

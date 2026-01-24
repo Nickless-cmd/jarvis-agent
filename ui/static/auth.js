@@ -23,16 +23,17 @@ function deleteCookie(name) {
 }
 
 function getToken() {
-  // Primary: sessionStorage
-  let token = sessionStorage.getItem(TOKEN_SESSION_KEY) || sessionStorage.getItem(TOKEN_SESSION_LEGACY) || "";
+  // Prefer cookie
+  let token = getCookie("jarvis_token") || "";
   if (token) return token;
-  // Secondary: cookie
-  token = getCookie("jarvis_token") || "";
-  if (token) {
-    sessionStorage.setItem(TOKEN_SESSION_KEY, token);
-    return token;
+  // Fallback to sessionStorage
+  token = sessionStorage.getItem(TOKEN_SESSION_KEY) || sessionStorage.getItem(TOKEN_SESSION_LEGACY) || "";
+  if (token && !getCookie("jarvis_token")) {
+    // Repair cookie with short lifetime
+    setCookie("jarvis_token", token, 1);
   }
-  // Tertiary: legacy persistent storage
+  if (token) return token;
+  // Last resort: legacy persistent storage
   token = localStorage.getItem(TOKEN_KEY) || "";
   if (token) {
     sessionStorage.setItem(TOKEN_SESSION_KEY, token);
@@ -43,7 +44,6 @@ function getToken() {
 
 function setToken(token, remember = true) {
   sessionStorage.setItem(TOKEN_SESSION_KEY, token);
-  // Write cookie so server reads it too
   setCookie("jarvis_token", token, remember ? 365 : 1);
   if (remember) {
     localStorage.setItem(TOKEN_KEY, token);

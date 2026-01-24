@@ -50,20 +50,13 @@ async function apiFetch(path, options = {}) {
   try {
     const res = await fetch(path, fetchOptions);
     if (res.status === 401 || res.status === 403) {
-      const verifier = typeof window.verifySessionAndMaybeLogout === 'function' ? window.verifySessionAndMaybeLogout : null;
-      const result = verifier ? await verifier(path, res.status) : { authenticated: false };
-      const stillAuthed = result && result.authenticated;
+      if (typeof window.ensureAuthState === "function") {
+        window.ensureAuthState();
+      }
       if (isAdminEndpoint(path)) {
-        // Admin endpoints may fail without killing session
-        if (stillAuthed) {
-          return { ok: false, status: res.status, adminDenied: true };
-        }
-        return { ok: false, status: res.status };
+        return { ok: false, status: res.status, adminDenied: true };
       }
-      // Non-admin endpoints: only trigger logout if verifier says not authenticated
-      if (!stillAuthed) {
-        window.dispatchEvent(new CustomEvent('apiAuthError', { detail: { path, status: res.status } }));
-      }
+      window.dispatchEvent(new CustomEvent('apiAuthError', { detail: { path, status: res.status } }));
       return { ok: false, status: res.status };
     }
     return res;

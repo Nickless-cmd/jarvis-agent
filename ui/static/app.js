@@ -3570,8 +3570,10 @@ async function initUI() {
   pollingIntervals.push(setInterval(loadRightPanels, 60000));
   pollingIntervals.push(setInterval(loadRightNotes, 60000));
   pollingIntervals.push(setInterval(loadRightLogs, 60000));
-  adminIntervals.push(setInterval(loadRightTickets, 15000));
-  adminIntervals.push(setInterval(loadRightLogs, 60000));
+  if (isAdminUser) {
+    adminIntervals.push(setInterval(loadRightTickets, 15000));
+    adminIntervals.push(setInterval(loadRightLogs, 60000));
+  }
   setInterval(() => renderRightPanels(window.__updatesLog || "", window.__commandsList || []), 1000);
   
   // Final UI touches
@@ -3602,6 +3604,7 @@ async function ensureAuthState() {
       if (window.authStore && typeof window.authStore.updateFromProfile === 'function') {
         window.authStore.updateFromProfile(profile);
       }
+      isAdminUser = !!profile.is_admin;
       authLostLatch = false;
       hideAuthOverlays();
       applyAdminVisibility(!!profile.is_admin);

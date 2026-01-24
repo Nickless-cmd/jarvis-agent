@@ -177,11 +177,8 @@ function handleHashChange() {
   const main = document.querySelector('.chat-pane .main-column');
   if (!main) return;
   const settingsModal = document.getElementById('settingsModal');
-  if (hash.startsWith('#settings/')) {
-    showEl(settingsModal);
-  } else {
-    hideEl(settingsModal);
-  }
+  // Do not auto-open settings modal based on hash; keep it hidden by default
+  if (settingsModal) hideEl(settingsModal);
   // Helper: 403 panel
   function render403() {
     main.innerHTML = '<div class="forbidden-panel"><h2>403 – Ingen adgang</h2><p>Du har ikke adgang til denne side.</p></div>';
@@ -1542,8 +1539,8 @@ function updateChatVisibility(hasSession) {
     hasMessages = false;
     chat.style.display = "none";
     if (statusRow) statusRow.style.display = "flex";
-    const greetingBanner = getGreetingBanner();
-    if (greetingBanner) greetingBanner.style.display = "block";
+      const greetingBanner = getGreetingBanner();
+      if (greetingBanner) showEl(greetingBanner);
     const chatPane = getChatPane();
     if (chatPane) chatPane.classList.add("no-session");
     const sessionPromptRow = getSessionPromptRow();
@@ -1700,7 +1697,7 @@ function renderChatMessage(msg) {
   const chat = getChat();
   if (chat) chat.appendChild(element);
   const greetingBanner = getGreetingBanner();
-  if (greetingBanner) greetingBanner.style.display = "none";
+  if (greetingBanner) hideEl(greetingBanner);
   hasMessages = true;
   scrollChatToBottom();
   return element;
@@ -2047,7 +2044,8 @@ async function createSession() {
     chat.innerHTML = "";
     hasMessages = false;
     updateChatVisibility(true);
-    if (greetingBanner) greetingBanner.style.display = "block";
+    const greetingBanner = getGreetingBanner();
+    if (greetingBanner) showEl(greetingBanner);
     updateActiveSessionLabel();
     return data.session_id;
   } else {
@@ -2096,7 +2094,9 @@ async function loadSessionMessages(id) {
   });
   hasMessages = (data.messages || []).length > 0;
   const greetingBanner = getGreetingBanner();
-  if (greetingBanner) greetingBanner.style.display = hasMessages ? "none" : "block";
+  if (greetingBanner) {
+    if (hasMessages) hideEl(greetingBanner); else showEl(greetingBanner);
+  }
   scrollChatToBottom();
 }
 
@@ -3180,7 +3180,7 @@ if (promptInput) {
     const greetingBanner = getGreetingBanner();
     if (!greetingBanner) return;
     if (promptInput.value.trim().length > 0) {
-      greetingBanner.style.display = "none";
+      hideEl(greetingBanner);
       if (!currentSessionId && !autoSessionInFlight) {
         autoSessionInFlight = true;
         createSession().finally(() => {
@@ -3188,7 +3188,7 @@ if (promptInput) {
         });
       }
     } else if (!hasMessages) {
-      greetingBanner.style.display = "block";
+      showEl(greetingBanner);
     }
   });
 }

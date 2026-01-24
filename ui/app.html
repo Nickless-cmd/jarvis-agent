@@ -1,5 +1,11 @@
+<!--
+  Jarvis UI entrypoints:
+  - /app → app.html (main shell for both chat and admin)
+  - /admin.html, /index.html → redirects to /app
+  All user and admin panels are rendered as views in this shell.
+  Admin panels are only visible for admins (frontend-only, see app.js).
+-->
 <!doctype html>
-<!-- Entry point for all Jarvis UI (chat + admin). Served at /app. Admin panels are admin-only sections in this shell. -->
 <html lang="da">
   <head>
     <meta charset="utf-8" />

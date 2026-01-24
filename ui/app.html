@@ -105,6 +105,19 @@
           <div id="sessionList" class="session-list"></div>
           <div class="small" id="sessionStatus"></div>
         </nav>
+        <div class="sidebar-panel admin-only" id="adminNav">
+          <div class="session-group-title">Admin</div>
+          <ul class="nav-list">
+            <li><a href="#admin/dashboard">Dashboard</a></li>
+            <li><a href="#admin/users">Users</a></li>
+            <li><a href="#admin/sessions">Sessions</a></li>
+            <li><a href="#admin/tools">Tools</a></li>
+            <li><a href="#admin/config">Config</a></li>
+            <li><a href="#admin/logs">Logs</a></li>
+            <li><a href="#admin/tickets">Tickets</a></li>
+            <li><a href="#admin/jobs">Jobs</a></li>
+          </ul>
+        </div>
       </div>
       <div class="sidebar-footer">
         <button id="ticketsBtn" class="rail-btn rail-wide" title="Tickets" aria-label="Tickets">
@@ -257,6 +270,7 @@
   <script src="/ui/static/auth.js?v={{BUILD_ID}}"></script>
   <script src="/ui/static/api.js?v={{BUILD_ID}}"></script>
   <script src="/ui/static/marked.min.js?v={{BUILD_ID}}"></script>
-  <script src="/ui/static/app.js?v={{BUILD_ID}}"></script>
+  <script>window.JARVIS_BUILD_ID="{{BUILD_ID}}";</script>
+  <script type="module" src="/ui/static/main.js?v={{BUILD_ID}}"></script>
 </body>
 </html>

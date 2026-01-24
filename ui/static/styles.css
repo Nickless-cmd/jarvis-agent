@@ -31,6 +31,13 @@
   --font-sans: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
 }
 
+/* Ensure utility hidden class exists here as well (used by app.js helpers) */
+.hidden { display: none !important; }
+
+/* Ensure session expiry and logged-out overlays don't affect layout */
+.session-expiry-banner { position: fixed; top: 0; left: 0; right: 0; z-index: 2000; }
+.logged-out { position: fixed; inset: 0; z-index: 3000; display: grid; place-items: center; }
+
 *,
 *::before,
 *::after {

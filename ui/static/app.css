@@ -710,7 +710,7 @@ body.sidebar-collapsed .session-initial {
   gap: 24px;
   width: 100%;
   margin: 0 0 24px 0;
-  padding: 20px 0 120px 0;
+  padding: 20px 0 140px 0; /* extra bottom padding for pinned composer */
   background: transparent;
   border: none;
   border-radius: 0;
@@ -831,7 +831,14 @@ body.sidebar-collapsed .session-initial {
   border-radius: 16px;
   padding: 10px;
 }
-.composer-wrap { margin-top: 12px; }
+.composer-wrap {
+  margin-top: 12px;
+  position: sticky;
+  bottom: 0;
+  background: var(--bg);
+  z-index: 10;
+  box-shadow: 0 -2px 16px rgba(0,0,0,0.08);
+}
 .suggestions {
   max-width: 760px;
   width: 100%;
@@ -1691,9 +1698,13 @@ input[type="file"].hidden::file-selector-button {
   padding: 12px 24px;
   margin-top: var(--panel-gap);
   min-height: var(--bar-height);
+  box-sizing: border-box;
   color: var(--muted);
   font-size: 12px;
   border-top: 1px solid var(--border);
+  background: var(--bg);
+  z-index: 5;
+  box-sizing: border-box;
 }
 .app-footer .footer-links a {
   padding: 0 6px;

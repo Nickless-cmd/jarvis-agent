@@ -295,6 +295,7 @@ let verifyingSession = false;
 let hasUserInteracted = false;
 window.addEventListener("pointerdown", () => { hasUserInteracted = true; }, { once: true });
 window.addEventListener("keydown", () => { hasUserInteracted = true; }, { once: true });
+let authBootstrapped = false;
 
 // Session expiry banner logic
 
@@ -370,18 +371,15 @@ window.closeAllStreams = window.closeAllStreams || function() { if (window.event
 window.startEventsStream = window.startEventsStream || function() { /* no-op until auth confirmed */ };
 
 function onAuthLost(reason) {
-  if (bootstrappingAuth) {
+  if (!authBootstrapped || bootstrappingAuth) {
     console.warn("[auth] onAuthLost suppressed during boot:", reason);
     return;
   }
   if (authLostLatch) return;
   authLostLatch = true;
-  if (typeof stopEventsStream === 'function') stopEventsStream();
-  if (typeof stopAllPolling === 'function') stopAllPolling();
-  if (typeof closeAllStreams === 'function') closeAllStreams();
-  showSessionExpiryBanner();
-  console.warn("[auth] onAuthLost triggered: ", reason);
-  // Optionally: set UI state to logged out, disable inputs, etc.
+  // Re-verify session; only ensureAuthState will decide UI
+  ensureAuthState();
+  console.warn("[auth] onAuthLost triggered re-check: ", reason);
 }
 
 window.addEventListener('apiAuthError', (e) => {
@@ -3671,6 +3669,7 @@ async function ensureAuthState() {
     document.body.classList.remove('ui-ready');
   } finally {
     bootstrappingAuth = false;
+    authBootstrapped = true;
   }
 }
 

@@ -21,6 +21,15 @@ function getToolsSummary() { return document.getElementById('toolsSummary'); }
 function getGlobalSearch() { return document.getElementById('globalSearch'); }
 function getGlobalSearchResults() { return document.getElementById('globalSearchResults'); }
 function getQuotaBar() { return document.getElementById('quotaBar'); }
+function getBrandTop() { return document.getElementById('brandTop'); }
+function getBrandCore() { return document.getElementById('brandCore'); }
+function getBrandShort() { return document.getElementById('brandShort'); }
+function getChat() { return document.getElementById('chat'); }
+function getChatStatus() { return document.getElementById('chatStatus'); }
+function getNoteCreateBtn() { return document.getElementById('noteCreateBtn'); }
+function startEventsStream() {
+  // Stub: implement event stream for notifications if needed
+}
 // --- UI polish: empty state, composer, settings modal skeleton ---
 function updateEmptyState() {
   const chat = document.getElementById('chat');
@@ -142,6 +151,20 @@ function setupAdminNav() {
 
 
 // --- Unified SPA router for all views ---
+// Centralized auth state for UI session logic
+const authState = {
+  isLoggedIn: false,
+  isAdmin: false,
+  adminUnavailable: false, // Set to true if /admin/* returns 401
+  token: null
+};
+
+// Centralized auth state from authStore
+let isAdminUser = false;
+let isLoggedIn = false;
+let username = "";
+let tokenPresent = false;
+
 function handleHashChange() {
   const hash = window.location.hash;
   const main = document.querySelector('.chat-pane .main-column');
@@ -198,6 +221,8 @@ function setupUnifiedUIEvents() {
   // Hide admin menu if not admin
   if (!window.authStore?.isAdmin) {
     document.querySelectorAll('.admin-only').forEach(el => el.style.display = 'none');
+    const toggle = document.getElementById('rightbarToggle');
+    if (toggle) toggle.style.display = 'none';
   }
   handleHashChange();
   // Modal: settings
@@ -220,8 +245,12 @@ document.addEventListener('DOMContentLoaded', setupUnifiedUIEvents);
 window.addEventListener('authStateChanged', () => {
   if (!window.authStore?.isAdmin) {
     document.querySelectorAll('.admin-only').forEach(el => el.style.display = 'none');
+    const toggle = document.getElementById('rightbarToggle');
+    if (toggle) toggle.style.display = 'none';
   } else {
     document.querySelectorAll('.admin-only').forEach(el => el.style.display = '');
+    const toggle = document.getElementById('rightbarToggle');
+    if (toggle) toggle.style.display = '';
   }
   setRightbarVisibility(!!window.authStore?.isAdmin && !authState.adminUnavailable);
   handleHashChange();
@@ -230,12 +259,11 @@ window.addEventListener('authStateChanged', () => {
 // Prevent double execution of app.js (e.g., if loaded twice)
 if (window.__JARVIS_APP_INIT__) {
   console.warn("[jarvis] app.js already initialized, skipping duplicate load.");
-  return;
-}
-window.__JARVIS_APP_INIT__ = true;
+} else {
+  window.__JARVIS_APP_INIT__ = true;
 
 // Defensive: ensure window.authStore exists
-var authStore = window.authStore || {};
+// var authStore = window.authStore || {}; // Removed to avoid redeclaration with const in authStore.js
 
 // Global arrays for polling and streams
 let pollingIntervals = [];
@@ -243,179 +271,8 @@ let openStreams = [];
 let eventClient = null;
 let adminPanelsLocked = false;
 let adminUnavailable = false;
+let authLostLatch = false;
 let adminIntervals = [];
-async function sendMessage(text = null) {
-  if (sendMessage.inFlight) return;
-  const input = getPromptInput();
-  const prompt = text !== null ? text : (input ? input.value.trim() : "");
-  if (!prompt) return;
-  if (input) input.value = "";
-  sendMessage.inFlight = true;
-  setStatus("Tænker…");
-  const sessionId = currentSessionId;
-  const payload = { prompt };
-  const chatStatus = getChatStatus();
-  if (chatStatus) chatStatus.textContent = "";
-  // Streaming mode
-  if (getStreamToggle() && getStreamToggle().checked) {
-    let abortController = new AbortController();
-    try {
-      const res = await apiFetch("/v1/chat/completions", {
-        method: "POST",
-        headers: { "X-Session-Id": sessionId || "" },
-        body: JSON.stringify(payload),
-        signal: abortController.signal,
-      });
-      if (!res || !res.body) throw new Error("No response body");
-      const assistantMsg = renderChatMessage({ role: "assistant", content: "" });
-      let pendingNews = null;
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let currentEvent = "message";
-      let hadDelta = false;
-      const body = assistantMsg.querySelector(".msg-body");
-      let streamingText = "";
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop();
-        for (const line of lines) {
-          if (line.startsWith("event:")) {
-            currentEvent = line.replace("event:", "").trim();
-            continue;
-          }
-          if (!line.startsWith("data:")) continue;
-          const dataLine = line.replace("data:", "").trim();
-          if (dataLine === "[DONE]") {
-            chatStatus.textContent = "";
-            setStatus("Klar");
-            if (body) {
-              body.innerHTML = "";
-              const bodyContent = renderMessageBody(streamingText, { markdown: true });
-              body.appendChild(bodyContent);
-            }
-            if (pendingNews) appendNewsList(assistantMsg, pendingNews);
-            if (currentSessionId) loadSessionMessages(currentSessionId);
-            loadQuotaBar();
-            loadExpiryNotice();
-            sendMessage.inFlight = false;
-            return;
-          }
-          if (currentEvent === "status") {
-            try {
-              const st = JSON.parse(dataLine);
-              const dict = I18N[getUiLang()] || I18N.da;
-              if (st.state === "using_tool") {
-                const tool = st.tool || "";
-                const map = {
-                  news: dict.statusSearching,
-                  weather: dict.statusSearching,
-                  search: dict.statusSearching,
-                  currency: dict.statusSearching,
-                  system: dict.statusSearching,
-                  ping: dict.statusSearching,
-                  process: dict.statusSearching,
-                  image: dict.statusSearching,
-                };
-                setStatus(map[tool] || dict.statusSearching);
-                if (chatStatus) chatStatus.textContent = "";
-              } else if (st.state === "writing") {
-                setStatus(dict.statusWriting);
-                if (chatStatus) chatStatus.textContent = "▊";
-              } else if (st.state === "thinking") {
-                setStatus(dict.statusThinking);
-                if (chatStatus) chatStatus.textContent = "";
-              } else if (st.state === "idle") {
-                setStatus(dict.statusReady);
-                if (chatStatus) chatStatus.textContent = "";
-              }
-            } catch (err) {
-              setStatus("JARVIS arbejder...");
-              if (chatStatus) chatStatus.textContent = "";
-            }
-            continue;
-          }
-          if (currentEvent === "meta") {
-            try {
-              const meta = JSON.parse(dataLine);
-              if (meta.meta?.quota_warning) showQuotaNotice(meta.meta.quota_warning);
-              if (meta.data?.type === "mixed") {
-                if (meta.data.weather && meta.rendered_text) {
-                  addWeatherCard({ location: meta.data.weather.location, scope: meta.data.weather.scope, rendered_text: meta.rendered_text });
-                }
-                if (meta.data.news?.type === "news") {
-                  addNewsCards(meta.data.news);
-                  pendingNews = meta.data.news;
-                }
-              }
-              if (meta.data?.type === "news") {
-                addNewsCards(meta.data);
-                pendingNews = meta.data;
-              }
-              if (meta.data?.type === "weather" && meta.rendered_text) {
-                addWeatherCard({ location: meta.data.location, scope: meta.data.scope, rendered_text: meta.rendered_text });
-              }
-              if (meta.data?.type === "file") addFileCard(meta.data);
-              if (meta.data?.type === "image_preview") addImagePreviewCard(meta.data);
-              if (meta.data?.type === "article") addArticleCard(meta.data);
-            } catch (err) {}
-            continue;
-          }
-          if (dataLine.startsWith("{") && dataLine.includes("\"choices\"")) currentEvent = "message";
-          try {
-            const chunk = JSON.parse(dataLine);
-            const delta = chunk.choices?.[0]?.delta?.content || "";
-            if (delta) {
-              streamingText += delta;
-              body.textContent = streamingText;
-              scrollChatToBottom();
-              hadDelta = true;
-            }
-          } catch (err) {
-            chatStatus.textContent = "Streaming-fejl";
-          }
-        }
-      }
-      if (!hadDelta) setStatus("JARVIS svarer tomt — prøv igen.");
-      sendMessage.inFlight = false;
-    } catch (err) {
-      setStatus("Forbindelse tabt – prøv igen");
-      sendMessage.inFlight = false;
-      // Vis retry UI på sidste besked
-      const chat = getChat();
-      if (chat) {
-        const last = chat.querySelector('.msg-assistant:last-child .msg-body');
-        if (last) {
-          last.innerHTML += '<div class="msg-retry"><button onclick="sendMessage()">Prøv igen</button></div>';
-        }
-      }
-    }
-    return;
-  }
-  // Non-streaming fallback
-  try {
-    const res = await apiFetch("/v1/chat/completions", {
-      method: "POST",
-      headers: { "X-Session-Id": sessionId || "" },
-      body: JSON.stringify(payload),
-    });
-    if (!res) return;
-    const data = await res.json();
-    renderChatMessage({ role: "assistant", content: data.choices?.[0]?.message?.content || "" });
-    setStatus("Klar");
-    if (currentSessionId) loadSessionMessages(currentSessionId);
-    loadQuotaBar();
-    loadExpiryNotice();
-    sendMessage.inFlight = false;
-  } catch (err) {
-    setStatus("Fejl ved svar");
-    sendMessage.inFlight = false;
-  }
-}
-
 
 // Session expiry banner logic
 
@@ -472,14 +329,14 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // Initial check (do not auto-redirect, just show banner if not authenticated)
-if (authStore && !authStore.isAuthenticated) {
+if (window.authStore && !window.authStore.isAuthenticated) {
   onAuthLost('not-authenticated');
 }
 
 // Listen for authStore changes to update UI (do not auto-redirect)
-if (authStore && typeof authStore.onChange === 'function') {
-  authStore.onChange(() => {
-    if (!authStore.isAuthenticated) {
+if (window.authStore && typeof window.authStore.onChange === 'function') {
+  window.authStore.onChange(() => {
+    if (!window.authStore.isAuthenticated) {
       onAuthLost('authStore');
       if (typeof stopEventsStream === 'function') stopEventsStream();
     } else {
@@ -612,24 +469,6 @@ function getSessionSearch() { return gid("sessionSearch"); }
 // (removed duplicate declaration of sessionsCache and currentSessionId)
 let sessionSearchValue = "";
 
-async function loadSessions() {
-  const list = getSessionList();
-  if (!list) return;
-  list.innerHTML = '<div class="small">Loader chats…</div>';
-  try {
-    const res = await apiFetch("/sessions", { method: "GET" });
-    if (!res || !res.ok) {
-      list.innerHTML = '<div class="small">Kunne ikke hente chats</div>';
-      return;
-    }
-    const data = await res.json();
-    sessionsCache = data.sessions || [];
-    renderSessionList();
-  } catch (err) {
-    list.innerHTML = '<div class="small">Fejl ved hentning</div>';
-  }
-}
-
 function renderSessionList() {
   const list = getSessionList();
   if (!list) return;
@@ -659,24 +498,6 @@ function renderSessionList() {
   });
 }
 
-async function createSession() {
-  const name = prompt("Navn på ny chat? (valgfri)") || "";
-  try {
-    const res = await apiFetch("/sessions", { method: "POST", body: JSON.stringify({ name }) });
-    if (!res || !res.ok) {
-      alert("Kunne ikke oprette ny chat");
-      return;
-    }
-    const data = await res.json();
-    currentSessionId = data.session_id;
-    await loadSessions();
-    renderSessionList();
-    loadSessionMessages(currentSessionId);
-  } catch (err) {
-    alert("Fejl ved oprettelse af chat");
-  }
-}
-
 if (getSessionSearch()) {
   getSessionSearch().addEventListener("input", renderSessionList);
 }
@@ -699,6 +520,8 @@ function getOnlinePill() { return gid("onlinePill"); }
 function getModeLabel() { return gid("modeLabel"); }
 function getFilesToggleBtn() { return gid("filesToggleBtn"); }
 function getFilesListWrap() { return gid("filesListWrap"); }
+function getNotesList() { return gid("notesList"); }
+function getNoteContentInput() { return gid("noteContentInput"); }
 function getMicBtn() { return gid("micBtn"); }
 function getLangSelect() { return gid("langSelect"); }
 function getThemeSelect() { return gid("themeSelect"); }
@@ -730,11 +553,6 @@ const LAST_SESSION_COOKIE = "jarvis_last_session";
 let currentSessionId = null;
 let sessionsCache = [];
 let lastSent = { text: "", ts: 0 };
-// Centralized auth state from authStore
-let isAdminUser = false;
-let isLoggedIn = false;
-let username = "";
-let tokenPresent = false;
 
 function updateAuthStateFromStore() {
   if (!window.authStore) return;
@@ -745,13 +563,6 @@ function updateAuthStateFromStore() {
 }
 
 // Listen for auth state changes
-// Centralized auth state for UI session logic
-const authState = {
-  isLoggedIn: false,
-  isAdmin: false,
-  adminUnavailable: false, // Set to true if /admin/* returns 401
-  token: null
-};
 
 function showLoggedOutScreen() {
   const root = document.getElementById("appRoot");
@@ -1158,6 +969,40 @@ async function loadRightTickets() {
     return `<li><a class="ticket-link" href="/admin#tickets">#${t.id} ${t.title}</a><span class="ticket-status ${statusCls}">${t.status}</span><span class="ticket-priority ${prioCls}">${priority || "ukendt"}</span></li>`;
   }).join("");
   rightTicketsBody.innerHTML = `<ul class="ticket-list">${items}</ul>`;
+}
+
+async function loadRightPanels() {
+  try {
+    const res = await fetch('/settings/public');
+    if (!res.ok) return;
+    const data = await res.json();
+    window.PUBLIC_SETTINGS = data;
+    window.__updatesLog = (data.updates_log || data.updates_auto || []).join('\n');
+    window.__commandsList = data.commands || [];
+    // Handle banner
+    if (topBanner) {
+      if (data.banner && data.banner.trim()) {
+        bannerTrack.textContent = data.banner.trim();
+        topBanner.classList.remove('hidden');
+      } else {
+        topBanner.classList.add('hidden');
+      }
+    }
+  } catch (err) {
+    // ignore
+  }
+}
+
+async function loadRightNotes() {
+  const notesList = getNotesList();
+  if (!notesList) return;
+  const data = await safeJson("/notes", { method: "GET" }, {});
+  if (!data || !data.notes) {
+    notesList.innerHTML = `<div class="muted">${getUiLang() === "en" ? "No notes." : "Ingen noter."}</div>`;
+    return;
+  }
+  const items = data.notes.map((n) => `<li>${n.title || n.content?.substring(0, 50) || "Untitled"}</li>`).join("");
+  notesList.innerHTML = `<ul class="notes-list">${items}</ul>`;
 }
 
 async function loadRightLogs() {
@@ -2461,6 +2306,7 @@ async function loadSettings() {
       const res = await fetch('/settings/public');
       if (!res.ok) return;
       const data = await res.json();
+      window.PUBLIC_SETTINGS = data;
       window.__updatesLog = (data.updates_log || data.updates_auto || []).join('\n');
       window.__commandsList = data.commands || [];
       // Handle banner
@@ -2516,16 +2362,6 @@ async function loadQuotaBar() {
   const pct = total > 0 ? Math.min(100, Math.max(0, (used / total) * 100)) : 0;
   quotaText.textContent = `${used} / ${total} MB`;
   quotaFill.style.width = `${pct}%`;
-}
-
-async function loadStatus() {
-  if (!jarvisDot) return;
-  const data = await safeJson("/status", null, { credentials: "include" });
-  if (!data) {
-    setOnlineStatus(false);
-    return;
-  }
-  setOnlineStatus(data.online !== false);
 }
 
 function setOnlineStatus(isOnline) {
@@ -3634,7 +3470,7 @@ function registerStream(stream) {
 // Initialize UI in a safe, deterministic order. Any single failure will be logged
 // but will not abort the rest of the startup.
 async function initUI() {
-  await applyPublicSettings();
+  // await applyPublicSettings(); // Stub: implement if needed
   await safe(loadBrand, "loadBrand");
   await safe(loadSettings, "loadSettings");
   initNotificationsUI();
@@ -3646,7 +3482,7 @@ async function initUI() {
   noteCreateBtn = getNoteCreateBtn();
   noteCreateWrap = gid("noteCreateWrap");
   filesListWrap = gid("filesListWrap");
-  filesList = getFilesList();
+  filesList = getFilesListWrap();
   notesList = getNotesList();
   eventsList = getEventsList();
   sessionPromptSave = getSessionPromptSave();
@@ -3748,3 +3584,4 @@ document.addEventListener("DOMContentLoaded", async () => {
 window.addEventListener("beforeunload", () => {
   if (typeof stopEventsStream === 'function') stopEventsStream();
 });
+}

@@ -27,6 +27,10 @@ function getBrandShort() { return document.getElementById('brandShort'); }
 function getChat() { return document.getElementById('chat'); }
 function getChatStatus() { return document.getElementById('chatStatus'); }
 function getNoteCreateBtn() { return document.getElementById('noteCreateBtn'); }
+function toEl(idOrEl) { return typeof idOrEl === 'string' ? document.getElementById(idOrEl) : idOrEl; }
+function showEl(idOrEl) { const el = toEl(idOrEl); if (!el) return; el.classList.remove('hidden'); }
+function hideEl(idOrEl) { const el = toEl(idOrEl); if (!el) return; el.classList.add('hidden'); }
+function isHidden(idOrEl) { const el = toEl(idOrEl); if (!el) return true; return el.classList.contains('hidden'); }
 function startEventsStream() {
   // Stub: implement event stream for notifications if needed
 }
@@ -56,7 +60,14 @@ document.addEventListener('DOMContentLoaded', () => {
   const modal = document.getElementById('settingsModal');
   const closeBtn = document.getElementById('closeSettings');
   if (closeBtn && modal) {
-    closeBtn.onclick = () => { modal.style.display = 'none'; };
+    closeBtn.onclick = () => { hideEl(modal); };
+  }
+  if (modal) {
+    hideEl(modal);
+    const hash = window.location.hash || "";
+    if (hash.startsWith('#settings/')) {
+      showEl(modal);
+    }
   }
   // Optionally, add a button to open settings
   // document.getElementById('openSettingsBtn').onclick = () => { modal.style.display = ''; };
@@ -169,6 +180,12 @@ function handleHashChange() {
   const hash = window.location.hash;
   const main = document.querySelector('.chat-pane .main-column');
   if (!main) return;
+  const settingsModal = document.getElementById('settingsModal');
+  if (hash.startsWith('#settings/')) {
+    showEl(settingsModal);
+  } else {
+    hideEl(settingsModal);
+  }
   // Helper: 403 panel
   function render403() {
     main.innerHTML = '<div class="forbidden-panel"><h2>403 – Ingen adgang</h2><p>Du har ikke adgang til denne side.</p></div>';
@@ -229,9 +246,9 @@ function setupUnifiedUIEvents() {
   const modal = document.getElementById('settingsModal');
   const closeBtn = document.getElementById('closeSettings');
   if (closeBtn && modal) {
-    closeBtn.onclick = () => { modal.style.display = 'none'; };
+    closeBtn.onclick = () => { hideEl(modal); };
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') modal.style.display = 'none';
+      if (e.key === 'Escape') { hideEl(modal); }
     });
   }
   // Settings modal open (if button exists)
@@ -613,8 +630,7 @@ function showAdminPanels() {
 function openSettingsModal() {
   const modal = document.getElementById('settingsModal');
   if (modal) {
-    modal.classList.remove('hidden');
-    modal.style.display = '';
+    showEl(modal);
   }
 }
 
@@ -2932,9 +2948,6 @@ document.getElementById("logoutBtn").addEventListener("click", () => {
   stopEventsStream();
   window.location.href = "/login";
 });
-document.getElementById("accountBtn").addEventListener("click", () => {
-  window.location.href = "/account";
-});
 const docsBtn = document.getElementById("docsBtn");
 if (docsBtn) {
   docsBtn.addEventListener("click", () => {
@@ -3217,6 +3230,10 @@ const notificationsBtn = getNotificationsBtn();
 if (notificationsBtn) {
   notificationsBtn.addEventListener("click", showNotificationsDropdown);
 }
+const notificationsDropdown = getNotificationsDropdown();
+if (notificationsDropdown) {
+  hideEl(notificationsDropdown);
+}
 const notificationsMarkAllRead = getNotificationsMarkAllRead();
 if (notificationsMarkAllRead) {
   notificationsMarkAllRead.addEventListener("click", markAllNotificationsRead);
@@ -3228,7 +3245,7 @@ document.addEventListener("click", (e) => {
   const btn = getNotificationsBtn();
   if (!dropdown || !btn) return;
   if (!dropdown.contains(e.target) && !btn.contains(e.target)) {
-    dropdown.hidden = true;
+    hideEl(dropdown);
   }
 });
 
@@ -3243,7 +3260,7 @@ if (toolsBtn) {
 document.addEventListener("click", (e) => {
   if (!notificationsDropdown || !notificationsBtn) return;
   if (e.target === notificationsBtn || notificationsDropdown.contains(e.target)) return;
-  notificationsDropdown.classList.add("hidden");
+  hideEl(notificationsDropdown);
 });
 
 document.addEventListener("click", (e) => {
@@ -3255,8 +3272,8 @@ document.addEventListener("click", (e) => {
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     const notificationsDropdown = getNotificationsDropdown();
-    if (notificationsDropdown && !notificationsDropdown.hidden) {
-      notificationsDropdown.hidden = true;
+    if (notificationsDropdown && !isHidden(notificationsDropdown)) {
+      hideEl(notificationsDropdown);
     }
     const toolsDropdown = getToolsDropdown();
     if (toolsDropdown && !toolsDropdown.classList.contains("hidden")) {
@@ -3436,18 +3453,18 @@ function showNotificationsDropdown() {
   const dropdown = getNotificationsDropdown();
   if (!dropdown) return;
 
-  const isHidden = dropdown.hidden;
-  dropdown.hidden = !isHidden;
-
-  if (!dropdown.hidden) {
+  if (isHidden(dropdown)) {
+    showEl(dropdown);
     loadNotifications();
     clampDropdown();
+  } else {
+    hideEl(dropdown);
   }
 }
 
 function clampDropdown() {
   const dropdown = getNotificationsDropdown();
-  if (!dropdown || dropdown.hidden) return;
+  if (!dropdown || isHidden(dropdown)) return;
   const r = dropdown.getBoundingClientRect();
   if (r.right > innerWidth - 8) {
     dropdown.style.transform = `translateX(${-(r.right - (innerWidth - 8))}px)`;
@@ -3541,6 +3558,13 @@ async function initUI() {
 // --- Robust auth/session state: always check /account/profile on load ---
 async function ensureAuthState() {
   try {
+    const token = getToken();
+    if (!token) {
+      if (window.authStore && typeof window.authStore.reset === 'function') window.authStore.reset();
+      showLoggedOutScreen();
+      document.body.classList.remove('ui-ready');
+      return;
+    }
     const res = await apiFetch("/account/profile", { method: "GET" });
     if (res && res.ok) {
       const profile = await res.json();

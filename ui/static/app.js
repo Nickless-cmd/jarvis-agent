@@ -64,10 +64,6 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   if (modal) {
     hideEl(modal);
-    const hash = window.location.hash || "";
-    if (hash.startsWith('#settings/')) {
-      showEl(modal);
-    }
   }
   // Optionally, add a button to open settings
   // document.getElementById('openSettingsBtn').onclick = () => { modal.style.display = ''; };
@@ -724,7 +720,7 @@ const NOTIFY_ENABLED = false; // temporary: disable notifications without removi
 function initNotificationsUI() {
   const wrap = document.getElementById("notifWrap");
   const dropdown = getNotificationsDropdown();
-  if (dropdown) dropdown.hidden = true;
+  if (dropdown) hideEl(dropdown);
   const enabled = NOTIFY_ENABLED !== false && PUBLIC_SETTINGS.notifications_enabled !== false;
   if (wrap) wrap.classList.toggle("hidden", !enabled);
 }

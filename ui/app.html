@@ -161,11 +161,25 @@
         <!-- Content panels (chat, admin, docs, tickets, account, 403) renderes her af routeren i app.js -->
       </div>
       <!-- Settings modal skeleton -->
-      <div id="settingsModal" class="modal" style="display:none;">
-        <div class="modal-content">
-          <span class="close" id="closeSettings">&times;</span>
-          <h2>Indstillinger</h2>
-          <div>coming soon</div>
+      <div id="settingsModal" class="modal hidden" aria-modal="true" role="dialog">
+        <div class="modal__dialog">
+          <button id="closeSettings" class="modal__close" aria-label="Luk indstillinger">✕</button>
+          <nav class="modal__nav" aria-label="Indstillinger sektioner">
+            <div class="session-group-title">Indstillinger</div>
+            <ul class="nav-list">
+              <li><a href="#settings/general">Generelt</a></li>
+              <li><a href="#settings/notifications">Notifikationer</a></li>
+              <li><a href="#settings/persona">Personlig tilpasning</a></li>
+              <li><a href="#settings/apps">Apps</a></li>
+              <li><a href="#settings/schedule">Tidsplaner</a></li>
+              <li><a href="#settings/data">Datasikkerhed</a></li>
+              <li><a href="#settings/account">Konto</a></li>
+            </ul>
+          </nav>
+          <div class="modal__panel" id="settingsPanel">
+            <h2>Indstillinger</h2>
+            <p>Vælg en sektion i venstre menu.</p>
+          </div>
         </div>
       </div>
       <div id="sessionPromptRow" class="session-prompt-row hidden">

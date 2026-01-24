@@ -308,6 +308,11 @@ function hideSessionExpiryBanner() {
     banner.classList.add('hidden');
   }
 }
+function hideAuthBanners() {
+  hideSessionExpiryBanner();
+  const loggedOut = document.getElementById('loggedOutScreen');
+  if (loggedOut) loggedOut.classList.add('hidden');
+}
 
 
 function stopEventsStream() {
@@ -3245,10 +3250,13 @@ if (notificationsMarkAllRead) {
 
 // Tools dropdown/button
 const toolsBtn = getToolsBtn();
-const toolsDropdown = getToolsDropdown();
-if (toolsDropdown) {
-  hideEl(toolsDropdown);
+let toolsDropdown = null;
+function ensureToolsDropdown() {
+  toolsDropdown = toolsDropdown || getToolsDropdown();
+  if (toolsDropdown) hideEl(toolsDropdown);
+  return toolsDropdown;
 }
+ensureToolsDropdown();
 
 // Click outside to close notifications dropdown
 document.addEventListener("click", (e) => {
@@ -3263,8 +3271,9 @@ document.addEventListener("click", (e) => {
 if (toolsBtn) {
   toolsBtn.addEventListener("click", (e) => {
     e.stopPropagation();
-    if (!toolsDropdown) return;
-    toolsDropdown.classList.toggle("hidden");
+    const dropdown = ensureToolsDropdown();
+    if (!dropdown) return;
+    dropdown.classList.toggle("hidden");
   });
 }
 
@@ -3275,9 +3284,10 @@ document.addEventListener("click", (e) => {
 });
 
 document.addEventListener("click", (e) => {
-  if (!toolsDropdown || !toolsBtn) return;
-  if (e.target === toolsBtn || toolsDropdown.contains(e.target)) return;
-  toolsDropdown.classList.add("hidden");
+  const dropdown = ensureToolsDropdown();
+  if (!dropdown || !toolsBtn) return;
+  if (e.target === toolsBtn || dropdown.contains(e.target)) return;
+  dropdown.classList.add("hidden");
 });
 
 document.addEventListener("keydown", (e) => {
@@ -3570,13 +3580,6 @@ async function initUI() {
 async function ensureAuthState() {
   bootstrappingAuth = true;
   try {
-    const token = getToken();
-    if (!token) {
-      if (window.authStore && typeof window.authStore.reset === 'function') window.authStore.reset();
-      showLoggedOutScreen();
-      document.body.classList.remove('ui-ready');
-      return;
-    }
     const res = await apiFetch("/account/profile", { method: "GET" });
     if (res && res.ok) {
       const profile = await res.json();
@@ -3584,7 +3587,7 @@ async function ensureAuthState() {
         window.authStore.updateFromProfile(profile);
       }
       authLostLatch = false;
-      hideSessionExpiryBanner();
+      hideAuthBanners();
       // Show/hide admin UI
       document.querySelectorAll('.admin-only').forEach(el => {
         el.classList.toggle('hidden', !profile.is_admin);

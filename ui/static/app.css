@@ -718,7 +718,106 @@ body.sidebar-collapsed .session-initial {
 }
 .chat-feed::-webkit-scrollbar { display: none; }
 .status-row {
-  margin-top: 16px;
+  margin-top: 0;
+  margin-bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: none;
+  border: none;
+  box-shadow: none;
+  padding: 0 0 2px 0;
+  position: relative;
+  z-index: 2;
+}
+.tool-chips-row {
+  justify-content: flex-start;
+  gap: 10px;
+  margin-bottom: 0;
+  margin-top: 0;
+  background: none;
+  border: none;
+  box-shadow: none;
+  padding: 0 0 2px 0;
+}
+.chip-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  background: #0b1220;
+  color: var(--text);
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: border 0.15s, background 0.15s, color 0.15s;
+  min-height: 28px;
+  min-width: 0;
+  user-select: none;
+  outline: none;
+}
+.chip-toggle:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent);
+}
+.chip-toggle[aria-pressed="true"], .chip-toggle.active {
+  background: #132a13;
+  border-color: #22c55e;
+  color: #bbf7d0;
+}
+.chip-toggle .tool-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 4px;
+}
+.chip-toggle .tool-dot.on {
+  background: #22c55e;
+}
+.chip-toggle .tool-dot.off {
+  background: #ef4444;
+}
+.status-chip {
+  pointer-events: none;
+  opacity: 0.7;
+  background: #222b3a;
+  color: #a3e635;
+  border: 1px solid #334155;
+}
+.popover {
+  position: absolute;
+  left: 0;
+  bottom: 54px;
+  background: #181f2a;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.25);
+  padding: 16px 18px 12px 18px;
+  z-index: 100;
+  min-width: 260px;
+  max-width: 340px;
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.popover textarea {
+  width: 100%;
+  min-height: 44px;
+  max-height: 120px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  padding: 8px 10px;
+  font-size: 13px;
+  resize: none;
+}
+.popover-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
 }
 .composer {
   max-width: 100%;

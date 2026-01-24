@@ -172,17 +172,30 @@
           <div id="chat" class="chat-feed-inner"></div>
           <div id="greetingBanner" class="greeting-banner"></div>
         </section>
-        <section class="status-row" aria-label="Status for samtale">
-          <div id="streamChip" class="chip-toggle">
+        <!-- Tool-chips row: Streaming, Personality, Status -->
+        <section class="status-row tool-chips-row" aria-label="Værktøjschips for samtale">
+          <div class="chip-toggle" id="streamChip" tabindex="0" role="button" aria-pressed="false">
             <span id="streamDot" class="tool-dot"></span>
             <span>Streaming</span>
           </div>
-          <div id="personaChip" class="chip-toggle">
+          <div class="chip-toggle" id="personaChip" tabindex="0" role="button">
             <span>Personlighed</span>
           </div>
-          <input type="checkbox" id="streamToggle" checked class="hidden" />
-          <div id="chatStatusInline" class="status-line">Jarvis – Klar.</div>
+          <div class="chip-toggle status-chip" id="statusChip" tabindex="-1">
+            <span id="statusChipText">Jarvis klar</span>
+          </div>
         </section>
+        <input type="checkbox" id="streamToggle" checked class="hidden" />
+        <!-- Personality popover (hidden by default) -->
+        <div id="personaPopover" class="popover hidden" role="dialog" aria-modal="true">
+          <label for="personaInput">Personlighed/toning</label>
+          <textarea id="personaInput" rows="2" placeholder="Skriv personlighed eller tone..."></textarea>
+          <div class="popover-actions">
+            <button id="personaSaveBtn" class="secondary">Gem</button>
+            <button id="personaCancelBtn" class="secondary">Annullér</button>
+          </div>
+        </div>
+        <div id="chatStatusInline" class="status-line">Jarvis  Klar.</div>
         <section class="composer-wrap" aria-label="Chat input">
           <div class="composer-input">
             <div class="tools-btn-wrap">

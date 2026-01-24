@@ -471,37 +471,116 @@ if (authStore && typeof authStore.onChange === 'function') {
   });
 }
 
+
 // Safe DOM access helpers
-function qs(selector, context = document) {
-  return context.querySelector(selector);
-}
+function qs(selector, context = document) { return context.querySelector(selector); }
+function qsa(selector, context = document) { return Array.from(context.querySelectorAll(selector)); }
+function gid(id) { return document.getElementById(id); }
+function safeSetText(el, text) { if (el) el.textContent = text; }
+function toggleHidden(el, hidden = null) { if (!el) return; if (hidden === null) { el.classList.toggle('hidden'); } else { el.classList.toggle('hidden', hidden); } }
+function isNearBottom(container) { if (!container) return true; const threshold = 100; return container.scrollHeight - container.scrollTop - container.clientHeight < threshold; }
 
-function qsa(selector, context = document) {
-  return Array.from(context.querySelectorAll(selector));
-}
+// --- Tool-chips and composer polish ---
+document.addEventListener('DOMContentLoaded', () => {
+  // Streaming chip toggle
+  const streamChip = gid('streamChip');
+  const streamToggle = gid('streamToggle');
+  const streamDot = gid('streamDot');
+  function updateStreamChip() {
+    if (!streamToggle || !streamChip || !streamDot) return;
+    const on = !!streamToggle.checked;
+    streamChip.setAttribute('aria-pressed', on ? 'true' : 'false');
+    streamChip.classList.toggle('active', on);
+    streamDot.classList.toggle('on', on);
+    streamDot.classList.toggle('off', !on);
+  }
+  if (streamChip && streamToggle) {
+    streamChip.addEventListener('click', () => {
+      streamToggle.checked = !streamToggle.checked;
+      updateStreamChip();
+    });
+    updateStreamChip();
+  }
 
-function gid(id) {
-  return document.getElementById(id);
-}
+  // Personality chip popover
+  const personaChip = gid('personaChip');
+  const personaPopover = gid('personaPopover');
+  const personaInput = gid('personaInput');
+  const personaSaveBtn = gid('personaSaveBtn');
+  const personaCancelBtn = gid('personaCancelBtn');
+  // LocalStorage key
+  const PERSONA_KEY = 'jarvisPersona';
+  function showPersonaPopover() {
+    if (!personaPopover) return;
+    personaPopover.classList.remove('hidden');
+    personaInput.value = localStorage.getItem(PERSONA_KEY) || '';
+    personaInput.focus();
+  }
+  function hidePersonaPopover() {
+    if (!personaPopover) return;
+    personaPopover.classList.add('hidden');
+  }
+  if (personaChip && personaPopover) {
+    personaChip.addEventListener('click', showPersonaPopover);
+    personaSaveBtn?.addEventListener('click', () => {
+      localStorage.setItem(PERSONA_KEY, personaInput.value.trim());
+      hidePersonaPopover();
+    });
+    personaCancelBtn?.addEventListener('click', hidePersonaPopover);
+    personaInput?.addEventListener('keydown', (e) => { if (e.key === 'Escape') hidePersonaPopover(); });
+    document.addEventListener('mousedown', (e) => {
+      if (personaPopover && !personaPopover.contains(e.target) && e.target !== personaChip) hidePersonaPopover();
+    });
+  }
 
-function safeSetText(el, text) {
-  if (el) el.textContent = text;
-}
+  // Status chip (informational)
+  const statusChip = gid('statusChip');
+  const statusChipText = gid('statusChipText');
+  function updateStatusChip(text) {
+    if (statusChipText) statusChipText.textContent = text || 'Jarvis klar';
+  }
+  // Optionally update on status changes
+  window.setStatus = (function(orig) {
+    return function(text) {
+      orig && orig(text);
+      updateStatusChip(text);
+    };
+  })(window.setStatus || function(){});
 
-function toggleHidden(el, hidden = null) {
-  if (!el) return;
-  if (hidden === null) {
-    el.classList.toggle('hidden');
-  } else {
-    el.classList.toggle('hidden', hidden);
+  // Composer autosize
+  const prompt = gid('prompt');
+  if (prompt) {
+    prompt.addEventListener('input', () => {
+      prompt.style.height = 'auto';
+      prompt.style.height = Math.min(prompt.scrollHeight, 160) + 'px';
+    });
+    // Initial autosize
+    prompt.style.height = 'auto';
+    prompt.style.height = Math.min(prompt.scrollHeight, 160) + 'px';
+  }
+});
+
+// --- Admin 401 gating ---
+window.adminAvailable = true;
+async function probeAdminEndpoints() {
+  try {
+    const res = await fetch('/admin/tickets?limit=1', { credentials: 'same-origin' });
+    if (res.status === 401 || res.status === 403) {
+      window.adminAvailable = false;
+      document.querySelectorAll('.admin-only, #rightTicketsPanel, #statusPanelCard').forEach(el => el.style.display = 'none');
+      if (window.adminPollingIntervals) window.adminPollingIntervals.forEach(clearInterval);
+      window.adminPollingIntervals = [];
+      return;
+    }
+    window.adminAvailable = true;
+  } catch (e) {
+    window.adminAvailable = false;
+    document.querySelectorAll('.admin-only, #rightTicketsPanel, #statusPanelCard').forEach(el => el.style.display = 'none');
+    if (window.adminPollingIntervals) window.adminPollingIntervals.forEach(clearInterval);
+    window.adminPollingIntervals = [];
   }
 }
-
-function isNearBottom(container) {
-  if (!container) return true;
-  const threshold = 100; // pixels from bottom
-  return container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
-}
+document.addEventListener('DOMContentLoaded', probeAdminEndpoints);
 
 function scrollChatToBottom() {
   const feed = getChatFeed();

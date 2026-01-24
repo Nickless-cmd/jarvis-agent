@@ -50,21 +50,20 @@ async function apiFetch(path, options = {}) {
   try {
     const res = await fetch(path, fetchOptions);
     if (res.status === 401 || res.status === 403) {
-      // --- 401/403 handling ---
+      const verifier = typeof window.verifySessionAndMaybeLogout === 'function' ? window.verifySessionAndMaybeLogout : null;
+      const result = verifier ? await verifier(path, res.status) : { authenticated: false };
+      const stillAuthed = result && result.authenticated;
       if (isAdminEndpoint(path)) {
-        // Never trigger logout for admin endpoints; just return adminDenied
-        // UI will hide admin panels and stop polling, but session remains active
-        return { ok: false, status: res.status, adminDenied: true };
+        // Admin endpoints may fail without killing session
+        if (stillAuthed) {
+          return { ok: false, status: res.status, adminDenied: true };
+        }
+        return { ok: false, status: res.status };
       }
-      if (path === "/auth/me") {
-        // Only /auth/me 401 triggers full logout/session expiry
-        console.warn("[auth] apiFetch: /auth/me returned ", res.status, "- triggering logout");
-        if (typeof window.onAuthLost === 'function') window.onAuthLost('401');
+      // Non-admin endpoints: only trigger logout if verifier says not authenticated
+      if (!stillAuthed) {
         window.dispatchEvent(new CustomEvent('apiAuthError', { detail: { path, status: res.status } }));
-        return null;
       }
-      // For other non-admin endpoints, show banner but do not reload or clear cookies
-      window.dispatchEvent(new CustomEvent('apiAuthError', { detail: { path, status: res.status } }));
       return { ok: false, status: res.status };
     }
     return res;

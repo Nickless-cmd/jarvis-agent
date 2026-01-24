@@ -291,6 +291,7 @@ let adminUnavailable = false;
 let authLostLatch = false;
 let adminIntervals = [];
 let bootstrappingAuth = false;
+let verifyingSession = false;
 
 // Session expiry banner logic
 
@@ -317,6 +318,38 @@ function hideAuthBanners() {
   hideSessionExpiryBanner();
   const loggedOut = document.getElementById('loggedOutScreen');
   if (loggedOut) loggedOut.classList.add('hidden');
+}
+
+async function verifySessionAndMaybeLogout(reasonUrl, statusCode) {
+  if (verifyingSession) return { authenticated: !authLostLatch };
+  verifyingSession = true;
+  try {
+    const res = await fetch("/account/profile", { method: "GET", headers: authHeaders(), credentials: "same-origin" });
+    if (res.ok) {
+      const profile = await res.json().catch(() => ({}));
+      if (window.authStore && typeof window.authStore.updateFromProfile === 'function') {
+        window.authStore.updateFromProfile(profile);
+      }
+      authLostLatch = false;
+      hideAuthOverlays();
+      showAppShell();
+      document.body.classList.add('ui-ready');
+      return { authenticated: true, profile };
+    }
+    clearToken();
+    if (window.authStore && typeof window.authStore.reset === 'function') window.authStore.reset();
+    showLoggedOutScreen();
+    showSessionExpiryBanner();
+    document.body.classList.remove('ui-ready');
+    return { authenticated: false };
+  } catch (err) {
+    return { authenticated: false };
+  } finally {
+    verifyingSession = false;
+  }
+}
+if (typeof window !== "undefined") {
+  window.verifySessionAndMaybeLogout = verifySessionAndMaybeLogout;
 }
 
 

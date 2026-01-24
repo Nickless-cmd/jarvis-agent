@@ -80,12 +80,23 @@
     ensureValidSession();
 
     let captchaToken = null;
+    let captchaOptional = (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
     async function loadCaptcha() {
-      const res = await fetch("/auth/captcha");
-      if (!res.ok) return;
-      const data = await res.json();
-      captchaToken = data.token;
-      document.getElementById("captchaQuestion").value = data.question;
+      try {
+        const res = await fetch("/auth/captcha");
+        if (!res.ok) throw new Error("captcha not ok");
+        const data = await res.json();
+        captchaToken = data.token;
+        document.getElementById("captchaQuestion").value = data.question;
+        captchaOptional = false;
+      } catch (err) {
+        console.warn("loadCaptcha: captcha unavailable, login will allow bypass", err);
+        captchaOptional = true;
+        const question = document.getElementById("captchaQuestion");
+        const answer = document.getElementById("captchaAnswer");
+        if (question) question.value = "Captcha ikke tilgængelig";
+        if (answer) answer.disabled = true;
+      }
     }
 
     async function login() {
@@ -95,7 +106,12 @@
       const res = await fetch("/auth/login", {
         method: "POST",
         headers: authHeaders(),
-        body: JSON.stringify({ username, password, captcha_token: captchaToken, captcha_answer: captchaAnswer })
+        body: JSON.stringify({
+          username,
+          password,
+          captcha_token: captchaOptional ? null : captchaToken,
+          captcha_answer: captchaOptional ? null : captchaAnswer
+        })
       });
       const data = await res.json();
       if (res.ok) {

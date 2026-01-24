@@ -1,5 +1,6 @@
 const TOKEN_KEY = "jarvisUserToken";
 const TOKEN_SESSION_KEY = "jarvisUserTokenSession";
+const TOKEN_SESSION_LEGACY = "jarvis_token_session"; // fallback name mentioned in logs
 const API_KEY = "devkey";
 const LAST_PATH_KEY = "jarvisLastPath";
 
@@ -25,25 +26,27 @@ function getToken() {
   // 1) Prefer cookie
   let token = getCookie("jarvis_token");
   if (token) {
-    console.debug("[auth] getToken: jarvis_token cookie present");
+    // Mirror to session storage for consistency
+    sessionStorage.setItem(TOKEN_SESSION_KEY, token);
     return token;
   }
-  console.debug("[auth] getToken: jarvis_token cookie missing");
 
-  // 2) Fallback to localStorage (persistent)
+  // 2) Fallback to persistent storage
   token = localStorage.getItem(TOKEN_KEY) || "";
   if (token) {
-    console.debug("[auth] getToken: found token in localStorage");
+    console.info("[auth] repairing jarvis_token from localStorage");
     setCookie("jarvis_token", token, 365);
+    sessionStorage.setItem(TOKEN_SESSION_KEY, token);
     return token;
   }
 
-  // 3) Fallback to sessionStorage (session)
-  token = sessionStorage.getItem(TOKEN_SESSION_KEY) || "";
+  // 3) Fallback to session storage (current or legacy key)
+  token = sessionStorage.getItem(TOKEN_SESSION_KEY) || sessionStorage.getItem(TOKEN_SESSION_LEGACY) || "";
   if (token) {
-    console.debug("[auth] getToken: found token in sessionStorage");
+    console.info("[auth] repairing jarvis_token from sessionStorage");
     // 1 day is enough for a browser session cookie-equivalent
     setCookie("jarvis_token", token, 1);
+    sessionStorage.setItem(TOKEN_SESSION_KEY, token);
     return token;
   }
 
@@ -56,6 +59,7 @@ function setToken(token, remember = true) {
   if (remember) {
     localStorage.setItem(TOKEN_KEY, token);
     sessionStorage.removeItem(TOKEN_SESSION_KEY);
+    sessionStorage.removeItem(TOKEN_SESSION_LEGACY);
   } else {
     sessionStorage.setItem(TOKEN_SESSION_KEY, token);
     localStorage.removeItem(TOKEN_KEY);
@@ -74,6 +78,7 @@ function clearToken() {
   deleteCookie("jarvis_token");
   localStorage.removeItem(TOKEN_KEY);
   sessionStorage.removeItem(TOKEN_SESSION_KEY);
+  sessionStorage.removeItem(TOKEN_SESSION_LEGACY);
   console.warn("[auth] clearToken: jarvis_token cleared");
   if (window.authStore) window.authStore.reset();
 }

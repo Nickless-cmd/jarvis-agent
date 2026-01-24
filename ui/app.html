@@ -81,30 +81,43 @@
           <button id="uploadSidebarBtn" class="rail-btn" title="Upload" aria-label="Upload">⤴</button>
         </div>
       </div>
-        <nav class="sidebar-nav">
-          <div class="nav-section">
-            <div class="nav-title">Sessions</div>
-            <div id="sessionList"></div>
-            <button id="createSessionBtn">+ Ny session</button>
-          </div>
-          <div class="nav-section admin-only" style="display:none">
-            <div class="nav-title">Admin</div>
-            <ul class="nav-list">
-              <li><a href="#admin/dashboard">Dashboard</a></li>
-              <li><a href="#admin/users">Users</a></li>
-              <li><a href="#admin/sessions">Sessions</a></li>
-              <li><a href="#admin/logs">Logs</a></li>
-              <li><a href="#admin/tickets">Tickets</a></li>
-              <li><a href="#admin/tools">Tools</a></li>
-              <li><a href="#admin/config">Config</a></li>
-            </ul>
-          </div>
+      <div class="sidebar-body">
+        <nav class="sidebar-nav" aria-label="Primær navigation">
+          <div class="session-group-title">Navigation</div>
+          <ul class="nav-list">
+            <li><a class="nav-pill" href="#/chat">Ny chat</a></li>
+            <li><a class="nav-pill" href="#/search">Søg i chats</a></li>
+            <li><a class="nav-pill" href="#/images">Billeder</a></li>
+            <li><a class="nav-pill" href="#/apps">Apps</a></li>
+            <li><a class="nav-pill" href="#/codex">Codex</a></li>
+            <li><a class="nav-pill" href="#/gpts">GPT'er</a></li>
+            <li><a class="nav-pill" href="#/projects">Projekter</a></li>
+          </ul>
         </nav>
-        <button id="quotaRequestBtn" class="secondary quota-btn">Anmod om mere plads</button>
-        <nav class="session-scroll" aria-label="Tidligere chats">
-          <div id="sessionList" class="session-list"></div>
-          <div class="small" id="sessionStatus"></div>
-        </nav>
+        <div class="sidebar-panel">
+          <div class="session-group-title">Dine chats</div>
+          <input id="sessionSearch" placeholder="Søg chats..." />
+          <button id="newChatInline" class="secondary">Start ny chat</button>
+          <div id="quotaBar" class="quota-bar">
+            <div class="quota-label">
+              <span>Kvota</span>
+              <span id="quotaText">0/0 MB</span>
+            </div>
+            <div class="quota-track">
+              <div id="quotaFill" class="quota-fill"></div>
+            </div>
+          </div>
+          <div id="expiryNotice" class="small"></div>
+          <div class="sidebar-panel" id="notesPanel">
+            <div class="session-group-title">Noter</div>
+            <div id="notesList" class="mini-list"></div>
+          </div>
+          <button id="quotaRequestBtn" class="secondary quota-btn">Anmod om mere plads</button>
+          <nav class="session-scroll" aria-label="Tidligere chats">
+            <div id="sessionList" class="session-list"></div>
+            <div class="small" id="sessionStatus"></div>
+          </nav>
+        </div>
         <div class="sidebar-panel admin-only" id="adminNav">
           <div class="session-group-title">Admin</div>
           <ul class="nav-list">

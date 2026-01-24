@@ -1,3 +1,143 @@
+// --- UI polish: empty state, composer, settings modal skeleton ---
+function updateEmptyState() {
+  const chat = document.getElementById('chat');
+  const emptyState = document.getElementById('emptyState');
+  if (!chat || !emptyState) return;
+  // If chat has no children or only whitespace, show emptyState
+  const hasMessages = [...chat.children].some(
+    el => el.nodeType === 1 && el.textContent.trim()
+  );
+  emptyState.style.display = hasMessages ? 'none' : '';
+}
+document.addEventListener('DOMContentLoaded', updateEmptyState);
+
+// Patch chat message rendering to call updateEmptyState after rendering
+const origRenderChat = window.renderChatMessage;
+window.renderChatMessage = function(...args) {
+  const result = origRenderChat ? origRenderChat.apply(this, args) : undefined;
+  updateEmptyState();
+  return result;
+};
+
+// Settings modal open/close logic (skeleton)
+document.addEventListener('DOMContentLoaded', () => {
+  const modal = document.getElementById('settingsModal');
+  const closeBtn = document.getElementById('closeSettings');
+  if (closeBtn && modal) {
+    closeBtn.onclick = () => { modal.style.display = 'none'; };
+  }
+  // Optionally, add a button to open settings
+  // document.getElementById('openSettingsBtn').onclick = () => { modal.style.display = ''; };
+});
+// --- Admin views: dashboard, users, sessions, logs, tickets, tools, config ---
+function showAdminView(view) {
+  // Find main content area (reuse chat-pane for SPA)
+  const main = document.querySelector('.chat-pane .main-column');
+  if (!main) return;
+  main.innerHTML = '';
+  if (view === 'dashboard') {
+    main.innerHTML = `<h2>Admin Dashboard</h2>
+      <div class="admin-cards">
+        <div class="admin-card">Users<br><span id="adminUsersCount">…</span></div>
+        <div class="admin-card">Sessions<br><span id="adminSessionsCount">…</span></div>
+        <div class="admin-card">Errors (24h)<br><span id="adminErrorsCount">…</span></div>
+        <div class="admin-card">Tool calls<br><span id="adminToolsCount">…</span></div>
+      </div>`;
+    // Try to fetch counts, else show "coming soon"
+    apiFetch('/admin/users').then(r => r && r.ok ? r.json() : null).then(d => {
+      document.getElementById('adminUsersCount').textContent = d?.users?.length ?? 'coming soon';
+    });
+    apiFetch('/admin/sessions').then(r => r && r.ok ? r.json() : null).then(d => {
+      document.getElementById('adminSessionsCount').textContent = d?.sessions?.length ?? 'coming soon';
+    });
+    document.getElementById('adminErrorsCount').textContent = 'coming soon';
+    document.getElementById('adminToolsCount').textContent = 'coming soon';
+    return;
+  }
+  if (view === 'users') {
+    main.innerHTML = `<h2>Users</h2><div id="adminUsersTable">Indlæser…</div>`;
+    apiFetch('/admin/users').then(r => r && r.ok ? r.json() : null).then(d => {
+      const users = d?.users || [];
+      const table = document.getElementById('adminUsersTable');
+      if (!users.length) { table.textContent = 'Ingen brugere eller coming soon'; return; }
+      table.innerHTML = `<table><tr><th>Brugernavn</th><th>Email</th><th>Admin</th></tr>${users.map(u => `<tr><td>${u.username}</td><td>${u.email||''}</td><td>${u.is_admin?'✔':''}</td></tr>`).join('')}</table>`;
+    });
+    return;
+  }
+  if (view === 'sessions') {
+    main.innerHTML = `<h2>Sessions</h2><div id="adminSessionsTable">Indlæser…</div>`;
+    apiFetch('/admin/sessions').then(r => r && r.ok ? r.json() : null).then(d => {
+      const sessions = d?.sessions || [];
+      const table = document.getElementById('adminSessionsTable');
+      if (!sessions.length) { table.textContent = 'Ingen sessions eller coming soon'; return; }
+      table.innerHTML = `<table><tr><th>ID</th><th>Navn</th><th>Oprettet</th></tr>${sessions.map(s => `<tr><td>${s.id}</td><td>${s.name||''}</td><td>${s.created_at||''}</td></tr>`).join('')}</table>`;
+    });
+    return;
+  }
+  if (view === 'logs') {
+    main.innerHTML = `<h2>Logs</h2><div id="adminLogs">Indlæser…</div>`;
+    apiFetch('/admin/logs').then(r => r && r.ok ? r.json() : null).then(d => {
+      const files = d?.files || [];
+      const logs = document.getElementById('adminLogs');
+      if (!files.length) { logs.textContent = 'Ingen logs eller coming soon'; return; }
+      logs.innerHTML = files.map(f => `<div><a href="#" onclick="loadLogFile('${f}')">${f}</a></div>`).join('');
+    });
+    return;
+  }
+  if (view === 'tickets') {
+    main.innerHTML = `<h2>Tickets</h2><div id="adminTickets">Indlæser…</div>`;
+    apiFetch('/admin/tickets').then(r => r && r.ok ? r.json() : null).then(d => {
+      const tickets = d?.tickets || [];
+      const el = document.getElementById('adminTickets');
+      if (!tickets.length) { el.textContent = 'Ingen tickets eller coming soon'; return; }
+      el.innerHTML = `<table><tr><th>ID</th><th>Titel</th><th>Status</th></tr>${tickets.map(t => `<tr><td>${t.id}</td><td>${t.title||''}</td><td>${t.status||''}</td></tr>`).join('')}</table>`;
+    });
+    return;
+  }
+  if (view === 'tools') {
+    main.innerHTML = `<h2>Tools</h2><div>coming soon</div>`;
+    return;
+  }
+  if (view === 'config') {
+    main.innerHTML = `<h2>Config</h2><div>coming soon</div>`;
+    return;
+  }
+  main.innerHTML = '<div>Ukendt admin view</div>';
+}
+
+// --- Admin nav and hash routing ---
+function setupAdminNav() {
+  const nav = document.querySelector('.admin-only .nav-list');
+  if (!nav) return;
+  nav.querySelectorAll('a').forEach(a => {
+    a.onclick = (e) => {
+      e.preventDefault();
+      const hash = a.getAttribute('href').split('#admin/')[1];
+      window.location.hash = '#admin/' + hash;
+    };
+  });
+}
+
+function handleHashChange() {
+  const hash = window.location.hash;
+  if (hash.startsWith('#admin/')) {
+    // Hide chat UI, show admin view
+    document.querySelector('.chat-pane').style.display = 'block';
+    document.querySelector('.composer').style.display = 'none';
+    showAdminView(hash.split('#admin/')[1] || 'dashboard');
+  } else {
+    // Show chat UI, hide admin view
+    document.querySelector('.chat-pane').style.display = 'block';
+    document.querySelector('.composer').style.display = '';
+    // Optionally, re-render chat/session if needed
+  }
+}
+
+window.addEventListener('hashchange', handleHashChange);
+document.addEventListener('DOMContentLoaded', () => {
+  setupAdminNav();
+  handleHashChange();
+});
 
 
 // If running in browser, attach authStore to window for legacy/global use
@@ -10,201 +150,175 @@ let eventClient = null;
 let adminPanelsLocked = false;
 let adminUnavailable = false;
 let adminIntervals = [];
-let lastEventId = 0;
-
-function handleBusEvent(evt) {
-  const payload = evt?.payload || {};
-  // Track cursor
-  if (evt?.id) {
-    lastEventId = Math.max(lastEventId, evt.id);
-  }
-  // Only render banner-like events that have body/title
-  const body = payload.body || payload.message || "";
-  const title = payload.title || "";
-  if (!body && !title) return;
-  appendEventBanners([
-    {
-      id: evt.id || payload.id || 0,
-      body,
-      title,
-      created_utc: payload.created_utc || payload.ts,
-      meta: payload.meta,
-    },
-  ]);
-}
-
-function startEventsStream() {
-  if (!NOTIFY_ENABLED) return;
-  if (!getToken()) return;
-  if (!eventClient) {
-    eventClient = new EventClient(handleBusEvent, { maxMs: 1200 });
-  }
-  eventClient.start();
-}
-
-function stopEventsStream() {
-  if (eventClient) {
-    eventClient.stop();
-    eventClient = null;
-  }
-}
-
-function hideAdminPanels() {
-  const adminEls = document.querySelectorAll(".admin-only, #rightTicketsPanel");
-  adminEls.forEach((el) => el.classList.add("hidden"));
-}
-
-function stopAdminPolling() {
-  adminIntervals.forEach((id) => clearInterval(id));
-  adminIntervals = [];
-}
-
-function stopAllPolling() {
-  stopAdminPolling();
-  pollingIntervals.forEach(clearInterval);
-  pollingIntervals = [];
-}
-
-// --- Event streaming client (deterministic short pulls) ---
-class EventClient {
-  constructor(onEvent, opts = {}) {
-    this.onEvent = onEvent;
-    this.maxMs = opts.maxMs || 1000;
-    this.filterType = opts.filterType;
-    this.filterSession = opts.filterSession;
-    this.running = false;
-    this.abortController = null;
-    this.backoffMs = 250;
-    this.lastId = 0;
-    this.seen = [];
-    this.seenLimit = 500;
-    this.visibilityHandler = () => {
-      if (document.hidden) {
-        this.stop();
-      } else if (authStore.isAuthenticated) {
-        this.start();
-      }
-    };
-  }
-
-  _markSeen(id) {
-    if (!id) return false;
-    if (this.seen.includes(id)) return true;
-    this.seen.push(id);
-    if (this.seen.length > this.seenLimit) {
-      this.seen.shift();
-    }
-    return false;
-  }
-
-  stop() {
-    this.running = false;
-    if (this.abortController) {
-      this.abortController.abort();
-    }
-    document.removeEventListener("visibilitychange", this.visibilityHandler);
-  }
-
-  async start() {
-    if (this.running || !authStore.isAuthenticated) return;
-    this.running = true;
-    document.addEventListener("visibilitychange", this.visibilityHandler);
-    while (this.running) {
-      try {
-        await this._pollOnce();
-        this.backoffMs = 250;
-      } catch (err) {
-        if (!this.running) break;
-        await this._sleep(this.backoffMs);
-        this.backoffMs = Math.min(this.backoffMs * 2, 5000);
-      }
-      if (this.running) {
-        await this._sleep(10);
-      }
-    }
-  }
-
-  async _pollOnce() {
-    const params = new URLSearchParams();
-    params.set("since_id", this.lastId || 0);
-    params.set("max_ms", this.maxMs);
-    if (this.filterType) params.set("type", this.filterType);
-    if (this.filterSession) params.set("session_id", this.filterSession);
-
-    this.abortController = new AbortController();
-    const res = await fetch(`/v1/events/stream?${params.toString()}`, {
-      method: "GET",
-      signal: this.abortController.signal,
-      credentials: "same-origin",
-    });
-
-    if (res.status === 401 || res.status === 403) {
-      this.stop();
-      return;
-    }
-    if (!res.ok || !res.body) {
-      return;
-    }
-
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    while (this.running) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const parts = buffer.split("\n\n");
-      buffer = parts.pop() || "";
-      for (const block of parts) {
-        this._handleBlock(block);
-      }
-    }
-    this.abortController = null;
-  }
-
-  _handleBlock(block) {
-    const lines = block.split("\n");
-    let dataStr = "";
-    let idVal = null;
-    let evtName = null;
-    for (const line of lines) {
-      if (line.startsWith("data:")) {
-        dataStr += line.slice(5).trim();
-      } else if (line.startsWith("id:")) {
-        const val = parseInt(line.slice(3).trim(), 10);
-        if (!isNaN(val)) idVal = val;
-      } else if (line.startsWith("event:")) {
-        evtName = line.slice(6).trim();
-      }
-    }
-    if (idVal !== null) {
-      this.lastId = Math.max(this.lastId, idVal);
-      if (this._markSeen(idVal)) return;
-    }
-    if (!dataStr) return;
+async function sendMessage(text = null) {
+  if (sendMessage.inFlight) return;
+  const input = getPromptInput();
+  const prompt = text !== null ? text : (input ? input.value.trim() : "");
+  if (!prompt) return;
+  if (input) input.value = "";
+  sendMessage.inFlight = true;
+  setStatus("Tænker…");
+  const sessionId = currentSessionId;
+  const payload = { prompt };
+  const chatStatus = getChatStatus();
+  if (chatStatus) chatStatus.textContent = "";
+  // Streaming mode
+  if (getStreamToggle() && getStreamToggle().checked) {
+    let abortController = new AbortController();
     try {
-      const payload = JSON.parse(dataStr);
-      const eventObj = {
-        id: idVal || payload.id || 0,
-        type: evtName || payload.type || "",
-        payload,
-        ts: payload.ts || Date.now() / 1000,
-      };
-      if (this.onEvent) this.onEvent(eventObj);
+      const res = await apiFetch("/v1/chat/completions", {
+        method: "POST",
+        headers: { "X-Session-Id": sessionId || "" },
+        body: JSON.stringify(payload),
+        signal: abortController.signal,
+      });
+      if (!res || !res.body) throw new Error("No response body");
+      const assistantMsg = renderChatMessage({ role: "assistant", content: "" });
+      let pendingNews = null;
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let currentEvent = "message";
+      let hadDelta = false;
+      const body = assistantMsg.querySelector(".msg-body");
+      let streamingText = "";
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop();
+        for (const line of lines) {
+          if (line.startsWith("event:")) {
+            currentEvent = line.replace("event:", "").trim();
+            continue;
+          }
+          if (!line.startsWith("data:")) continue;
+          const dataLine = line.replace("data:", "").trim();
+          if (dataLine === "[DONE]") {
+            chatStatus.textContent = "";
+            setStatus("Klar");
+            if (body) {
+              body.innerHTML = "";
+              const bodyContent = renderMessageBody(streamingText, { markdown: true });
+              body.appendChild(bodyContent);
+            }
+            if (pendingNews) appendNewsList(assistantMsg, pendingNews);
+            if (currentSessionId) loadSessionMessages(currentSessionId);
+            loadQuotaBar();
+            loadExpiryNotice();
+            sendMessage.inFlight = false;
+            return;
+          }
+          if (currentEvent === "status") {
+            try {
+              const st = JSON.parse(dataLine);
+              const dict = I18N[getUiLang()] || I18N.da;
+              if (st.state === "using_tool") {
+                const tool = st.tool || "";
+                const map = {
+                  news: dict.statusSearching,
+                  weather: dict.statusSearching,
+                  search: dict.statusSearching,
+                  currency: dict.statusSearching,
+                  system: dict.statusSearching,
+                  ping: dict.statusSearching,
+                  process: dict.statusSearching,
+                  image: dict.statusSearching,
+                };
+                setStatus(map[tool] || dict.statusSearching);
+                if (chatStatus) chatStatus.textContent = "";
+              } else if (st.state === "writing") {
+                setStatus(dict.statusWriting);
+                if (chatStatus) chatStatus.textContent = "▊";
+              } else if (st.state === "thinking") {
+                setStatus(dict.statusThinking);
+                if (chatStatus) chatStatus.textContent = "";
+              } else if (st.state === "idle") {
+                setStatus(dict.statusReady);
+                if (chatStatus) chatStatus.textContent = "";
+              }
+            } catch (err) {
+              setStatus("JARVIS arbejder...");
+              if (chatStatus) chatStatus.textContent = "";
+            }
+            continue;
+          }
+          if (currentEvent === "meta") {
+            try {
+              const meta = JSON.parse(dataLine);
+              if (meta.meta?.quota_warning) showQuotaNotice(meta.meta.quota_warning);
+              if (meta.data?.type === "mixed") {
+                if (meta.data.weather && meta.rendered_text) {
+                  addWeatherCard({ location: meta.data.weather.location, scope: meta.data.weather.scope, rendered_text: meta.rendered_text });
+                }
+                if (meta.data.news?.type === "news") {
+                  addNewsCards(meta.data.news);
+                  pendingNews = meta.data.news;
+                }
+              }
+              if (meta.data?.type === "news") {
+                addNewsCards(meta.data);
+                pendingNews = meta.data;
+              }
+              if (meta.data?.type === "weather" && meta.rendered_text) {
+                addWeatherCard({ location: meta.data.location, scope: meta.data.scope, rendered_text: meta.rendered_text });
+              }
+              if (meta.data?.type === "file") addFileCard(meta.data);
+              if (meta.data?.type === "image_preview") addImagePreviewCard(meta.data);
+              if (meta.data?.type === "article") addArticleCard(meta.data);
+            } catch (err) {}
+            continue;
+          }
+          if (dataLine.startsWith("{") && dataLine.includes("\"choices\"")) currentEvent = "message";
+          try {
+            const chunk = JSON.parse(dataLine);
+            const delta = chunk.choices?.[0]?.delta?.content || "";
+            if (delta) {
+              streamingText += delta;
+              body.textContent = streamingText;
+              scrollChatToBottom();
+              hadDelta = true;
+            }
+          } catch (err) {
+            chatStatus.textContent = "Streaming-fejl";
+          }
+        }
+      }
+      if (!hadDelta) setStatus("JARVIS svarer tomt — prøv igen.");
+      sendMessage.inFlight = false;
     } catch (err) {
-      // ignore malformed payloads
+      setStatus("Forbindelse tabt – prøv igen");
+      sendMessage.inFlight = false;
+      // Vis retry UI på sidste besked
+      const chat = getChat();
+      if (chat) {
+        const last = chat.querySelector('.msg-assistant:last-child .msg-body');
+        if (last) {
+          last.innerHTML += '<div class="msg-retry"><button onclick="sendMessage()">Prøv igen</button></div>';
+        }
+      }
     }
+    return;
   }
-
-  _sleep(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-  }
-}
-
-// Centralized auth check using authStore
-function checkAuthAndRedirect() {
-  if (!authStore.isAuthenticated) {
-    window.location.href = "/login";
+  // Non-streaming fallback
+  try {
+    const res = await apiFetch("/v1/chat/completions", {
+      method: "POST",
+      headers: { "X-Session-Id": sessionId || "" },
+      body: JSON.stringify(payload),
+    });
+    if (!res) return;
+    const data = await res.json();
+    renderChatMessage({ role: "assistant", content: data.choices?.[0]?.message?.content || "" });
+    setStatus("Klar");
+    if (currentSessionId) loadSessionMessages(currentSessionId);
+    loadQuotaBar();
+    loadExpiryNotice();
+    sendMessage.inFlight = false;
+  } catch (err) {
+    setStatus("Fejl ved svar");
+    sendMessage.inFlight = false;
   }
 }
 
@@ -310,54 +424,87 @@ function scrollChatToBottom() {
   }
 }
 
-// Safe element getters (called when needed, not at script load)
-function getChat() { return gid("chat"); }
-function getStreamToggle() { return gid("streamToggle"); }
-function getChatStatus() { return gid("chatStatus"); }
-function getSessionStatus() { return gid("sessionStatus"); }
-function getModeSelect() { return gid("modeSelect"); }
-function getResponseModeSelect() { return gid("responseModeSelect"); }
-function getModelSelect() { return gid("modelSelect"); }
+// --- Sessions sidebar logic ---
 function getSessionList() { return gid("sessionList"); }
 function getSessionSearch() { return gid("sessionSearch"); }
-function getStatusBadge() { return gid("statusBadge"); }
-function getStatusInline() { return gid("chatStatusInline"); }
-function getFooterText() { return gid("footerText"); }
-function getFooterSupport() { return gid("footerSupport"); }
-function getFooterContact() { return gid("footerContact"); }
-function getFooterLicense() { return gid("footerLicense"); }
-function getToolsSummary() { return gid("toolsSummary"); }
-function getJarvisDot() { return gid("jarvisDot"); }
-function getQuotaRequestBtn() { return gid("quotaRequestBtn"); }
-function getQuotaNotice() { return gid("quotaNotice"); }
-function getStreamChip() { return gid("streamChip"); }
-function getStreamDot() { return gid("streamDot"); }
-function getPersonaChip() { return gid("personaChip"); }
-function getQuotaFill() { return gid("quotaFill"); }
-function getQuotaText() { return gid("quotaText"); }
-function getGlobalSearch() { return gid("globalSearch"); }
-function getGlobalSearchResults() { return gid("globalSearchResults"); }
-function getTopBanner() { return gid("topBanner"); }
-function getBannerTrack() { return gid("bannerTrack"); }
-function getExpiryNotice() { return gid("expiryNotice"); }
-function getUploadInput() { return gid("uploadInput"); }
-function getUploadBtn() { return gid("uploadBtn"); }
-function getUploadSidebarBtn() { return gid("uploadSidebarBtn"); }
-function getImageUploadBtn() { return gid("imageUploadBtn"); }
-function getImageUploadInput() { return gid("imageUploadInput"); }
-function getNotesList() { return gid("notesList"); }
-function getFilesList() { return gid("filesList"); }
-function getNoteTitleInput() { return gid("noteTitleInput"); }
-function getNoteContentInput() { return gid("noteContentInput"); }
-function getNoteCreateBtn() { return gid("noteCreateBtn"); }
-function getQuotaBar() { return gid("quotaBar"); }
-function getNotesPanel() { return gid("notesPanel"); }
-function getFilesPanel() { return gid("filesPanel"); }
-function getNoteDueInput() { return gid("noteDueInput"); }
-function getNoteRemindToggle() { return gid("noteRemindToggle"); }
-function getBrandTop() { return gid("brandTop"); }
-function getBrandCore() { return gid("brandCore"); }
-function getBrandShort() { return gid("brandShort"); }
+let sessionsCache = [];
+let currentSessionId = null;
+let sessionSearchValue = "";
+
+async function loadSessions() {
+  const list = getSessionList();
+  if (!list) return;
+  list.innerHTML = '<div class="small">Loader chats…</div>';
+  try {
+    const res = await apiFetch("/sessions", { method: "GET" });
+    if (!res || !res.ok) {
+      list.innerHTML = '<div class="small">Kunne ikke hente chats</div>';
+      return;
+    }
+    const data = await res.json();
+    sessionsCache = data.sessions || [];
+    renderSessionList();
+  } catch (err) {
+    list.innerHTML = '<div class="small">Fejl ved hentning</div>';
+  }
+}
+
+function renderSessionList() {
+  const list = getSessionList();
+  if (!list) return;
+  const search = getSessionSearch();
+  sessionSearchValue = search ? search.value.trim().toLowerCase() : "";
+  let filtered = sessionsCache;
+  if (sessionSearchValue) {
+    filtered = sessionsCache.filter(s => (s.name || "").toLowerCase().includes(sessionSearchValue) || (s.id || "").includes(sessionSearchValue));
+  }
+  if (!filtered.length) {
+    list.innerHTML = '<div class="small">Ingen chats fundet</div>';
+    return;
+  }
+  list.innerHTML = "";
+  filtered.forEach(s => {
+    const div = document.createElement("div");
+    div.className = "session-row" + (s.id === currentSessionId ? " active" : "");
+    div.textContent = s.name || s.id;
+    div.title = s.name || s.id;
+    div.tabIndex = 0;
+    div.onclick = () => {
+      currentSessionId = s.id;
+      renderSessionList();
+      loadSessionMessages(s.id);
+    };
+    list.appendChild(div);
+  });
+}
+
+async function createSession() {
+  const name = prompt("Navn på ny chat? (valgfri)") || "";
+  try {
+    const res = await apiFetch("/sessions", { method: "POST", body: JSON.stringify({ name }) });
+    if (!res || !res.ok) {
+      alert("Kunne ikke oprette ny chat");
+      return;
+    }
+    const data = await res.json();
+    currentSessionId = data.session_id;
+    await loadSessions();
+    renderSessionList();
+    loadSessionMessages(currentSessionId);
+  } catch (err) {
+    alert("Fejl ved oprettelse af chat");
+  }
+}
+
+if (getSessionSearch()) {
+  getSessionSearch().addEventListener("input", renderSessionList);
+}
+if (document.getElementById("newChatBtn")) {
+  document.getElementById("newChatBtn").addEventListener("click", createSession);
+}
+if (document.getElementById("newChatInline")) {
+  document.getElementById("newChatInline").addEventListener("click", createSession);
+}
 function getNewChatInline() { return gid("newChatInline"); }
 function getSessionPromptRow() { return gid("sessionPromptRow"); }
 function getSessionPromptInput() { return gid("sessionPromptInput"); }
@@ -3347,7 +3494,34 @@ async function initUI() {
   console.log("UI ready");
 }
   
-document.addEventListener("DOMContentLoaded", initUI);
+
+// --- Robust auth/session state: always check /account/profile on load ---
+async function ensureAuthState() {
+  try {
+    const res = await apiFetch("/account/profile", { method: "GET" });
+    if (res && res.ok) {
+      const profile = await res.json();
+      window.authStore.updateFromProfile(profile);
+      // Show/hide admin UI
+      document.querySelectorAll('.admin-only').forEach(el => {
+        el.classList.toggle('hidden', !profile.is_admin);
+      });
+      // Show main UI
+      document.body.classList.add('ui-ready');
+    } else {
+      window.authStore.reset();
+      document.body.classList.remove('ui-ready');
+    }
+  } catch (err) {
+    window.authStore.reset();
+    document.body.classList.remove('ui-ready');
+  }
+}
+
+document.addEventListener("DOMContentLoaded", async () => {
+  await ensureAuthState();
+  await initUI();
+});
 window.addEventListener("beforeunload", () => {
   stopEventsStream();
 });

@@ -81,25 +81,25 @@
           <button id="uploadSidebarBtn" class="rail-btn" title="Upload" aria-label="Upload">⤴</button>
         </div>
       </div>
-      <div class="sidebar-body">
-        <input id="sessionSearch" placeholder="Søg chats..." />
-        <button id="newChatInline" class="secondary">Start ny chat</button>
-        <div id="quotaBar" class="quota-bar">
-          <div class="quota-label">
-            <span>Kvota</span>
-            <span id="quotaText">0/0 MB</span>
+        <nav class="sidebar-nav">
+          <div class="nav-section">
+            <div class="nav-title">Sessions</div>
+            <div id="sessionList"></div>
+            <button id="createSessionBtn">+ Ny session</button>
           </div>
-          <div class="quota-track">
-            <div id="quotaFill" class="quota-fill"></div>
+          <div class="nav-section admin-only" style="display:none">
+            <div class="nav-title">Admin</div>
+            <ul class="nav-list">
+              <li><a href="#admin/dashboard">Dashboard</a></li>
+              <li><a href="#admin/users">Users</a></li>
+              <li><a href="#admin/sessions">Sessions</a></li>
+              <li><a href="#admin/logs">Logs</a></li>
+              <li><a href="#admin/tickets">Tickets</a></li>
+              <li><a href="#admin/tools">Tools</a></li>
+              <li><a href="#admin/config">Config</a></li>
+            </ul>
           </div>
-        </div>
-        <div class="sidebar-panel">
-        </div>
-        <div id="expiryNotice" class="small"></div>
-        <div class="sidebar-panel" id="notesPanel">
-          <div class="session-group-title">Noter</div>
-          <div id="notesList" class="mini-list"></div>
-        </div>
+        </nav>
         <button id="quotaRequestBtn" class="secondary quota-btn">Anmod om mere plads</button>
         <nav class="session-scroll" aria-label="Tidligere chats">
           <div id="sessionList" class="session-list"></div>
@@ -147,6 +147,7 @@
       <div class="main-column">
         <section class="chat-feed conversation-log" aria-label="Chatbeskeder" aria-live="polite">
           <div id="chat" class="chat-feed-inner chat-feed"></div>
+          <div id="emptyState" style="display:none;color:#aaa;text-align:center;margin:2em 0;">Ingen beskeder endnu. Start en samtale!</div>
           <div id="greetingBanner" class="greeting-banner"></div>
         </section>
         <section class="status-row" aria-label="Status for samtale">
@@ -165,7 +166,7 @@
             <div class="tools-btn-wrap">
               <button id="toolsBtn" class="composer-btn" title="Værktøjer" aria-label="Værktøjer">+</button>
             </div>
-            <textarea id="prompt" placeholder="Stil dit spørgsmål?" rows="1"></textarea>
+            <textarea id="prompt" placeholder="Skriv en besked eller brug /kommando…" rows="1"></textarea>
             <button id="micBtn" class="composer-btn" title="Tale til Jarvis" aria-label="Tale til Jarvis">🎤</button>
             <button id="sendBtn" class="composer-btn send-btn">↑</button>
           </div>
@@ -182,6 +183,14 @@
             </div>
           </div>
         </section>
+      </div>
+      <!-- Settings modal skeleton -->
+      <div id="settingsModal" class="modal" style="display:none;">
+        <div class="modal-content">
+          <span class="close" id="closeSettings">&times;</span>
+          <h2>Indstillinger</h2>
+          <div>coming soon</div>
+        </div>
       </div>
       <div id="sessionPromptRow" class="session-prompt-row hidden">
         <span class="session-prompt-label">Session-personlighed</span>

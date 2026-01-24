@@ -1,78 +1,15 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-:root {
-  color-scheme: dark;
-  --bg: #111318;
-  --surface: #161922;
-  --border: #252a36;
-  --muted: #8f9bb3;
-  --text: #e6e9f2;
-  --primary: #7c93ff;
-  --sidebar-width: 260px;
-  --rightbar-width: 320px;
-  --radius: 12px;
-  --spacing: 12px;
-}
-
-*,
-*::before,
-*::after {
-  box-sizing: border-box;
-}
-
+html, body, #root { height: 100%; }
 body {
-  margin: 0;
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
-  background: var(--bg);
-  color: var(--text);
+  @apply bg-neutral-950 text-neutral-50 antialiased;
 }
 
-button,
-input,
-textarea {
-  font: inherit;
-  color: inherit;
+::selection {
+  background: rgba(16, 163, 127, 0.35);
 }
 
-.app-root {
-  min-height: 100vh;
-  background: var(--bg);
-}
-
-.loading {
-  display: grid;
-  place-items: center;
-  min-height: 100vh;
-  color: var(--muted);
-}
-
-.app-shell {
-  display: grid;
-  grid-template-columns: var(--sidebar-width) 1fr 0px;
-  transition: grid-template-columns 0.2s ease;
-  min-height: 100vh;
-}
-
-.app-shell.has-admin {
-  grid-template-columns: var(--sidebar-width) 1fr var(--rightbar-width);
-}
-
-.main-pane {
-  min-height: 100vh;
-  border-left: 1px solid var(--border);
-  border-right: 1px solid var(--border);
-  background: var(--bg);
-}
-
-.btn-ghost {
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  color: var(--text);
-  padding: 6px 10px;
-  cursor: pointer;
-}
-
-.btn-ghost:hover {
-  border-color: var(--primary);
-}
+/* pæn scrollbar baseline */
+* { scrollbar-width: thin; }

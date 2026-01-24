@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
-import { loadProfile, Profile } from "./api";
+import { getProfile as loadProfile, logout as apiLogout, Profile } from "./lib/apiClient";
 
 type ProfileState = {
   profile: Profile | null;

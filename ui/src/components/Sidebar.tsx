@@ -1,49 +1,127 @@
-import React from "react";
-import "./Sidebar.css";
+import { NavLink, useNavigate } from 'react-router-dom'
+import { useChat } from '../contexts/ChatContext'
 
-type Props = {
-  username?: string;
-  onOpenSettings: () => void;
-  onToggleAdmin?: () => void;
-  isAdmin?: boolean;
-};
+type Props = { onNavigate?: () => void }
 
-const sampleSessions = ["Projekt Alpha", "Ideer til pitch", "Opsummering af møde", "Planlægning af sprint"];
+export default function Sidebar({ onNavigate }: Props) {
+  const { sessions, activeSessionId, setActiveSessionId, createNewChat, profile, logout } = useChat()
+  const navigate = useNavigate()
 
-export const Sidebar: React.FC<Props> = ({ username, onOpenSettings, onToggleAdmin, isAdmin }) => {
+  const username = profile?.username || profile?.user || 'Bruger'
+  const initials = username?.slice(0, 1)?.toUpperCase() || 'U'
+
+  function handleSelectSession(id: string) {
+    setActiveSessionId(id)
+    onNavigate?.()
+  }
+
+  function handleAdminClick() {
+    navigate('/admin')
+    onNavigate?.()
+  }
+
+  function handleSettings() {
+    navigate('/settings')
+    onNavigate?.()
+  }
+
   return (
-    <aside className="sidebar">
-      <div className="sidebar__header">
-        <div className="sidebar__brand">
-          <div className="logo-dot" />
-          <span className="logo-text">Jarvis</span>
-        </div>
-        <button className="btn-ghost" title="New chat">+ Ny chat</button>
-      </div>
-      <div className="sidebar__search">
-        <input placeholder="Søg chats..." />
-      </div>
-      <div className="sidebar__section">
-        <div className="sidebar__section-title">Dine chats</div>
-        <div className="sidebar__list">
-          {sampleSessions.map((s) => (
-            <div key={s} className="sidebar__item">{s}</div>
-          ))}
+    <div className="h-full flex flex-col bg-neutral-900">
+      {/* Top */}
+      <div className="px-3 pt-4 pb-3 border-b border-neutral-800">
+        <button
+          onClick={createNewChat}
+          className="w-full rounded-lg border border-neutral-700 bg-neutral-800 hover:bg-neutral-700 px-3 py-2 text-sm font-medium transition"
+        >
+          + New chat
+        </button>
+        <div className="mt-3">
+          <input
+            type="search"
+            placeholder="Search chats"
+            className="w-full rounded-lg bg-neutral-800 border border-neutral-700 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500"
+          />
         </div>
       </div>
-      <div className="sidebar__footer">
-        <div className="sidebar__user">
-          <div className="avatar">{username?.charAt(0).toUpperCase() || "?"}</div>
-          <div className="user-meta">
-            <div className="user-name">{username || "Ukendt bruger"}</div>
+
+      {/* Sessions */}
+      <div className="flex-1 overflow-y-auto px-3 py-3 space-y-2">
+        <div className="text-xs text-neutral-400 uppercase tracking-wide px-1">Your chats</div>
+        {sessions.length === 0 && (
+          <div className="text-sm text-neutral-500 px-1">No chats yet.</div>
+        )}
+        <div className="space-y-1">
+          {sessions.map((s) => {
+            const id = s.id || (s as any).session_id || (s as any).sessionId
+            const title = s.name || (s as any).title || 'Untitled'
+            const active = id === activeSessionId
+
+            return (
+              <div
+                key={id}
+                className={[
+                  "group flex items-center gap-2 rounded-lg px-2 py-2 text-sm transition",
+                  active ? "bg-neutral-800 border border-neutral-700" : "hover:bg-neutral-800/60 border border-transparent",
+                ].join(" ")}
+              >
+                <button
+                  onClick={() => handleSelectSession(id)}
+                  className="flex-1 text-left truncate"
+                >
+                  {title}
+                </button>
+                <button
+                  className="opacity-0 group-hover:opacity-100 text-neutral-400 hover:text-neutral-200 transition"
+                  title="More"
+                >
+                  …
+                </button>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Bottom profile/actions */}
+      <div className="border-t border-neutral-800 px-3 py-4 space-y-3">
+        {profile ? (
+          <div className="flex items-center gap-3">
+            <div className="h-9 w-9 rounded-full bg-neutral-800 grid place-items-center text-sm font-semibold">
+              {initials}
+            </div>
+            <div className="min-w-0">
+              <div className="text-sm font-medium truncate">{username}</div>
+              <div className="text-xs text-neutral-400 truncate">{profile?.email || ''}</div>
+            </div>
           </div>
-        </div>
-        <div className="sidebar__actions">
-          <button className="btn-ghost" onClick={onOpenSettings}>Indstillinger</button>
-          {isAdmin && <button className="btn-ghost" onClick={onToggleAdmin}>Admin panel</button>}
-          <button className="btn-ghost" onClick={() => (window.location.href = "/logout")}>Log ud</button>
+        ) : (
+          <div className="text-sm text-neutral-400">Not logged in</div>
+        )}
+
+        <div className="space-y-2 text-sm">
+          <button
+            onClick={handleSettings}
+            className="w-full text-left px-3 py-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 transition"
+          >
+            Settings
+          </button>
+          {profile?.is_admin && (
+            <button
+              onClick={handleAdminClick}
+              className="w-full text-left px-3 py-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 transition"
+            >
+              Admin
+            </button>
+          )}
+          <NavLink
+            to="/logout"
+            onClick={(e) => { e.preventDefault(); logout(); }}
+            className="block px-3 py-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 transition"
+          >
+            Logout
+          </NavLink>
         </div>
       </div>
-    </aside>
-  );
-};
+    </div>
+  )
+}

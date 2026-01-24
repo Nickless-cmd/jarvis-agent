@@ -288,7 +288,7 @@ let openStreams = [];
 let eventClient = null;
 let adminPanelsLocked = false;
 let adminUnavailable = false;
-let authLostLatch = false;
+let authLostLatch = true;
 let adminIntervals = [];
 let bootstrappingAuth = false;
 let verifyingSession = false;
@@ -360,6 +360,11 @@ function stopEventsStream() {
     window.eventClient = null;
   }
 }
+
+// Ensure optional globals exist to avoid runtime ReferenceError
+window.stopAllPolling = window.stopAllPolling || function() { if (window.pollingIntervals) window.pollingIntervals.forEach(clearInterval); window.pollingIntervals = []; };
+window.closeAllStreams = window.closeAllStreams || function() { if (window.eventClient && typeof window.eventClient.close === 'function') { window.eventClient.close(); window.eventClient = null; } };
+window.startEventsStream = window.startEventsStream || function() { /* no-op until auth confirmed */ };
 
 function onAuthLost(reason) {
   if (bootstrappingAuth) {
@@ -517,7 +522,8 @@ async function probeAdminEndpoints() {
     window.adminPollingIntervals = [];
   }
 }
-document.addEventListener('DOMContentLoaded', probeAdminEndpoints);
+// probeAdminEndpoints should only run after we know the user's admin status.
+// It will be invoked from `ensureAuthState()` when applicable.
 
 function scrollChatToBottom() {
   const feed = getChatFeed();
@@ -3630,6 +3636,12 @@ async function ensureAuthState() {
       document.querySelectorAll('.admin-only').forEach(el => {
         el.classList.toggle('hidden', !profile.is_admin);
       });
+      // Only probe admin endpoints if user is admin
+      if (profile.is_admin) {
+        try { probeAdminEndpoints(); } catch (err) { console.warn('probeAdminEndpoints failed', err); }
+      } else {
+        hideAdminPanels();
+      }
       // Show main UI
       showAppShell();
       document.body.classList.add('ui-ready');
@@ -3664,11 +3676,13 @@ document.addEventListener("DOMContentLoaded", async () => {
   ["settingsModal", "notificationsDropdown", "personaPopover", "toolsDropdown"].forEach((id) => {
     const el = document.getElementById(id);
     if (!el) return;
-    if (id === "notificationsDropdown") {
-      el.hidden = true;
-    }
+    // Always prefer class-based hiding to avoid mixed hidden/style states
     el.classList.add("hidden");
-    el.style.display = id === "settingsModal" ? "none" : "";
+    if (id === "settingsModal") {
+      el.style.display = "none";
+    } else {
+      el.style.display = "";
+    }
   });
   // If hash targets settings, defer opening until after auth success
   const loginBtn = document.getElementById("loggedOutLoginBtn");
@@ -3678,9 +3692,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   await ensureAuthState();
   // If not authenticated, stop here
   if (!window.authStore?.isAuthenticated) return;
-  if (window.location.hash.startsWith("#settings/")) {
-    openSettingsModal();
-  }
   await initUI();
 });
 window.addEventListener("beforeunload", () => {

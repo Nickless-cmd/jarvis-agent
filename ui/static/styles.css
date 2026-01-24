@@ -107,7 +107,7 @@ html, body {
   min-width: var(--sidebar-width);
   max-width: var(--sidebar-width);
   position: sticky;
-  top: 0;
+  top: var(--header-height);
   height: 100vh;
   z-index: 10;
   min-height: 0;
@@ -121,6 +121,10 @@ html, body {
   background: var(--sidebar-bg);
   border-left: 1px solid var(--border);
   min-height: 0;
+  position: sticky;
+  top: calc(var(--header-height) + 12px);
+  height: calc(100vh - var(--header-height) - var(--footer-height) - 24px);
+  overflow: auto;
 }
 .rightbar.hidden { display: none !important; }
 

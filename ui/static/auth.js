@@ -42,6 +42,7 @@ function getToken() {
   token = sessionStorage.getItem(TOKEN_SESSION_KEY) || "";
   if (token) {
     console.debug("[auth] getToken: found token in sessionStorage");
+    // 1 day is enough for a browser session cookie-equivalent
     setCookie("jarvis_token", token, 1);
     return token;
   }

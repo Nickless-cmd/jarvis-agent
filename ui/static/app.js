@@ -290,6 +290,7 @@ let adminPanelsLocked = false;
 let adminUnavailable = false;
 let authLostLatch = false;
 let adminIntervals = [];
+let bootstrappingAuth = false;
 
 // Session expiry banner logic
 
@@ -318,6 +319,10 @@ function stopEventsStream() {
 }
 
 function onAuthLost(reason) {
+  if (bootstrappingAuth) {
+    console.warn("[auth] onAuthLost suppressed during boot:", reason);
+    return;
+  }
   if (authLostLatch) return;
   authLostLatch = true;
   if (typeof stopEventsStream === 'function') stopEventsStream();
@@ -346,9 +351,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // Initial check (do not auto-redirect, just show banner if not authenticated)
-if (window.authStore && !window.authStore.isAuthenticated) {
-  onAuthLost('not-authenticated');
-}
+// Initial check moved to ensureAuthState to avoid false positives during boot
 
 // Listen for authStore changes to update UI (do not auto-redirect)
 if (window.authStore && typeof window.authStore.onChange === 'function') {
@@ -1373,6 +1376,7 @@ function setStatusImmediate(text) {
 }
 
 function updateGreeting(name) {
+  const greetingBanner = gid("greetingBanner");
   if (!greetingBanner) return;
   currentUserName = name || "";
   const hour = new Date().getHours();
@@ -3557,6 +3561,7 @@ async function initUI() {
 
 // --- Robust auth/session state: always check /account/profile on load ---
 async function ensureAuthState() {
+  bootstrappingAuth = true;
   try {
     const token = getToken();
     if (!token) {
@@ -3571,6 +3576,8 @@ async function ensureAuthState() {
       if (window.authStore && typeof window.authStore.updateFromProfile === 'function') {
         window.authStore.updateFromProfile(profile);
       }
+      authLostLatch = false;
+      hideSessionExpiryBanner();
       // Show/hide admin UI
       document.querySelectorAll('.admin-only').forEach(el => {
         el.classList.toggle('hidden', !profile.is_admin);
@@ -3592,10 +3599,23 @@ async function ensureAuthState() {
     }
     showLoggedOutScreen();
     document.body.classList.remove('ui-ready');
+  } finally {
+    bootstrappingAuth = false;
   }
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
+  // Force-close optional modals/dropdowns on initial load
+  ["settingsModal", "notificationsDropdown", "personaPopover", "toolsDropdown"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (id === "notificationsDropdown") {
+      el.hidden = true;
+    }
+    el.classList.add("hidden");
+    el.style.display = id === "settingsModal" ? "none" : "";
+  });
+  // If hash targets settings, defer opening until after auth success
   const loginBtn = document.getElementById("loggedOutLoginBtn");
   if (loginBtn) {
     loginBtn.addEventListener("click", () => { window.location.href = "/login"; });
@@ -3603,6 +3623,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   await ensureAuthState();
   // If not authenticated, stop here
   if (!window.authStore?.isAuthenticated) return;
+  if (window.location.hash.startsWith("#settings/")) {
+    openSettingsModal();
+  }
   await initUI();
 });
 window.addEventListener("beforeunload", () => {

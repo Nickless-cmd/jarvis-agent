@@ -111,9 +111,15 @@
     }
 
     async function applySettings() {
-      const res = await fetch("/settings/public");
-      if (!res.ok) return;
-      const data = await res.json();
+      let data = {};
+      try {
+        const res = await fetch("/settings/public");
+        if (!res.ok) throw new Error("settings/public not ok");
+        data = await res.json();
+      } catch (err) {
+        console.warn("applySettings: unable to load settings/public", err);
+        return;
+      }
       const registerLink = document.getElementById("registerLink");
       if (!data.register_enabled) {
         if (registerLink) {
@@ -154,11 +160,15 @@
     }
 
     async function loadBrand() {
-      const res = await fetch("/settings/brand");
-      if (!res.ok) return;
-      const data = await res.json();
-      const el = document.getElementById("brandTopLogin");
-      if (el) el.textContent = (data.top_label || "Jarvis").trim() || "Jarvis";
+      try {
+        const res = await fetch("/settings/brand");
+        if (!res.ok) return;
+        const data = await res.json();
+        const el = document.getElementById("brandTopLogin");
+        if (el) el.textContent = (data.top_label || "Jarvis").trim() || "Jarvis";
+      } catch (err) {
+        console.warn("loadBrand: unable to load brand", err);
+      }
     }
 
     const rememberStored = sessionStorage.getItem("jarvisRememberMe");

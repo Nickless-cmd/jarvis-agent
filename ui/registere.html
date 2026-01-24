@@ -89,9 +89,15 @@
     }
 
     async function applySettings() {
-      const res = await fetch("/settings/public");
-      if (!res.ok) return;
-      const data = await res.json();
+      let data = {};
+      try {
+        const res = await fetch("/settings/public");
+        if (!res.ok) throw new Error("settings/public not ok");
+        data = await res.json();
+      } catch (err) {
+        console.warn("applySettings: unable to load settings/public", err);
+        return;
+      }
       const registerBtn = document.getElementById("registerBtn");
       if (!data.register_enabled) {
         registerBtn.disabled = true;
@@ -115,11 +121,15 @@
     }
 
     async function loadBrand() {
-      const res = await fetch("/settings/brand");
-      if (!res.ok) return;
-      const data = await res.json();
-      const el = document.getElementById("brandTopRegister");
-      if (el) el.textContent = (data.top_label || "Jarvis").trim() || "Jarvis";
+      try {
+        const res = await fetch("/settings/brand");
+        if (!res.ok) return;
+        const data = await res.json();
+        const el = document.getElementById("brandTopRegister");
+        if (el) el.textContent = (data.top_label || "Jarvis").trim() || "Jarvis";
+      } catch (err) {
+        console.warn("loadBrand: unable to load brand", err);
+      }
     }
 
     document.getElementById("registerBtn").addEventListener("click", register);

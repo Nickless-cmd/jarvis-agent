@@ -22,17 +22,43 @@ function deleteCookie(name) {
 }
 
 function getToken() {
-  const token = getCookie("jarvis_token");
+  // 1) Prefer cookie
+  let token = getCookie("jarvis_token");
   if (token) {
     console.debug("[auth] getToken: jarvis_token cookie present");
-  } else {
-    console.debug("[auth] getToken: jarvis_token cookie missing");
+    return token;
   }
-  return token;
+  console.debug("[auth] getToken: jarvis_token cookie missing");
+
+  // 2) Fallback to localStorage (persistent)
+  token = localStorage.getItem(TOKEN_KEY) || "";
+  if (token) {
+    console.debug("[auth] getToken: found token in localStorage");
+    setCookie("jarvis_token", token, 365);
+    return token;
+  }
+
+  // 3) Fallback to sessionStorage (session)
+  token = sessionStorage.getItem(TOKEN_SESSION_KEY) || "";
+  if (token) {
+    console.debug("[auth] getToken: found token in sessionStorage");
+    setCookie("jarvis_token", token, 1);
+    return token;
+  }
+
+  return "";
 }
 
 function setToken(token, remember = true) {
+  // Write cookie + storage so future reads are consistent
   setCookie("jarvis_token", token, remember ? 365 : 1);
+  if (remember) {
+    localStorage.setItem(TOKEN_KEY, token);
+    sessionStorage.removeItem(TOKEN_SESSION_KEY);
+  } else {
+    sessionStorage.setItem(TOKEN_SESSION_KEY, token);
+    localStorage.removeItem(TOKEN_KEY);
+  }
   console.info("[auth] setToken: jarvis_token set (remember=" + remember + ")");
 }
 
@@ -45,6 +71,8 @@ if (typeof window !== 'undefined') {
 
 function clearToken() {
   deleteCookie("jarvis_token");
+  localStorage.removeItem(TOKEN_KEY);
+  sessionStorage.removeItem(TOKEN_SESSION_KEY);
   console.warn("[auth] clearToken: jarvis_token cleared");
   if (window.authStore) window.authStore.reset();
 }

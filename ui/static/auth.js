@@ -26,6 +26,7 @@ function getToken() {
   // 1) Prefer cookie
   let token = getCookie("jarvis_token");
   if (token) {
+    console.debug("[auth] getToken: found cookie jarvis_token (len=", token.length, ")");
     // Mirror to session storage for consistency
     sessionStorage.setItem(TOKEN_SESSION_KEY, token);
     return token;
@@ -43,7 +44,7 @@ function getToken() {
   // 3) Fallback to session storage (current or legacy key)
   token = sessionStorage.getItem(TOKEN_SESSION_KEY) || sessionStorage.getItem(TOKEN_SESSION_LEGACY) || "";
   if (token) {
-    console.info("[auth] repairing jarvis_token from sessionStorage");
+    console.info("[auth] repairing jarvis_token from sessionStorage (len=", token.length, ")");
     // 1 day is enough for a browser session cookie-equivalent
     setCookie("jarvis_token", token, 1);
     sessionStorage.setItem(TOKEN_SESSION_KEY, token);

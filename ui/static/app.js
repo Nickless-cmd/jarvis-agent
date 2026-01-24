@@ -3594,6 +3594,10 @@ async function ensureAuthState() {
       document.body.classList.add('ui-ready');
       setRightbarVisibility(!!profile.is_admin && !authState.adminUnavailable);
     } else {
+      try {
+        const body = await res.clone().text().catch(() => "<no-body>");
+        console.warn("[auth] profile fetch failed", res.status, body);
+      } catch (err) {}
       if (window.authStore && typeof window.authStore.reset === 'function') {
         window.authStore.reset();
       }

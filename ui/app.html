@@ -52,7 +52,7 @@
           <option value="short">💬 Kort</option>
           <option value="deep">🔍 Dybt</option>
         </select>
-        <select id="modelSelect" class="hidden"></select>
+        
         <div id="notifWrap" class="notif-wrap hidden">
           <button id="notificationsBtn" class="control-btn" aria-label="Notifikationer">
             🔔
@@ -174,28 +174,8 @@
             <button id="personaCancelBtn" class="secondary">Annullér</button>
           </div>
         </div>
-        <div id="chatStatusInline" class="status-line">Jarvis  Klar.</div>
         <section class="composer-wrap" aria-label="Chat input">
-          <div class="composer-input">
-            <div class="tools-btn-wrap">
-              <button id="toolsBtn" class="composer-btn" title="Værktøjer" aria-label="Værktøjer">+</button>
-            </div>
-            <textarea id="prompt" placeholder="Skriv en besked eller brug /kommando…" rows="1"></textarea>
-            <button id="micBtn" class="composer-btn" title="Tale til Jarvis" aria-label="Tale til Jarvis">🎤</button>
-            <button id="sendBtn" class="composer-btn send-btn" title="Send">↑</button>
-          </div>
-          <div id="toolsDropdown" class="tools-dropdown hidden">
-            <div class="tools-grid">
-              <label><input type="checkbox" id="toolNews" checked /> Nyheder</label>
-              <label><input type="checkbox" id="toolWeather" checked /> Vejr</label>
-              <label><input type="checkbox" id="toolSearch" checked /> Web</label>
-              <label><input type="checkbox" id="toolCurrency" checked /> Valuta</label>
-              <label><input type="checkbox" id="toolImage" checked /> Billede</label>
-              <label class="admin-only"><input type="checkbox" id="toolSystem" checked /> System</label>
-              <label class="admin-only"><input type="checkbox" id="toolPing" checked /> Ping</label>
-              <label class="admin-only"><input type="checkbox" id="toolProcess" checked /> Processer</label>
-            </div>
-          </div>
+          <!-- composer moved out of main for reliable fixed positioning -->
         </section>
       </div>
       <!-- Settings modal: 2-column layout -->
@@ -243,12 +223,7 @@
       <input id="uploadInput" type="file" class="hidden" />
       <input id="imageUploadInput" type="file" accept="image/*" class="hidden" />
       <!-- Dev: runtime info (populated from /v1/info) -->
-      <div id="devInfo" class="dev-info hidden" aria-hidden="true">
-        <span id="devInfoCompact" class="dev-info-compact"></span>
-        <button id="devInfoToggle" class="dev-info-toggle" aria-expanded="false" aria-label="Toggle dev info">⋯</button>
-        <div id="devInfoFull" class="dev-info-full hidden" aria-hidden="true"></div>
-      </div>
-      <div class="small" id="chatStatus"></div>
+      <!-- devInfo and chatStatus removed to keep area above composer clean -->
 
     </section>
 
@@ -303,13 +278,44 @@
       </div>
     </aside>
   </main>
+  <!-- Composer placed here so fixed positioning is relative to viewport -->
+  <section class="composer-wrap" aria-label="Chat input">
+    <div id="chatStatusInline" class="status-line">Jarvis Klar.</div>
+    <div class="composer-input">
+      <div class="tools-btn-wrap">
+        <button id="toolsBtn" class="composer-btn" title="Værktøjer" aria-label="Værktøjer">+</button>
+      </div>
+      <textarea id="prompt" placeholder="Skriv en besked eller brug /kommando…" rows="1"></textarea>
+      <button id="micBtn" class="composer-btn" title="Tale til Jarvis" aria-label="Tale til Jarvis">🎤</button>
+      <button id="sendBtn" class="composer-btn send-btn" title="Send">↑</button>
+    </div>
+    <div id="toolsDropdown" class="tools-dropdown hidden">
+      <div class="tools-grid">
+        <label><input type="checkbox" id="toolNews" checked /> Nyheder</label>
+        <label><input type="checkbox" id="toolWeather" checked /> Vejr</label>
+        <label><input type="checkbox" id="toolSearch" checked /> Web</label>
+        <label><input type="checkbox" id="toolCurrency" checked /> Valuta</label>
+        <label><input type="checkbox" id="toolImage" checked /> Billede</label>
+        <label class="admin-only"><input type="checkbox" id="toolSystem" checked /> System</label>
+        <label class="admin-only"><input type="checkbox" id="toolPing" checked /> Ping</label>
+        <label class="admin-only"><input type="checkbox" id="toolProcess" checked /> Processer</label>
+      </div>
+    </div>
+  </section>
   <footer class="app-footer">
-    <span id="footerText">Jarvis v.1 @ 2026</span>
-    <span class="footer-links">
-      <a id="footerSupport" href="#">Support</a>
-      <a id="footerContact" href="#">Kontakt</a>
-      <a id="footerLicense" href="#">Open‑source licens</a>
-    </span>
+        <div class="footer-left">
+          <span id="footerBuild">Build: unknown · App: OK · root</span>
+        </div>
+        <div class="footer-center">
+          <span id="footerCenter">Jarvis v.1 — 2026 · All rights reserved.</span>
+        </div>
+        <div class="footer-right">
+          <a href="#/support">Support</a>
+          <span class="sep">·</span>
+          <a href="#/contact">Contact</a>
+          <span class="sep">·</span>
+          <a href="#/license">License</a>
+        </div>
   </footer>
   <div id="cookieBanner" class="cookie-banner" style="display:none;">
     <div class="cookie-card">
@@ -333,6 +339,16 @@
   <script src="/ui/static/api.js?v={{BUILD_ID}}"></script>
   <script src="/ui/static/marked.min.js?v={{BUILD_ID}}"></script>
   <script>window.JARVIS_BUILD_ID="{{BUILD_ID}}";</script>
+  <script>
+    (function (){
+      // Populate footer build info with latest repo build id and environment root
+      try {
+        var id = window.JARVIS_BUILD_ID || '{{BUILD_ID}}';
+        var el = document.getElementById('footerBuild');
+        if (el) el.textContent = 'build:' + id + ' · App: OK · root:/home/bs/vscode/jarvis-agent';
+      } catch (e) { /* noop */ }
+    })();
+  </script>
   <script type="module" src="/ui/static/main.js?v={{BUILD_ID}}"></script>
   </div>
   <div id="loggedOutScreen" class="logged-out hidden">

@@ -1,89 +1,11 @@
 /* ChatGPT-like shell: design tokens + layout primitives (dark-first) */
 
 :root {
-  color-scheme: dark;
-  --bg-primary: #1a1d21;
-  --bg-secondary: #23262b;
-  --sidebar-bg: #202329;
-  --card-bg: #23262b;
-  --panel: #23262b;
-  --border: #2f323a;
-  --border-strong: #3a3d45;
-  --text-primary: #f5f6f7;
-  --text-secondary: #c9ced6;
-  --accent: #10a37f;
-  --danger: #e65a5a;
-  --muted: #9ca3af;
-  --radius-lg: 16px;
-  --radius-md: 12px;
-  --radius-pill: 999px;
-  --sidebar-width: 260px;
-  --header-height: 56px;
-  --footer-height: 56px;
-  --content-max: 960px;
-  --spacing-1: 4px;
-  --spacing-2: 8px;
-  --spacing-3: 12px;
-  --spacing-4: 16px;
-  --spacing-5: 20px;
-  --spacing-6: 24px;
-  --shadow-soft: 0 10px 40px rgba(0,0,0,0.25);
-  --shadow-border: 0 0 0 1px var(--border);
-  --font-sans: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
-}
-
-/* Ensure utility hidden class exists here as well (used by app.js helpers) */
-.hidden { display: none !important; }
-
-/* Ensure session expiry and logged-out overlays don't affect layout */
-.session-expiry-banner { position: fixed; top: 0; left: 0; right: 0; z-index: 2000; }
-.logged-out { position: fixed; inset: 0; z-index: 3000; display: grid; place-items: center; }
-
-*,
-*::before,
-*::after {
-  box-sizing: border-box;
-}
-::selection { background: rgba(16, 163, 127, 0.25); color: var(--text-primary); }
-
-html, body {
-  margin: 0;
-  padding: 0;
-  min-height: 100%;
+  /* status-row, composer and composer-input duplicates removed to avoid conflicting rules
+     The canonical composer styles live earlier in this file (fixed composer and transparent input).
+  */
   background: var(--bg-primary);
-  color: var(--text-primary);
-  font-family: var(--font-sans);
-}
-
-.app-shell {
-  background: var(--bg-primary);
-  padding-top: var(--header-height);
-  padding-bottom: var(--footer-height);
-}
-
-.logged-out {
-  display: grid;
-  place-items: center;
-  height: 100vh;
-  background: var(--bg-primary);
-  color: var(--text-primary);
-}
-.logged-out-card {
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  padding: 32px;
-  text-align: center;
-  box-shadow: var(--shadow-soft);
-}
-.logged-out button {
-  margin-top: 16px;
-  padding: 10px 16px;
-  border-radius: var(--radius-pill);
-  border: 1px solid var(--border);
-  background: var(--accent);
-  color: #0d1512;
-  cursor: pointer;
+  /* Duplicate sticky/composer styles removed; canonical fixed composer rules are defined earlier */
 }
 
 .chat-layout {
@@ -108,9 +30,9 @@ html, body {
   max-width: var(--sidebar-width);
   position: sticky;
   top: var(--header-height);
-  height: 100vh;
-  z-index: 10;
-  min-height: 0;
+  height: calc(100vh - var(--header-height) - var(--footer-height));
+  overflow: auto;
+  z-index: 20;
 }
 
 .rightbar {
@@ -220,6 +142,7 @@ header.topbar { white-space: nowrap; }
   max-width: var(--content-max);
   margin: 0 auto;
   padding: var(--spacing-5);
+  padding-bottom: 0; /* remove extra bottom gap so toolchips sit flush above composer */
   width: 100%;
   display: flex;
   flex-direction: column;
@@ -243,13 +166,25 @@ header.topbar { white-space: nowrap; }
 }
 
 .composer-wrap {
-  position: sticky;
-  bottom: 0;
-  background: linear-gradient(180deg, rgba(31,33,37,0) 0%, rgba(31,33,37,0.9) 20%, rgba(31,33,37,1) 100%);
-  padding: var(--spacing-4) var(--spacing-5) calc(var(--spacing-5) + 8px);
-  border-top: 1px solid var(--border);
-  backdrop-filter: blur(6px);
-  z-index: 20;
+  position: fixed;
+  left: var(--sidebar-width);
+  right: 0;
+  bottom: calc(var(--footer-height) + var(--composer-extra));
+  padding: var(--spacing-3) var(--spacing-5);
+  border-top: none;
+  background: transparent; /* allow chat background to show through */
+  box-shadow: none;
+  z-index: 2400;
+  max-height: calc(40vh); /* prevent composer from growing into footer */
+  overflow: auto;
+}
+
+.chat-layout.has-rightbar .composer-wrap { right: 320px; }
+
+.status-line {
+  color: var(--text-secondary);
+  padding: 4px 0 8px;
+  font-size: 13px;
 }
 
 .composer-input {
@@ -259,9 +194,9 @@ header.topbar { white-space: nowrap; }
   align-items: center;
   padding: var(--spacing-3);
   border-radius: var(--radius-pill);
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow-border);
+  background: transparent; /* show chat behind */
+  border: none;
+  box-shadow: none;
 }
 
 .composer-input textarea {
@@ -274,6 +209,7 @@ header.topbar { white-space: nowrap; }
   font-size: 15px;
   padding: 6px 4px;
   min-height: 24px;
+  max-height: 20vh;
 }
 .composer-input textarea:focus { outline: none; }
 
@@ -344,10 +280,11 @@ header.topbar { white-space: nowrap; }
 
 /* Responsive: sidebar collapse, modal 1-col, composer sticky, etc. */
 @media (max-width: 1024px) {
-  .chat-layout { grid-template-columns: 70px 1fr; }
+  .chat-layout { grid-template-columns: 70px 1fr; margin-left: 0; }
   .rightbar { display: none; }
-  .sidebar { padding: var(--spacing-3); width: 70px; min-width: 70px; }
+  .sidebar { position: static; padding: var(--spacing-3); width: 70px; min-width: 70px; }
   .sidebar-body { display: none; }
+  .composer-wrap { position: static; left: auto; right: auto; bottom: auto; z-index: 20; }
 }
 
 @media (max-width: 720px) {
@@ -364,18 +301,6 @@ header.topbar { white-space: nowrap; }
 }
 ::selection { background: rgba(16, 163, 127, 0.25); color: var(--text-primary); }
 
-html, body {
-  margin: 0;
-  padding: 0;
-  min-height: 100%;
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  font-family: var(--font-sans);
-}
-
-.app-shell {
-  background: var(--bg-primary);
-}
 
 .chat-layout {
   display: grid;
@@ -483,7 +408,7 @@ html, body {
   align-items: center;
   color: var(--text-secondary);
   padding-top: var(--spacing-3);
-  border-top: 1px solid var(--border);
+  /* no border - toolchips should sit flush above composer */
 }
 
 .composer-wrap {
@@ -502,9 +427,8 @@ html, body {
   align-items: center;
   padding: var(--spacing-3);
   border-radius: var(--radius-pill);
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow-border);
+  background: transparent; /* show chat behind */
+  border: none;
 }
 
 .composer-input textarea {

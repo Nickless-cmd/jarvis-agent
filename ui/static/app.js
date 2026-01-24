@@ -496,6 +496,14 @@ async function probeAdminEndpoints() {
 
 function scrollChatToBottom() {
   const feed = getChatFeed();
+  const chatInner = document.getElementById('chat');
+  // Prefer scrolling the newest message into view for reliability
+  if (chatInner && chatInner.lastElementChild) {
+    try {
+      chatInner.lastElementChild.scrollIntoView({ block: 'end', behavior: 'auto' });
+      return;
+    } catch (err) {}
+  }
   if (feed) {
     feed.scrollTop = feed.scrollHeight;
   }
@@ -2201,12 +2209,21 @@ async function loadFooter() {
   const res = await apiFetch("/settings/footer", { method: "GET" });
   if (!res) return;
   const data = await res.json();
-  if (footerText) footerText.textContent = data.text || "Jarvis v.1 @ 2026";
-  if (footerSupport) footerSupport.href = data.support_url || "#";
-  if (footerContact) footerContact.href = data.contact_url || "#";
-  if (footerLicense) {
-    footerLicense.textContent = data.license_text || "Open‑source licens";
-    footerLicense.href = data.license_url || "#";
+  // New footer layout: center text + left build + right links
+  try {
+    const center = document.getElementById('footerCenter');
+    if (center) center.textContent = data.text || 'Jarvis v.1 — 2026 · All rights reserved.';
+    const build = document.getElementById('footerBuild');
+    if (build) build.textContent = `build:${window.JARVIS_BUILD_ID||''} · App: OK · root:/home/bs/vscode/jarvis-agent`;
+    const right = document.querySelector('.app-footer .footer-right');
+    if (right) {
+      const links = right.querySelectorAll('a');
+      if (links[0]) { links[0].href = data.support_url || '#'; links[0].textContent = data.support_text || 'Support'; }
+      if (links[1]) { links[1].href = data.contact_url || '#'; links[1].textContent = data.contact_text || 'Contact'; }
+      if (links[2]) { links[2].href = data.license_url || '#'; links[2].textContent = data.license_text || 'License'; }
+    }
+  } catch (err) {
+    console.warn('loadFooter failed to apply footer settings', err);
   }
 }
 

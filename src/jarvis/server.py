@@ -47,6 +47,7 @@ from jarvis.auth import (
     get_or_create_default_user,
     get_user_by_token,
     login_user,
+    logout_user,
     register_user,
     verify_user_password,
 )
@@ -79,6 +80,8 @@ from jarvis.notes import (
     delete_note,
     list_due_note_reminders,
 )
+from jarvis.code_rag.index import get_index_dim  # type: ignore
+from jarvis.code_rag.index import _probe_embedding_dim  # type: ignore
 import requests
 from jarvis.tickets import (
     create_ticket,
@@ -151,6 +154,65 @@ if not _req_logger.handlers:
     _req_logger.addHandler(file_handler)
 _req_logger.setLevel(logging.INFO)
 _last_log_cleanup = 0.0
+
+# Stream cancellation tracking - maps trace_id to cancellation flag
+_stream_cancellations: dict[str, bool] = {}
+_stream_cancellations_lock = asyncio.Lock()
+
+async def set_stream_cancelled(trace_id: str):
+    """Mark a stream as cancelled."""
+    async with _stream_cancellations_lock:
+        _stream_cancellations[trace_id] = True
+    _req_logger.debug(f"Stream marked as cancelled: {trace_id}")
+
+async def is_stream_cancelled(trace_id: str) -> bool:
+    """Check if a stream has been marked as cancelled."""
+    async with _stream_cancellations_lock:
+        return _stream_cancellations.get(trace_id, False)
+
+async def clear_stream_cancelled(trace_id: str):
+    """Clear cancellation flag for a stream."""
+    async with _stream_cancellations_lock:
+        _stream_cancellations.pop(trace_id, None)
+
+def check_stream_cancelled_sync(trace_id: str) -> bool:
+    """Check if a stream has been marked as cancelled (synchronous version for threads)."""
+    return _stream_cancellations.get(trace_id, False)
+
+async def _stream_simple_response(
+    request: Request,
+    text: str,
+    model: str,
+    session_id: str | None,
+    trace_id: str,
+):
+    """
+    Async generator that streams a simple text response with frequent disconnect checks.
+    Used for pre-agent responses (sensitive content, quota, banner, etc).
+    """
+    try:
+        stream_id = f"chatcmpl-{uuid.uuid4().hex}"
+        _req_logger.info(f"stream_simple_start trace={trace_id} session={session_id}")
+        
+        for chunk in _stream_chunks(text, model, stream_id=stream_id, session_id=session_id, trace_id=trace_id):
+            # Check for disconnect frequently
+            if await request.is_disconnected():
+                _req_logger.info(f"stream_simple_disconnected trace={trace_id} session={session_id}")
+                await set_stream_cancelled(trace_id)
+                return
+            yield chunk
+        
+        # Note: _stream_chunks already yields "data: [DONE]\n\n" at the end, so no need to yield again
+        _req_logger.info(f"stream_simple_done trace={trace_id} session={session_id}")
+    except asyncio.CancelledError:
+        _req_logger.info(f"stream_simple_cancelled trace={trace_id} session={session_id}")
+        raise
+    except Exception as exc:
+        _req_logger.exception(f"stream_simple_error trace={trace_id}: {exc}")
+        raise
+    finally:
+        await clear_stream_cancelled(trace_id)
+
 def is_test_mode():
     try:
         from jarvis.config import is_test_mode as cfg_test
@@ -703,12 +765,71 @@ MAX_STREAM_SECONDS = int(os.getenv("JARVIS_MAX_STREAM_SECONDS", "120"))
 
 
 def _stream_error_event(message: str, error_type: str, trace_id: str | None = None, session_id: str | None = None):
-    payload = {"ok": False, "error": {"type": error_type, "message": message}}
-    if trace_id:
-        payload["error"]["trace_id"] = trace_id
-    if session_id:
-        payload["session_id"] = session_id
-    return f"event: error\ndata: {json.dumps(payload)}\n\n"
+    """Return OpenAI-compatible error chunk (strictly SSE format)."""
+    payload = {
+        "id": trace_id or "error",
+        "object": "chat.completion.chunk",
+        "created": int(time.time()),
+        "model": "unknown",
+        "choices": [{"index": 0, "delta": {}, "finish_reason": "error"}],
+        "error": {"type": error_type, "message": message}
+    }
+    return f"data: {json.dumps(payload)}\n\n"
+
+
+def _emit_stream_text_events(
+    text: str,
+    stream_id: str,
+    request_id: str | None = None,
+    trace_id: str | None = None,
+    session_id: str | None = None,
+):
+    """
+    Emit EventBus events for streaming text (events only, no SSE yields).
+    The main generator will listen for these events and yield SSE chunks to client.
+    This is what the agent task should call to trigger streaming.
+    """
+    created = int(time.time())
+    started_at = time.time()
+
+    # Emit agent.stream.start
+    _emit_event("agent.stream.start", {
+        "session_id": session_id,
+        "message_id": stream_id,
+        "request_id": request_id or stream_id,
+        "trace_id": trace_id,
+        "started_at": started_at,
+    })
+
+    sequence = 0
+    text_buffer = []
+    for part in _chunk_text(text):
+        text_buffer.append(part)
+        # Emit agent.stream.delta event
+        _emit_event("agent.stream.delta", {
+            "message_id": stream_id,
+            "request_id": request_id or stream_id,
+            "sequence": sequence,
+            "token": part,
+            "role": "assistant",
+            "trace_id": trace_id,
+            "session_id": session_id,
+        })
+        sequence += 1
+
+    # Emit agent.stream.final
+    duration_ms = int((time.time() - started_at) * 1000)
+    _emit_event("agent.stream.final", {
+        "session_id": session_id,
+        "message_id": stream_id,
+        "request_id": request_id or stream_id,
+        "trace_id": trace_id,
+        "text": "".join(text_buffer),
+        "duration_ms": duration_ms,
+        "parts": sequence,
+    })
+    # Always emit a chat.token at least once (final text) to satisfy contract
+    emit_chat_token(session_id, request_id or stream_id, "".join(text_buffer), sequence=sequence, trace_id=trace_id)
 
 
 def _stream_text_events(
@@ -722,6 +843,7 @@ def _stream_text_events(
     """
     Emit EventBus events for streaming text and yield SSE data.
     This is the canonical way to stream text responses via EventBus.
+    Used for direct SSE responses (not via main generator).
     """
     created = int(time.time())
     started_at = time.time()
@@ -816,15 +938,11 @@ def _stream_chunks(
     return _stream_text_events(text, model, stream_id, trace_id, session_id)
 
 
+
 def _status_event(state: str, tool: str | None = None, trace_id: str | None = None, session_id: str | None = None):
-    payload = {"state": state}
-    if tool:
-        payload["tool"] = tool
-    if trace_id:
-        payload["trace_id"] = trace_id
-    if session_id:
-        payload["session_id"] = session_id
-    return f"event: status\ndata: {json.dumps(payload)}\n\n"
+    """Status events should NOT be sent in SSE output stream (breaks OpenAI format).
+    This function is deprecated - return None to indicate no output."""
+    return None
 
 
 def _resolve_user(user_token: str | None) -> dict:
@@ -1359,6 +1477,20 @@ async def admin_login(request: Request, req: LoginRequest, authorization: str | 
         )
     _req_logger.info("ADMIN LOGIN success user=%s is_admin=%s", user["username"], is_admin_user(user))
     return response
+
+
+@app.post("/auth/logout")
+async def logout(token: str | None = Depends(_resolve_token)):
+    """Log out current user by invalidating token."""
+    if not token:
+        raise HTTPException(401, detail="Not authenticated")
+    if logout_user(token):
+        _req_logger.info("LOGOUT success token=%s", token[:8] + "...")
+        response = JSONResponse({"ok": True})
+        response.delete_cookie("jarvis_token", path="/")
+        return response
+    # Token not found or is API bearer token (can't logout)
+    raise HTTPException(400, detail="Could not logout")
 
 
 @app.get("/sessions")
@@ -2439,12 +2571,11 @@ async def chat(
         if session_id:
             add_message(session_id, "assistant", reply)
         if stream:
-            def sensitive_gen():
-                stream_id = f"chatcmpl-{uuid.uuid4().hex}"
-                for chunk in _stream_chunks(reply, model, stream_id=stream_id, session_id=session_id):
-                    yield chunk
-                yield "data: [DONE]\n\n"
-            return StreamingResponse(sensitive_gen(), media_type="text/event-stream")
+            trace_id = uuid.uuid4().hex
+            return StreamingResponse(
+                _stream_simple_response(req, reply, model, session_id, trace_id),
+                media_type="text/event-stream"
+            )
         return {
             "id": f"chatcmpl-{uuid.uuid4().hex}",
             "object": "chat.completion",
@@ -2515,12 +2646,11 @@ async def chat(
             if session_id:
                 add_message(session_id, "assistant", reply)
             if stream:
-                def prompt_gen():
-                    stream_id = f"chatcmpl-{uuid.uuid4().hex}"
-                    for chunk in _stream_chunks(reply, model, stream_id=stream_id, session_id=session_id):
-                        yield chunk
-                    yield "data: [DONE]\n\n"
-                return StreamingResponse(prompt_gen(), media_type="text/event-stream")
+                trace_id = uuid.uuid4().hex
+                return StreamingResponse(
+                    _stream_simple_response(req, reply, model, session_id, trace_id),
+                    media_type="text/event-stream"
+                )
             return {
                 "id": f"chatcmpl-{uuid.uuid4().hex}",
                 "object": "chat.completion",
@@ -2553,12 +2683,11 @@ async def chat(
             if session_id:
                 add_message(session_id, "assistant", reply)
             if stream:
-                def banner_gen():
-                    stream_id = f"chatcmpl-{uuid.uuid4().hex}"
-                    for chunk in _stream_chunks(reply, model, stream_id=stream_id, session_id=session_id):
-                        yield chunk
-                    yield "data: [DONE]\n\n"
-                return StreamingResponse(banner_gen(), media_type="text/event-stream")
+                trace_id = uuid.uuid4().hex
+                return StreamingResponse(
+                    _stream_simple_response(req, reply, model, session_id, trace_id),
+                    media_type="text/event-stream"
+                )
             return {
                 "id": f"chatcmpl-{uuid.uuid4().hex}",
                 "object": "chat.completion",
@@ -2596,26 +2725,41 @@ async def chat(
             if session_id:
                 add_message(session_id, "assistant", reply)
             if stream:
-                def quota_gen():
-                    if note_reminder:
-                        yield (
-                            "event: meta\n"
-                            f"data: {json.dumps({'meta': {'note_reminder': note_reminder}})}\n\n"
-                        )
-                    if expiry_warning:
-                        yield (
-                            "event: meta\n"
-                            f"data: {json.dumps({'meta': {'expiry_warning': expiry_warning}})}\n\n"
-                        )
-                    yield (
-                        "event: meta\n"
-                        f"data: {json.dumps({'meta': {'quota_warning': quota_warning}})}\n\n"
-                    )
-                    stream_id = f"chatcmpl-{uuid.uuid4().hex}"
-                    for chunk in _stream_chunks(reply, model, stream_id=stream_id, session_id=session_id):
-                        yield chunk
-                    yield "data: [DONE]\n\n"
-                return StreamingResponse(quota_gen(), media_type="text/event-stream")
+                trace_id = uuid.uuid4().hex
+                
+                async def quota_gen_async():
+                    try:
+                        stream_id = f"chatcmpl-{uuid.uuid4().hex}"
+                        _req_logger.info(f"stream_quota_start trace={trace_id} session={session_id}")
+                        
+                        # Note: metadata (note_reminder, expiry_warning, quota_warning) are NOT sent
+                        # in SSE stream as that would break OpenAI format compatibility.
+                        # Metadata can be sent via separate endpoints if needed.
+                        
+                        # Yield content chunks (strictly OpenAI format only)
+                        chunks_sent = 0
+                        for chunk in _stream_chunks(reply, model, stream_id=stream_id, session_id=session_id):
+                            if await req.is_disconnected():
+                                _req_logger.info(f"stream_quota_disconnected trace={trace_id}")
+                                await set_stream_cancelled(trace_id)
+                                return
+                            if chunks_sent == 0:
+                                _req_logger.info(f"first_chunk trace={trace_id} session={session_id}")
+                            yield chunk
+                            chunks_sent += 1
+                        
+                        # Note: _stream_chunks already yields "data: [DONE]\n\n" at the end, so no need to yield again
+                        _req_logger.info(f"stream_quota_done trace={trace_id} chunks_sent={chunks_sent}")
+                    except asyncio.CancelledError:
+                        _req_logger.info(f"stream_quota_cancelled trace={trace_id}")
+                        raise
+                    except Exception as exc:
+                        _req_logger.exception(f"stream_quota_error trace={trace_id}: {exc}")
+                        raise
+                    finally:
+                        await clear_stream_cancelled(trace_id)
+                
+                return StreamingResponse(quota_gen_async(), media_type="text/event-stream")
             response = {
                 "id": f"chatcmpl-{uuid.uuid4().hex}",
                 "object": "chat.completion",
@@ -2652,6 +2796,7 @@ async def chat(
             done_sent = False
             agent_start_time = time.time()
             chat_start_time = time.time()
+            _req_logger.info(f"stream_start trace={trace_id} session={session_id} user={user['username']}")
             emit_chat_start(session_id, stream_id, model, trace_id=trace_id)
             
             # Subscribe to agent.stream events for this trace_id
@@ -2716,6 +2861,7 @@ async def chat(
                 async def run_agent_task():
                     nonlocal agent_result, agent_error
                     try:
+                        _req_logger.debug(f"agent_task_start trace={trace_id}")
                         # Run agent
                         result = await asyncio.to_thread(
                             run_agent,
@@ -2725,8 +2871,10 @@ async def chat(
                             allowed_tools=allowed_tools,
                             ui_city=ui_city,
                             ui_lang=ui_lang,
+                            trace_id=trace_id,
                         )
                         agent_result = result
+                        _req_logger.debug(f"agent_task_done trace={trace_id}")
                         
                         # Process result and emit streaming events
                         if result.get("meta", {}).get("tool_used"):
@@ -2751,15 +2899,14 @@ async def chat(
                             text_stream = f"{quota_warning}\n\n{text_stream}"
                         
                         # Emit EventBus events for streaming (canonical approach)
-                        # Agent execution only emits events via EventBus - no direct streaming
-                        await asyncio.to_thread(lambda: list(_stream_text_events(
+                        # The main generator will listen for these events and yield SSE chunks to client
+                        await asyncio.to_thread(lambda: _emit_stream_text_events(
                             text_stream,
-                            model,
                             stream_id=stream_id,
                             request_id=stream_id,
                             trace_id=trace_id,
                             session_id=session_id,
-                        )))
+                        ))
                         
                     except asyncio.CancelledError:
                         # CancelledError should not emit error events - it's handled by the main generator
@@ -2792,7 +2939,24 @@ async def chat(
                 
                 # Process streaming events
                 tokens_emitted = False
+                chunks_sent = 0
+                first_chunk_sent = False
+                bytes_sent = 0
                 while True:
+                    # Check for disconnect before processing events
+                    if await req.is_disconnected():
+                        _req_logger.info(f"stream_disconnected trace={trace_id} session={session_id}")
+                        await set_stream_cancelled(trace_id)
+                        if agent_task and not agent_task.done():
+                            agent_task.cancel()
+                        try:
+                            # Attempt to terminate SSE cleanly
+                            yield "data: [DONE]\n\n"
+                        except Exception:
+                            pass
+                        _req_logger.info(f"stream_cleanup trace={trace_id} session={session_id}")
+                        return
+                    
                     try:
                         event_type, payload = await asyncio.wait_for(event_queue.get(), timeout=0.1)
                         
@@ -2809,7 +2973,13 @@ async def chat(
                                 "session_id": session_id,
                                 "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
                             }
-                            yield f"data: {json.dumps(head)}\n\n"
+                            chunk = f"data: {json.dumps(head)}\n\n"
+                            yield chunk
+                            if not first_chunk_sent:
+                                _req_logger.info(f"first_chunk trace={trace_id} session={session_id}")
+                                first_chunk_sent = True
+                            chunks_sent += 1
+                            bytes_sent += len(chunk)
                         
                         elif event_type == "agent.stream.delta":
                             # Yield data chunk
@@ -2824,19 +2994,21 @@ async def chat(
                                 "session_id": session_id,
                                 "choices": [{"index": 0, "delta": {"content": payload["token"]}, "finish_reason": None}],
                             }
-                            yield f"data: {json.dumps(data)}\n\n"
+                            chunk = f"data: {json.dumps(data)}\n\n"
+                            yield chunk
+                            if not first_chunk_sent:
+                                _req_logger.info(f"first_chunk trace={trace_id} session={session_id}")
+                                first_chunk_sent = True
+                            chunks_sent += 1
+                            bytes_sent += len(chunk)
                             # Emit chat.token (small payload)
                             emit_chat_token(session_id, stream_id, payload.get("token") or "", sequence=payload.get("sequence"), trace_id=trace_id)
                             tokens_emitted = True
                         
                         elif event_type == "agent.stream.status":
-                            # Yield status event for tool usage
-                            yield _status_event(
-                                payload["status"],
-                                payload.get("tool"),
-                                trace_id=trace_id,
-                                session_id=session_id,
-                            )
+                            # Status events are NOT sent to client - they break OpenAI SSE format
+                            _req_logger.debug(f"stream_status trace={trace_id} status={payload.get('status')}")
+                            continue
                         
                         elif event_type == "agent.stream.final":
                             if not tokens_emitted:
@@ -2854,20 +3026,32 @@ async def chat(
                                 "session_id": session_id,
                                 "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
                             }
-                            yield f"data: {json.dumps(tail)}\n\n"
-                            yield "data: [DONE]\n\n"
+                            tail_chunk = f"data: {json.dumps(tail)}\n\n"
+                            yield tail_chunk
+                            chunks_sent += 1
+                            bytes_sent += len(tail_chunk)
+                            done_chunk = "data: [DONE]\n\n"
+                            yield done_chunk
+                            bytes_sent += len(done_chunk)
                             done_sent = True
+                            _req_logger.info(f"stream_done trace={trace_id} chunks_sent={chunks_sent} bytes_sent={bytes_sent}")
                             emit_chat_end(session_id, stream_id, ok=True, trace_id=trace_id)
                             break
                         
                         elif event_type == "agent.stream.error":
-                            yield _stream_error_event(
+                            error_resp = _stream_error_event(
                                 payload.get("error_message", "Stream error"),
                                 payload.get("error_type", "Error"),
                                 trace_id,
                                 session_id,
                             )
-                            yield "data: [DONE]\n\n"
+                            yield error_resp
+                            chunks_sent += 1
+                            bytes_sent += len(error_resp)
+                            done_chunk = "data: [DONE]\n\n"
+                            yield done_chunk
+                            bytes_sent += len(done_chunk)
+                            _req_logger.info(f"stream_error trace={trace_id} error_type={payload.get('error_type')} chunks_sent={chunks_sent} bytes_sent={bytes_sent}")
                             emit_chat_end(
                                 session_id,
                                 stream_id,
@@ -2949,6 +3133,8 @@ async def chat(
                         
                         # Check for disconnect/timeout
                         if await req.is_disconnected():
+                            _req_logger.info(f"Client disconnected: trace={trace_id}")
+                            await set_stream_cancelled(trace_id)
                             if agent_task and not agent_task.done():
                                 agent_task.cancel()
                             try:
@@ -2961,8 +3147,15 @@ async def chat(
                                 })
                             except Exception:
                                 pass
+                            try:
+                                yield "data: [DONE]\n\n"
+                            except Exception:
+                                pass
+                            _req_logger.info(f"stream_cleanup trace={trace_id} session={session_id}")
                             return
                         if time.monotonic() > deadline:
+                            _req_logger.info(f"Stream timeout: trace={trace_id}")
+                            await set_stream_cancelled(trace_id)
                             if agent_task and not agent_task.done():
                                 agent_task.cancel()
                             try:
@@ -3005,7 +3198,7 @@ async def chat(
                         yield "data: [DONE]\n\n"
                         return
                 
-                yield _status_event("idle", trace_id=trace_id, session_id=session_id)
+                # Do not send status events to client; stream is complete
                 
                 # Emit agent.done event
                 try:
@@ -3054,12 +3247,19 @@ async def chat(
                     yield "data: [DONE]\n\n"
             finally:
                 # Cleanup
+                _req_logger.info(f"stream_cleanup trace={trace_id} session={session_id}")
                 try:
                     event_queue.cleanup()
                 except Exception:
                     pass
                 if agent_task and not agent_task.done():
+                    _req_logger.debug(f"cancelling_agent_task trace={trace_id}")
                     agent_task.cancel()
+                # Clear cancellation flag
+                try:
+                    await clear_stream_cancelled(trace_id)
+                except Exception:
+                    pass
 
         return StreamingResponse(generator(), media_type="text/event-stream")
 
@@ -3085,6 +3285,7 @@ async def chat(
                 allowed_tools=allowed_tools,
                 ui_city=ui_city,
                 ui_lang=ui_lang,
+                trace_id=trace_id,
             )
         except Exception as exc:
             try:
@@ -3188,6 +3389,39 @@ async def chat(
     if payload_meta is not None:
         response["meta"] = payload_meta
     return response
+
+
+@app.post("/v1/chat/stop")
+async def chat_stop(
+    payload: dict = None,
+    authorization: str | None = Header(None),
+    token: str | None = Depends(_resolve_token),
+):
+    """Stop an active streaming chat request.
+    
+    Request body should contain:
+    {
+        "trace_id": "the-trace-id-from-streaming-response"
+    }
+    
+    Or query param: /v1/chat/stop?trace_id=xxx
+    """
+    if not _auth_or_token_ok(authorization, token):
+        raise HTTPException(401, detail="Invalid API key")
+    
+    trace_id = None
+    if isinstance(payload, dict):
+        trace_id = payload.get("trace_id")
+    
+    if trace_id:
+        _req_logger.info(f"stream_stop_requested trace={trace_id}")
+        try:
+            await set_stream_cancelled(trace_id)
+        except Exception as e:
+            _req_logger.warning(f"Failed to set stream cancelled: {e}")
+        return {"ok": True, "trace_id": trace_id}
+    
+    return {"ok": False, "error": "Missing trace_id"}
 
 
 @app.get("/config")
@@ -3410,6 +3644,34 @@ async def status():
         "ok": app_state.demo_user_ensured and app_state.paths_logged,
         "online": True,
         "version": "1.0.0"
+    }
+
+
+@app.get("/health/embeddings")
+async def health_embeddings():
+    """Lightweight embedding/FAISS status probe.
+    
+    Returns:
+    - model: current embedding model
+    - embedding_dim: actual embedding dimension from provider
+    - embedding_dim_current: runtime cached dimension
+    - faiss_index_dim: dimension of FAISS index on disk
+    """
+    try:
+        from jarvis.memory import get_embedding_dim
+        embed_dim_runtime = get_embedding_dim()
+    except Exception:
+        embed_dim_runtime = 384
+    
+    model = os.getenv("OLLAMA_EMBED_MODEL") or "nomic-embed-text:latest"
+    embed_dim = _probe_embedding_dim()
+    index_dim = get_index_dim()
+    return {
+        "model": model,
+        "embedding_dim_probed": embed_dim,
+        "embedding_dim_current": embed_dim_runtime,
+        "faiss_index_dim": index_dim,
+        "ok": embed_dim == index_dim if index_dim else True,
     }
 
 

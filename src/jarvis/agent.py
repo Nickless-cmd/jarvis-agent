@@ -1557,6 +1557,7 @@ def run_agent(
     allowed_tools: list[str] | None = None,
     ui_city: str | None = None,
     ui_lang: str | None = None,
+    trace_id: str | None = None,
 ):
     from jarvis.agent_core import orchestrator
     return orchestrator.handle_turn(
@@ -1566,6 +1567,7 @@ def run_agent(
         allowed_tools=allowed_tools,
         ui_city=ui_city,
         ui_lang=ui_lang,
+        trace_id=trace_id,
     )
 def _run_agent_core_fallback(
     user_id: str,

@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useChat } from '../contexts/ChatContext'
 
 export default function Composer() {
-  const { activeSessionId, sendMessage } = useChat()
+  const { activeSessionId, sendMessage, isStreaming, stopStreaming } = useChat()
   const [value, setValue] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -18,7 +18,7 @@ export default function Composer() {
     }
   }
 
-  const disabled = busy || !value.trim() || !activeSessionId
+  const disabled = busy || isStreaming || !value.trim() || !activeSessionId
 
   return (
     <div className="w-full px-4 py-4 bg-neutral-950">
@@ -53,13 +53,23 @@ export default function Composer() {
               >
                 🎤
               </button>
-              <button
-                onClick={onSend}
-                disabled={disabled}
-                className="h-10 px-4 rounded-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-sm font-medium text-neutral-50 transition"
-              >
-                Send
-              </button>
+              {!isStreaming && (
+                <button
+                  onClick={onSend}
+                  disabled={disabled}
+                  className="h-10 px-4 rounded-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-sm font-medium text-neutral-50 transition"
+                >
+                  Send
+                </button>
+              )}
+              {isStreaming && (
+                <button
+                  onClick={stopStreaming}
+                  className="h-10 px-4 rounded-full bg-red-600 hover:bg-red-500 text-sm font-medium text-neutral-50 transition"
+                >
+                  Stop
+                </button>
+              )}
             </div>
           </div>
         </div>

@@ -1,14 +1,30 @@
 export type FetchInit = RequestInit
 
+export class UnauthorizedError extends Error {
+  status: number
+  body: any
+  constructor(message = 'Unauthorized', status = 401, body: any = null) {
+    super(message)
+    this.status = status
+    this.body = body
+  }
+}
+
 function getAuthHeaders(): Record<string, string> {
   const headers: Record<string, string> = {}
-  // Always send devkey as Authorization Bearer
-  headers['Authorization'] = 'Bearer devkey'
-  // Send jarvis_token from cookie as X-User-Token if available
-  const cookie = document.cookie.match(/jarvis_token=([^;]*)/)?.[1]
-  if (cookie) {
-    headers['X-User-Token'] = decodeURIComponent(cookie)
-  }
+  // Prefer persisted token from localStorage (cookie may be httpOnly and unreadable)
+  try {
+    const ls = typeof window !== 'undefined' ? window.localStorage.getItem('jarvis_token') : null
+    if (ls) headers['Authorization'] = `Bearer ${ls}`
+  } catch {}
+  // Fallback devkey for development if no user token
+  if (!headers['Authorization']) headers['Authorization'] = 'Bearer devkey'
+  // Optionally include X-User-Token from cookie if accessible (non-httpOnly)
+  try {
+    const m = typeof document !== 'undefined' ? document.cookie.match(/jarvis_token=([^;]*)/) : null
+    const cookie = m && m[1] ? decodeURIComponent(m[1]) : null
+    if (cookie) headers['X-User-Token'] = cookie
+  } catch {}
   return headers
 }
 
@@ -24,6 +40,18 @@ async function apiFetch(path: string, init: FetchInit = {}) {
   let data: any = text
   try { data = text ? JSON.parse(text) : null } catch (_) { /* keep text */ }
 
+  if (res.status === 401 || res.status === 403) {
+    // Avoid redirect loops: only redirect once per session
+    try {
+      const key = 'jarvis_auth_redirected'
+      const already = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(key) : null
+      if (!already) {
+        sessionStorage.setItem(key, '1')
+        window.location.href = '/login'
+      }
+    } catch {}
+    throw new UnauthorizedError('Unauthorized', res.status, data)
+  }
   if (!res.ok) {
     const err: any = new Error(`HTTP ${res.status}`)
     err.status = res.status
@@ -87,102 +115,6 @@ export async function sendChatMessage(opts: SendOpts) {
 
 // Streaming helper: calls `onChunk` for each text increment received from the server.
 // Returns an object with `abort()` to cancel the stream.
-export async function sendChatMessageStream(
-  opts: { sessionId?: string; prompt: string },
-  onChunk: (chunk: string) => void,
-  onStatus?: (status: string) => void,
-) {
-  const { sessionId, prompt } = opts
-  const authHeaders = getAuthHeaders()
-  const headers: Record<string,string> = { 'Content-Type': 'application/json', ...authHeaders }
-  if (sessionId) headers['X-Session-Id'] = sessionId
-  const ac = new AbortController()
-  const res = await fetch('/v1/chat/completions', {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      prompt,
-      messages: [{ role: 'user', content: prompt }],
-      stream: true
-    }),
-    credentials: 'include',
-    signal: ac.signal,
-  })
-  if (!res.ok) {
-    const err: any = new Error('Network error')
-    err.status = res.status
-    throw err
-  }
-
-  const reader = res.body?.getReader()
-  if (!reader) return { abort: () => ac.abort() }
-  const dec = new TextDecoder()
-  let buf = ''
-
-  async function pump() {
-    try {
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buf += dec.decode(value, { stream: true })
-        const parts = buf.split(/\n\n/)
-        buf = parts.pop() || ''
-
-        for (const part of parts) {
-          const lines = part.split(/\n/).map(l => l.trim()).filter(Boolean)
-
-          for (const line of lines) {
-            if (line.startsWith('event:')) continue
-            if (!line.startsWith('data:')) continue
-
-            const payload = line.replace(/^data:\s*/, '')
-            if (payload === '[DONE]') {
-              ac.abort()
-              return
-            }
-            try {
-              const parsed = JSON.parse(payload)
-
-              // status handling (e.g. { status: { state: "thinking" } })
-              if (parsed.status && typeof parsed.status.state === 'string') {
-                onStatus?.(parsed.status.state)
-                continue
-              }
-
-              // Only append assistant content from OpenAI-style choices
-              if (parsed.choices && parsed.choices[0]) {
-                const choice = parsed.choices[0]
-                const delta = choice.delta
-                const message = choice.message
-                const txt =
-                  (delta && delta.content) ||
-                  (message && message.content) ||
-                  parsed.text ||
-                  ''
-                if (txt) onChunk(txt)
-                continue
-              }
-
-              // If explicit text field (non-status), append
-              if (parsed.text) {
-                onChunk(parsed.text)
-              }
-            } catch (_) {
-              // Non-JSON chunks are ignored for text append to avoid noisy UI
-            }
-          }
-        }
-      }
-    } catch (err) {
-      if ((err as any)?.name !== 'AbortError') throw err
-    }
-  }
-
-  pump().catch(() => {})
-
-  return {
-    abort: () => ac.abort(),
-  }
-}
+// Deprecated: use streamChat in src/lib/stream.ts for streaming
 
 export default apiFetch

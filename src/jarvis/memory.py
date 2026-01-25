@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 import os
 import re
 from dataclasses import dataclass
@@ -7,6 +8,19 @@ from dataclasses import dataclass
 import numpy as np
 from jarvis.provider.ollama_client import ollama_request
 from jarvis.agent_core.cache import TTLCache
+
+logger = logging.getLogger(__name__)
+
+
+class EmbeddingDimMismatch(Exception):
+    def __init__(self, actual: int, expected: int, model: str):
+        super().__init__(f"EmbeddingDimMismatch(actual={actual}, expected={expected}, model={model})")
+        self.actual = actual
+        self.expected = expected
+        self.model = model
+
+# Ensure we only log embedding length once per trace
+_logged_embed_len_traces: set[str] = set()
 
 try:
     import faiss  # type: ignore
@@ -57,9 +71,11 @@ except ImportError:  # pragma: no cover - fallback for environments without fais
 
     faiss = _DummyFaiss()
 
+# Default embedding dimension - may be overridden by provider
+# This is just a fallback; the actual dimension comes from probing
 DIM = 384
 _EMBEDDER = None
-
+_EMBEDDING_DIM_RUNTIME: int | None = None  # Cache the probed dimension from Ollama
 DATA_DIR = os.path.abspath(
     os.path.join(os.path.dirname(os.path.dirname(__file__)), "..", "data", "memory")
 )
@@ -92,6 +108,7 @@ _last_cache_status: str | None = None
 def _hash_embed(text: str, dim: int = DIM):
     digest = hashlib.sha256(text.encode("utf-8")).digest()
     seed = int.from_bytes(digest[:4], "little")
+    # Deterministic best-effort embedding to ensure fallback never raises
     rng = np.random.default_rng(seed)
     vec = rng.random(dim, dtype=np.float32)
     return vec
@@ -126,49 +143,150 @@ def _to_vec(x) -> np.ndarray:
     return vec
 
 
-def _encode(text: str):
-    embedder = _get_embedder()
-    if os.getenv("DISABLE_EMBEDDINGS") == "1":
-        return _to_vec(_hash_embed(text))
-    backend = os.getenv("EMBEDDINGS_BACKEND", "ollama")
-    if backend == "ollama":
+def get_embedding_dim() -> int:
+    """Get the current embedding dimension (cached after first probe).
+    This ensures we use the actual dimension from the embedding provider (e.g., 768 from Ollama nomic-embed-text)."""
+    global _EMBEDDING_DIM_RUNTIME
+    if _EMBEDDING_DIM_RUNTIME is not None:
+        return _EMBEDDING_DIM_RUNTIME
+    # Probe once and cache
+    try:
+        # Try a tiny probe to get the dimension without full encoding
+        from jarvis.provider.ollama_client import ollama_request
+        model = os.getenv("OLLAMA_EMBED_MODEL") or "nomic-embed-text:latest"
         url = os.getenv("OLLAMA_EMBED_URL", "http://127.0.0.1:11434/api/embeddings")
-        model = os.getenv("OLLAMA_EMBED_MODEL", "nomic-embed-text")
-        resp = ollama_request(
-            url,
-            {"model": model, "prompt": text},
-            connect_timeout=3.0,
-            read_timeout=30.0,
-            retries=2,
-        )
+        resp = ollama_request(url, {"model": model, "prompt": "."}, connect_timeout=2.0, read_timeout=10.0, retries=1)
         if resp.get("ok"):
             data = resp.get("data") or {}
-            vec = data.get("embedding")
-            if not vec:
-                raise RuntimeError("Missing embedding from Ollama")
-            return _to_vec(vec)
-        error = resp.get("error") or {}
-        raise RuntimeError(
-            f"Ollama embeddings failed ({error.get('type')}): {error.get('message')} [trace_id={error.get('trace_id')}]"
-        )
-    return _to_vec(embedder.encode([text])[0])
+            vec = data.get("embedding", [])
+            if vec:
+                _EMBEDDING_DIM_RUNTIME = len(vec)
+                logger.info(f"Embedding dimension auto-detected from {model}: {_EMBEDDING_DIM_RUNTIME}")
+                return _EMBEDDING_DIM_RUNTIME
+    except Exception as e:
+        logger.warning(f"Failed to auto-probe embedding dimension: {e}")
+    
+    # Fallback
+    _EMBEDDING_DIM_RUNTIME = DIM
+    logger.warning(f"Using fallback embedding dimension: {DIM}")
+    return DIM
+
+
+def _encode(text: str, best_effort: bool = True, *, expected_dim: int | None = None, trace_id: str | None = None):
+    """Encode text to embedding. Falls back to hash-embed on error if best_effort=True.
+
+    Args:
+        expected_dim: If provided, validate returned vector length and raise EmbeddingDimMismatch on mismatch.
+        trace_id: Optional trace id to log once and support cancellation-aware provider retries.
+    """
+    # Check if embeddings are disabled
+    if os.getenv("JARVIS_DISABLE_EMBEDDINGS") == "1" or os.getenv("DISABLE_EMBEDDINGS") == "1":
+        return _to_vec(_hash_embed(text))
+
+    # Cancellation check (non-async context)
+    if trace_id:
+        try:
+            from jarvis.server import check_stream_cancelled_sync  # type: ignore
+            if check_stream_cancelled_sync(trace_id):
+                raise RuntimeError("Cancelled")
+        except Exception:
+            pass
+
+    embedder = _get_embedder()
+    backend = os.getenv("EMBEDDINGS_BACKEND", "ollama")
+
+    try:
+        if backend == "ollama":
+            url = os.getenv("OLLAMA_EMBED_URL", "http://127.0.0.1:11434/api/embeddings")
+            # Force known-good embedding model
+            model = os.getenv("OLLAMA_EMBED_MODEL") or "nomic-embed-text:latest"
+            resp = ollama_request(
+                url,
+                {"model": model, "prompt": text},
+                connect_timeout=3.0,
+                read_timeout=30.0,
+                retries=2,
+                trace_id=trace_id,
+            )
+            if resp.get("ok"):
+                data = resp.get("data") or {}
+                vec = data.get("embedding")
+                if not vec:
+                    logger.warning("Missing embedding from Ollama response (trace_id=%s); using hash fallback", resp.get("trace_id"))
+                    if best_effort:
+                        return _to_vec(_hash_embed(text))
+                    raise RuntimeError("Missing embedding from Ollama")
+                try:
+                    arr = _to_vec(vec)
+                    # Cache the actual embedding dimension from provider
+                    global _EMBEDDING_DIM_RUNTIME
+                    if _EMBEDDING_DIM_RUNTIME is None:
+                        _EMBEDDING_DIM_RUNTIME = int(arr.size)
+                        logger.info(f"Embedding dimension locked from {model}: {_EMBEDDING_DIM_RUNTIME}")
+                    # Log actual embedding length once per trace
+                    tid = resp.get("trace_id") or trace_id
+                    if tid and tid not in _logged_embed_len_traces:
+                        logger.info("embedding_len=%s model=%s trace_id=%s", int(arr.size), model, tid)
+                        # bound the set size; avoid unbounded growth
+                        if len(_logged_embed_len_traces) > 1024:
+                            _logged_embed_len_traces.clear()
+                        _logged_embed_len_traces.add(tid)
+                    if expected_dim is not None and int(arr.size) != int(expected_dim):
+                        raise EmbeddingDimMismatch(int(arr.size), int(expected_dim), model)
+                    return arr
+                except EmbeddingDimMismatch:
+                    raise
+                except Exception as exc:
+                    logger.warning("Invalid embedding shape (%s); using hash fallback", exc)
+                    if best_effort:
+                        return _to_vec(_hash_embed(text))
+                    raise
+            error = resp.get("error") or {}
+            # If cancelled, short-circuit without retry loops
+            if (error.get("type") or "").lower() == "clientcancelled".lower():
+                raise RuntimeError("Cancelled")
+            msg = f"Ollama embeddings failed ({error.get('type')}): {error.get('message')} [trace_id={error.get('trace_id')}]"
+            logger.warning(msg)
+            if best_effort:
+                return _to_vec(_hash_embed(text))
+            raise RuntimeError(msg)
+        else:
+            # sentence_transformers or other backend
+            arr = _to_vec(embedder.encode([text])[0])
+            model = os.getenv("EMBEDDINGS_MODEL", "all-MiniLM-L6-v2")
+            if expected_dim is not None and int(arr.size) != int(expected_dim):
+                raise EmbeddingDimMismatch(int(arr.size), int(expected_dim), model)
+            return arr
+    except (TimeoutError, ConnectionError, OSError) as e:
+        logger.warning(f"Embedding timeout/connection error (best-effort fallback): {type(e).__name__}: {e}")
+        if best_effort:
+            return _to_vec(_hash_embed(text))
+        raise
+    except EmbeddingDimMismatch:
+        # propagate, let caller decide on fallback (e.g., skip RAG)
+        raise
+    except Exception as e:
+        logger.warning(f"Embedding error (best-effort fallback): {type(e).__name__}: {e}")
+        if best_effort:
+            return _to_vec(_hash_embed(text))
+        raise
 
 
 def _ensure_index_dim(store: MemoryStore, dim: int) -> None:
     if store.index.d == dim:
         return
-    print(f"⚠ Embedding dim mismatch (index={store.index.d}, vec={dim}); rebuilding index")
+    logger.info(f"⚠ Embedding dim mismatch (index={store.index.d}, vec={dim}); rebuilding index")
     new_index = faiss.IndexFlatL2(dim)
     new_memories = []
     for entry in store.memories:
         try:
-            vec = _encode(entry)
+            vec = _encode(entry, best_effort=True)
             if vec.size != dim:
                 continue
             new_index.add(vec.reshape(1, -1))
             new_memories.append(entry)
         except Exception as exc:
-            print(f"⚠ Embedding rebuild skipped: {exc!r}")
+            logger.warning(f"Embedding rebuild skipped for entry: {exc!r}")
             continue
     store.index = new_index
     store.memories = new_memories
@@ -221,18 +339,29 @@ def add_memory(role: str, text: str, user_id: str = "default") -> None:
     store = _get_store(user_id)
     _search_cache.clear()
     try:
-        vec = _encode(entry)
+        vec = _encode(entry, best_effort=True)
         _ensure_index_dim(store, vec.size)
         store.index.add(vec.reshape(1, -1))
     except Exception as exc:
-        print(f"⚠ Embedding add skipped: {exc!r}")
+        logger.warning(f"Embedding add skipped: {exc!r}")
         return
     store.memories.append(entry)
     store.save()
 
 
-def search_memory(query: str, k: int = 3, user_id: str | None = None) -> list[str]:
+def search_memory(query: str, k: int = 3, user_id: str | None = None, trace_id: str | None = None) -> list[str]:
     global _last_cache_status
+    
+    # Check if stream has been cancelled
+    if trace_id:
+        try:
+            from jarvis.server import check_stream_cancelled_sync
+            if check_stream_cancelled_sync(trace_id):
+                logger.debug(f"search_memory cancelled: trace={trace_id}")
+                return []
+        except Exception:
+            pass
+    
     cache_key = (user_id or "default", query, k)
     cached = _search_cache.get(cache_key)
     if cached is not None:
@@ -244,7 +373,7 @@ def search_memory(query: str, k: int = 3, user_id: str | None = None) -> list[st
     if store.index.ntotal == 0:
         return []
     try:
-        qvec = _encode(query)
+        qvec = _encode(query, best_effort=True, expected_dim=store.index.d, trace_id=trace_id)
         _ensure_index_dim(store, qvec.size)
         qmat = qvec.reshape(1, -1)
         limit = min(k, store.index.ntotal)
@@ -255,7 +384,7 @@ def search_memory(query: str, k: int = 3, user_id: str | None = None) -> list[st
         _search_cache.set(cache_key, hits)
         return hits
     except Exception as exc:
-        print(f"⚠ Embedding search skipped: {exc!r}")
+        logger.warning(f"Embedding search skipped: {exc!r}")
         return []
 
 

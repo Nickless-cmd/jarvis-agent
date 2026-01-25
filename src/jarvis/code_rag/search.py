@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,7 +12,9 @@ import faiss
 import numpy as np
 
 from jarvis.code_rag.index import DEFAULT_INDEX_DIR, DEFAULT_REPO_ROOT, ensure_index, load_index
-from jarvis.memory import DIM, _encode
+from jarvis.memory import _encode
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -64,12 +67,18 @@ def search_code(
   repo_root: Path | str | None = None,
   index_dir: Path | str | None = None,
   k: int = 8,
+  trace_id: str | None = None,
 ) -> list[CodeHit]:
-  """Search the code index for relevant chunks."""
+  """Search the code index for relevant chunks. Best-effort: returns fallback on embedding errors.
+  
+  Args:
+      trace_id: optional trace ID for cancellation-aware embeddings
+  """
   root = Path(repo_root) if repo_root else DEFAULT_REPO_ROOT
   target = Path(index_dir) if index_dir else DEFAULT_INDEX_DIR
 
-  if os.getenv("DISABLE_EMBEDDINGS"):
+  # Check if embeddings are disabled or if we should use fallback
+  if os.getenv("JARVIS_DISABLE_EMBEDDINGS") == "1" or os.getenv("DISABLE_EMBEDDINGS") == "1":
     return _search_fallback(query, target)
 
   existing = load_index(index_dir=target)
@@ -80,18 +89,24 @@ def search_code(
   idx, chunks = existing
 
   try:
-    vec = _encode(query)
-    if vec.size != DIM:
-      vec = np.asarray(vec, dtype=np.float32).reshape(1, -1)
-    else:
-      vec = vec.reshape(1, -1)
-  except Exception:
-    return []
+    from jarvis.memory import EmbeddingDimMismatch
+    vec = _encode(query, best_effort=True, expected_dim=idx.d, trace_id=trace_id)
+    vec = np.asarray(vec, dtype=np.float32).reshape(1, -1)
+  except EmbeddingDimMismatch as exc:
+    logger.error(
+      f"embedding dimension mismatch (actual={exc.actual}, expected={exc.expected}, model={exc.model}); "
+      f"skipping RAG and using fallback"
+    )
+    return _search_fallback(query, target)
+  except Exception as e:
+    logger.warning(f"Failed to encode query for search (using fallback): {e}")
+    return _search_fallback(query, target)
 
   try:
     scores, ids = idx.search(vec, min(k, len(chunks)))
-  except Exception:
-    return []
+  except Exception as e:
+    logger.warning(f"FAISS search failed (using fallback): {e}")
+    return _search_fallback(query, target)
 
   hits: list[CodeHit] = []
   for score, chunk_idx in zip(scores[0], ids[0]):

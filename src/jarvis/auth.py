@@ -173,6 +173,30 @@ def get_user_by_token(token: str | None) -> dict | None:
         }
 
 
+def logout_user(token: str | None) -> bool:
+    """Invalidate user token. Returns True if token was found and invalidated."""
+    if not token:
+        return False
+    # Don't invalidate API bearer tokens
+    candidates = {
+        DEFAULT_API_KEY,
+        os.getenv("BEARER_TOKEN"),
+        os.getenv("API_BEARER_TOKEN"),
+    }
+    candidates = {c for c in candidates if c}
+    if token in candidates:
+        return False
+    
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE users SET token = NULL, token_expires_at = NULL WHERE token = ?",
+            (token,),
+        )
+        conn.commit()
+        # Check if any rows were updated
+        return conn.total_changes > 0
+
+
 def get_user_profile(username: str) -> dict | None:
     with get_conn() as conn:
         row = conn.execute(

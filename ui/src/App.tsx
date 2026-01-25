@@ -1,7 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { ChatProvider } from './contexts/ChatContext'
-import { AuthProvider } from './contexts/AuthContext'
-import { ProfileProvider } from './profile'
+import { AuthProvider, RequireAuth, RequireAdmin } from './contexts/AuthContext'
+// Removed ProfileProvider to avoid duplicate profile fetches
 import AppShell from './layouts/AppShell'
 import ChatPage from './pages/ChatPage'
 import LoginPage from './pages/LoginPage'
@@ -11,7 +11,6 @@ import AdminLayout from './pages/admin/AdminLayout'
 import AdminDashboard from './pages/admin/AdminDashboard'
 import AdminUsers from './pages/admin/AdminUsers'
 import AdminSessions from './pages/admin/AdminSessions'
-import RequireAdmin from './pages/admin/RequireAdmin'
 
 export default function App() {
   return (
@@ -20,14 +19,14 @@ export default function App() {
         {/* Login page - no ProfileProvider, no AppShell */}
         <Route path="/login" element={<LoginPage />} />
         
-        {/* Protected routes with ProfileProvider and AppShell */}
+        {/* Protected routes with RequireAuth and AppShell */}
         <Route
           element={
-            <ProfileProvider>
+            <RequireAuth>
               <ChatProvider>
                 <AppShell />
               </ChatProvider>
-            </ProfileProvider>
+            </RequireAuth>
           }
         >
           <Route path="/" element={<ChatPage />} />

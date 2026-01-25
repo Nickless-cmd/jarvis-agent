@@ -1,6 +1,8 @@
-import React, { createContext, useContext, useEffect, useState } from 'react'
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react'
 import * as api from '../lib/apiClient'
+import { useAuth } from './AuthContext'
 import { t } from '../lib/i18n'
+import { streamChat } from '../lib/stream'
 
 type Message = { id?: string; role: string; content: string; created_at?: string }
 
@@ -17,7 +19,9 @@ type ChatState = {
   loadMessages: (id: string) => void
   messages: Message[]
   loading: boolean
-  isThinking: boolean
+  isStreaming: boolean
+  streamingError: string | null
+  stopStreaming: () => void
   selectSession: (id: string) => void
   newSession: () => Promise<void>
   sendMessage: (promptOrOpts: string | { sessionId?: string; prompt: string }) => Promise<void>
@@ -29,32 +33,24 @@ const ChatContext = createContext<ChatState | null>(null)
 export function useChat() { const ctx = useContext(ChatContext); if(!ctx) throw new Error('useChat must be used within ChatProvider'); return ctx }
 
 export const ChatProvider: React.FC<{children:any}> = ({ children }) => {
-  const [profile, setProfile] = useState<any | null>(null)
-  const [profileLoading, setProfileLoading] = useState<boolean>(true)
+  const { profile, loading: profileLoading } = useAuth()
   const [sessions, setSessions] = useState<Session[]>([])
   const [selectedSessionId, setSelectedSessionId] = useState<string|undefined>(undefined)
   const [messages, setMessages] = useState<Message[]>([])
   const [loading, setLoading] = useState(false)
-  const [isThinking, setIsThinking] = useState(false)
+  const [isStreaming, setIsStreaming] = useState(false)
+  const [streamingError, setStreamingError] = useState<string|null>(null)
+  const abortRef = useRef<() => void>(() => {})
 
   useEffect(() => {
     let mounted = true
     async function init(){
-      try{
-        const p = await api.getProfile()
-        if(!mounted) return
-        setProfile(p)
-      }catch(e){
-        setProfile(null)
-        if (mounted) setProfileLoading(false)
-        return
-      }
+      if (!profile || profileLoading) return
       try {
         const s = await api.listSessions()
         if(!mounted) return
         setSessions(s)
         if(s && s.length) {
-          // Restore last active session from localStorage
           const savedSessionId = localStorage.getItem('activeSessionId')
           const sessionExists = savedSessionId && s.some(session => session.id === savedSessionId)
           if (sessionExists) {
@@ -63,13 +59,13 @@ export const ChatProvider: React.FC<{children:any}> = ({ children }) => {
             selectSession(s[0].id)
           }
         }
-      } finally {
-        if (mounted) setProfileLoading(false)
+      } catch {
+        setSessions([])
       }
     }
     init()
     return () => { mounted = false }
-  }, [])
+  }, [profile, profileLoading])
 
   async function selectSession(id: string){
     setSelectedSessionId(id)
@@ -99,7 +95,8 @@ export const ChatProvider: React.FC<{children:any}> = ({ children }) => {
     if(!sessionId) return
     const prompt = opts.prompt
     
-    setIsThinking(true)
+    setIsStreaming(true)
+    setStreamingError(null)
     
     // optimistic user message
     const userMsg: Message = { id: `u-${Date.now()}-${Math.random().toString(36).slice(2,8)}`, role: 'user', content: prompt }
@@ -108,34 +105,50 @@ export const ChatProvider: React.FC<{children:any}> = ({ children }) => {
     const assistantId = `a-${Date.now()}-${Math.random().toString(36).slice(2,8)}`
     setMessages(prev => [...prev, { id: assistantId, role: 'assistant', content: '' }])
 
-    try{
-      const handle = await api.sendChatMessageStream({ sessionId, prompt }, (chunk: string) => {
-        setMessages(prev => {
-          const copy = prev.slice()
-          const idx = copy.findIndex(m => m.id === assistantId)
-          if (idx === -1) return copy
-          const msg = copy[idx]
-          copy[idx] = { ...msg, content: (msg.content || '') + chunk }
-          return copy
-        })
-      })
-      // handle.abort() is available if caller needs to cancel
-    }catch(err){
-      // replace assistant placeholder with error message
+    try {
+      const controller = new AbortController()
+      const handle = await streamChat(
+        { sessionId, prompt, signal: controller.signal },
+        (delta: string) => {
+          setMessages(prev => {
+            const copy = prev.slice()
+            const idx = copy.findIndex(m => m.id === assistantId)
+            if (idx === -1) return copy
+            const msg = copy[idx]
+            copy[idx] = { ...msg, content: (msg.content || '') + delta }
+            return copy
+          })
+        },
+        () => {
+          setIsStreaming(false)
+        },
+        (errText: string) => {
+          setIsStreaming(false)
+          setStreamingError(errText)
+          setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: `Fejl: ${errText}` } : m))
+        }
+      )
+      abortRef.current = () => {
+        try { handle.abort() } catch {}
+        setIsStreaming(false)
+      }
+    } catch (err) {
+      setIsStreaming(false)
+      setStreamingError('Fejl ved hentning af svar.')
       setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: 'Fejl ved hentning af svar.' } : m))
-    }finally{
-      setIsThinking(false)
     }
+  }
+
+  function stopStreaming() {
+    abortRef.current?.()
   }
 
   async function logout() {
     try { await api.logout() } catch {}
     // clear client state
-    setProfile(null)
     setSessions([])
     setSelectedSessionId(undefined)
     setMessages([])
-    // Clear saved session from localStorage
     localStorage.removeItem('activeSessionId')
     try { window.location.href = '/ui/login' } catch {}
   }
@@ -151,7 +164,9 @@ export const ChatProvider: React.FC<{children:any}> = ({ children }) => {
     loadMessages: (id: string) => selectSession(id),
     messages,
     loading,
-    isThinking,
+    isStreaming,
+    streamingError,
+    stopStreaming,
     selectSession,
     newSession,
     sendMessage,

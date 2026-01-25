@@ -165,8 +165,16 @@ def handle_code_question(
     should_attach_reminders: Callable | None = None,
     prepend_reminders: Callable | None = None,
     user_id_int: int | None = None,
+    rag_hash: str | None = None,
+    trace_id: str | None = None,
 ) -> dict | None:
-    """Handle code questions via local code RAG. Returns response dict or None."""
+    """
+    Handle code questions via local code RAG. Returns response dict or None.
+    
+    Args:
+        rag_hash: Pre-computed hash from retrieve_code_rag_async (for non-blocking RAG)
+        trace_id: Optional trace ID for cancellation checking
+    """
     if allowed_tools is not None and "code" not in allowed_tools:
         return None
 
@@ -179,7 +187,7 @@ def handle_code_question(
         hits: list[CodeHit] = []
         if queries:
             try:
-                hits = search_code(" ".join(queries), k=5, repo_root=repo_root, index_dir=index_dir)
+                hits = search_code(" ".join(queries), k=5, repo_root=repo_root, index_dir=index_dir, trace_id=trace_id)
             except Exception as exc:
                 reply = (
                     f"I could not search the codebase right now: {exc}"
@@ -263,17 +271,26 @@ def handle_code_question(
     elif not _code_question_intent(prompt):
         return None
 
-    try:
-        hits = search_code(query, k=5, repo_root=repo_root, index_dir=index_dir)
-    except Exception as exc:
-        if ui_lang and ui_lang.lower().startswith("en"):
-            reply = f"I could not search the codebase right now: {exc}"
-        else:
-            reply = f"Jeg kunne ikke søge i kodebasen lige nu: {exc}"
-        add_memory("assistant", reply, user_id=user_id)
-        if session_id:
-            state.add_message("assistant", reply)
-        return {"text": reply, "meta": {"tool": "code_search", "tool_used": False}}
+    # Try to get cached RAG results first (non-blocking, with short timeout)
+    hits = []
+    if rag_hash:
+        from jarvis.agent_core.rag_async import get_code_rag_results
+        hits = get_code_rag_results(rag_hash, max_wait=0.5, trace_id=trace_id)
+
+    
+    # If no cached results, do blocking search
+    if not hits:
+        try:
+            hits = search_code(query, k=5, repo_root=repo_root, index_dir=index_dir, trace_id=trace_id)
+        except Exception as exc:
+            if ui_lang and ui_lang.lower().startswith("en"):
+                reply = f"I could not search the codebase right now: {exc}"
+            else:
+                reply = f"Jeg kunne ikke søge i kodebasen lige nu: {exc}"
+            add_memory("assistant", reply, user_id=user_id)
+            if session_id:
+                state.add_message("assistant", reply)
+            return {"text": reply, "meta": {"tool": "code_search", "tool_used": False}}
 
     if not hits:
         reply = _no_hits_reply(ui_lang)

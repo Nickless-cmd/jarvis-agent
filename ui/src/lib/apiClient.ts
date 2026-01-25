@@ -77,81 +77,18 @@ export async function sendChatMessage(opts: { sessionId?: string; prompt: string
   return { text: '', raw: r.data }
 }
 
+// Deprecated: streaming has moved to src/lib/stream.ts
+// Keeping a thin wrapper for compatibility; consider removing once callers migrate.
 export async function sendChatMessageStream(opts: { sessionId?: string; prompt: string }, onChunk: (s: string) => void) {
-  const { sessionId, prompt } = opts
-  const headers: Record<string,string> = { 'Content-Type': 'application/json' }
-  if (sessionId) headers['X-Session-Id'] = sessionId
-  // include auth headers via apiFetch approach but use fetch directly for streaming
-  const jarvis = readCookie('jarvis_token')
-  const authHeaders = { ...defaultHeaders(true), ...headers }
-  const ac = new AbortController()
-  const res = await fetch('/v1/chat/completions', {
-    method: 'POST',
-    headers: authHeaders,
-    body: JSON.stringify({ prompt, stream: true }),
-    credentials: 'include',
-    signal: ac.signal,
-  })
-  if (res.status === 401 || res.status === 403) {
-    try { window.location.href = '/login' } catch {}
-    throw new AuthError('Unauthorized', res.status, null)
-  }
-  if (!res.ok) throw new ApiError('Network error', res.status, null)
-
-  const reader = res.body?.getReader()
-  if (!reader) return { abort: () => ac.abort() }
-  const dec = new TextDecoder()
-  let buffer = ''
-  let closed = false
-
-  async function pump() {
-    try {
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buffer += dec.decode(value, { stream: true })
-        // split into lines
-        const parts = buffer.split(/\n/) // handle newline-separated or SSE lines
-        // keep last partial
-        buffer = parts.pop() || ''
-        for (const raw of parts) {
-          const line = raw.trim()
-          if (!line) continue
-          const data = line.startsWith('data:') ? line.replace(/^data:\s*/, '') : line
-          if (data === '[DONE]') {
-            closed = true
-            return
-          }
-          // try parse json
-          try {
-            const parsed = JSON.parse(data)
-            // openai-ish delta
-            if (parsed.choices && parsed.choices[0]) {
-              const delta = parsed.choices[0].delta || parsed.choices[0]
-              const txt = delta?.content || parsed.text || ''
-              if (txt) onChunk(txt)
-            } else if (parsed.text) {
-              onChunk(parsed.text)
-            } else {
-              onChunk(JSON.stringify(parsed))
-            }
-          } catch (e) {
-            // plain text
-            onChunk(data)
-          }
-        }
-      }
-    } catch (err) {
-      if ((err as any)?.name !== 'AbortError') throw err
-    }
-  }
-
-  pump().catch(() => {})
-
-  return {
-    abort: () => ac.abort(),
-    closed: () => closed,
-  }
+  const { streamChat } = await import('./stream')
+  const controller = new AbortController()
+  const handle = await streamChat(
+    { sessionId: opts.sessionId, prompt: opts.prompt, signal: controller.signal },
+    (delta) => onChunk(delta),
+    () => {},
+    () => {}
+  )
+  return { abort: () => handle.abort(), closed: () => false }
 }
 
 export async function logout() {
@@ -176,6 +113,5 @@ export default {
   createSession,
   getSessionMessages,
   sendChatMessage,
-  sendChatMessageStream,
   logout,
 }

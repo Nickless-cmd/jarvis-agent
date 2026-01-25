@@ -3,22 +3,32 @@ import { useChat } from '../contexts/ChatContext'
 
 export default function ChatView({ scrollRef }: { scrollRef: React.RefObject<HTMLDivElement> }) {
   const { activeSessionId, messages, loadMessages } = useChat()
+  const [atBottom, setAtBottom] = useState(true)
 
   useEffect(() => {
     if (activeSessionId) loadMessages(activeSessionId)
   }, [activeSessionId])
 
-  // Auto-scroll to bottom on load and new messages
+  // Track scroll and auto-scroll when near bottom
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    function onScroll() {
+      const dist = el.scrollHeight - el.scrollTop - el.clientHeight
+      setAtBottom(dist <= 80)
+    }
+    el.addEventListener('scroll', onScroll)
+    return () => el.removeEventListener('scroll', onScroll)
+  }, [scrollRef])
+
   useEffect(() => {
     if (!messages.length || !scrollRef.current) return
-    
-    // Always scroll to bottom when messages change (including initial load)
+    if (!atBottom) return
     requestAnimationFrame(() => {
-      if (scrollRef.current) {
-        scrollRef.current.scrollTop = scrollRef.current.scrollHeight
-      }
+      const el = scrollRef.current!
+      el.scrollTop = el.scrollHeight
     })
-  }, [messages, scrollRef])
+  }, [messages, scrollRef, atBottom])
 
   const rendered = useMemo(() => {
     return messages.map((m, idx) => {
@@ -87,8 +97,24 @@ export default function ChatView({ scrollRef }: { scrollRef: React.RefObject<HTM
       )}
 
       {activeSessionId && messages.length > 0 && (
-        <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-4 relative">
           {rendered}
+          {!atBottom && (
+            <div className="absolute bottom-2 right-2">
+              <button
+                className="px-3 py-1.5 text-xs rounded-full bg-neutral-800 border border-neutral-700 text-neutral-200 hover:bg-neutral-700"
+                onClick={() => {
+                  const el = scrollRef.current
+                  if (el) {
+                    el.scrollTop = el.scrollHeight
+                    setAtBottom(true)
+                  }
+                }}
+              >
+                Jump to bottom
+              </button>
+            </div>
+          )}
         </div>
       )}
     </>

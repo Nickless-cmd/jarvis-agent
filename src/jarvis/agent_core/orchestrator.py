@@ -4,13 +4,17 @@ Agent orchestrator - coordinates agent execution.
 
 from dataclasses import dataclass
 from typing import Dict, Any, Optional
+import logging
 
 from jarvis.agent_core.state_service import AgentStateService
 from jarvis.notifications import add_notification
 import time
+import hashlib
+from jarvis.agent_core.rag_async import retrieve_code_rag_async, get_code_rag_results
+
+logger = logging.getLogger(__name__)
 
 last_turn_metrics: Dict[str, Any] | None = None
-
 @dataclass
 class TurnResult:
     reply_text: str
@@ -117,6 +121,7 @@ def handle_turn(
     allowed_tools: list[str] | None = None,
     ui_city: str | None = None,
     ui_lang: str | None = None,
+    trace_id: str | None = None,
 ):
     """
     Handle a single turn of agent interaction.
@@ -134,14 +139,17 @@ def handle_turn(
 
     timings = {}
     start_total = time.time()
+    t0 = start_total
 
     def _finish(resp):
         timings.setdefault("total_ms", (time.time() - start_total) * 1000)
         set_last_metric("timings", timings)
+        if trace_id:
+            logger.info(f"trace={trace_id} t0_start={t0:.3f} t1_memory_done={(time.time() - t0):.3f}s total={timings.get('total_ms', 0):.0f}ms")
         return resp
 
     start = time.time()
-    mem = search_memory(prompt, user_id=user_id)
+    mem = search_memory(prompt, user_id=user_id, trace_id=trace_id)
     try:
         from jarvis.memory import get_last_cache_status
         timings["memory_cache"] = get_last_cache_status()
@@ -149,8 +157,17 @@ def handle_turn(
         pass
     timings["memory_ms"] = (time.time() - start) * 1000
     memory_used_flag = bool(mem)
+    
+    if trace_id:
+        logger.info(f"trace={trace_id} memory_search completed in {timings['memory_ms']:.0f}ms")
+    
     session_hist = get_recent_messages(session_id, limit=8) if session_id else []
     _debug(f"🧭 run_agent: user={user_id} session={session_id} prompt={prompt!r}")
+    
+    # Start RAG retrieval in background (non-blocking for streaming)
+    rag_hash = hashlib.md5(f"{prompt}:{session_id}".encode()).hexdigest()
+    retrieve_code_rag_async(prompt, rag_hash, trace_id=trace_id)
+    
     if session_id:
         wants_prompt, custom = _session_prompt_intent(prompt)
         if wants_prompt:
@@ -417,6 +434,8 @@ def handle_turn(
             ui_lang=ui_lang,
             allowed_tools=allowed_tools,
             user_id_int=preloaded["user_id_int"],
+            rag_hash=rag_hash,
+            trace_id=trace_id,
         )
         if code_response:
             return code_response

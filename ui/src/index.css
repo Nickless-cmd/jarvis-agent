@@ -17,3 +17,23 @@ body {
 
 /* pæn scrollbar baseline */
 * { scrollbar-width: thin; }
+
+/* Marquee animation for header banner */
+@keyframes marquee {
+  0% {
+    transform: translateX(0%);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+.animate-marquee {
+  display: inline-block;
+  animation: marquee 45s linear infinite;
+}
+
+.animate-marquee::after {
+  content: attr(data-text);
+  padding-left: 2rem;
+}

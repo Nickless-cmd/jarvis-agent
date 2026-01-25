@@ -24,6 +24,11 @@ export default function ChatView({ scrollRef }: { scrollRef: React.RefObject<HTM
     return messages.map((m, idx) => {
       const role = m.role || (m as any).author || 'assistant'
       const isUser = role === 'user'
+      const timestamp = m.created_at || (m as any).timestamp || new Date().toISOString()
+      const timeStr = new Date(timestamp).toLocaleTimeString('da-DK', { 
+        hour: '2-digit', 
+        minute: '2-digit' 
+      })
 
       return (
         <div
@@ -33,13 +38,27 @@ export default function ChatView({ scrollRef }: { scrollRef: React.RefObject<HTM
             isUser ? "bg-neutral-900/80 border-neutral-800" : "bg-neutral-900/60",
           ].join(" ")}
         >
-          <div className="flex items-center gap-2 text-xs text-neutral-500 mb-1">
-            <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-neutral-800 text-neutral-200 text-[11px] font-semibold">
-              {isUser ? 'You' : 'Jarvis'}
-            </span>
-            <span>{role === 'user' ? 'User' : 'Assistant'}</span>
+          <div className="flex items-center justify-between gap-2 text-xs text-neutral-500 mb-1">
+            {isUser ? (
+              <>
+                <span>{timeStr}</span>
+                <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-neutral-800 text-neutral-200 text-[11px] font-semibold">
+                  You
+                </span>
+              </>
+            ) : (
+              <>
+                <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-neutral-800 text-neutral-200 text-[11px] font-semibold">
+                  Jarvis
+                </span>
+                <span>{timeStr}</span>
+              </>
+            )}
           </div>
-          <div className="whitespace-pre-wrap break-words text-neutral-100">
+          <div className={[
+            "whitespace-pre-wrap break-words text-neutral-100",
+            isUser ? "text-right" : ""
+          ].join(" ")}>
             {m.content || (m as any).text || ''}
           </div>
         </div>

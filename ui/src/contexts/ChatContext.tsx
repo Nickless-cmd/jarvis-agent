@@ -53,7 +53,16 @@ export const ChatProvider: React.FC<{children:any}> = ({ children }) => {
         const s = await api.listSessions()
         if(!mounted) return
         setSessions(s)
-        if(s && s.length) selectSession(s[0].id)
+        if(s && s.length) {
+          // Restore last active session from localStorage
+          const savedSessionId = localStorage.getItem('activeSessionId')
+          const sessionExists = savedSessionId && s.some(session => session.id === savedSessionId)
+          if (sessionExists) {
+            selectSession(savedSessionId)
+          } else {
+            selectSession(s[0].id)
+          }
+        }
       } finally {
         if (mounted) setProfileLoading(false)
       }
@@ -64,6 +73,8 @@ export const ChatProvider: React.FC<{children:any}> = ({ children }) => {
 
   async function selectSession(id: string){
     setSelectedSessionId(id)
+    // Save to localStorage so it persists across page reloads
+    localStorage.setItem('activeSessionId', id)
     setLoading(true)
     try{
       const msgs = await api.getSessionMessages(id)
@@ -124,6 +135,8 @@ export const ChatProvider: React.FC<{children:any}> = ({ children }) => {
     setSessions([])
     setSelectedSessionId(undefined)
     setMessages([])
+    // Clear saved session from localStorage
+    localStorage.removeItem('activeSessionId')
     try { window.location.href = '/ui/login' } catch {}
   }
 

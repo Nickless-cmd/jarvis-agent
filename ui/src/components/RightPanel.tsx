@@ -11,7 +11,7 @@ export default function RightPanel() {
   ]
 
   return (
-    <aside className="flex flex-col w-64 shrink-0 border-l border-neutral-800 bg-neutral-900/60 overflow-hidden">
+    <aside className="flex flex-col w-72 shrink-0 border-l border-neutral-800 bg-neutral-900/60 overflow-hidden">
       <div className="shrink-0 border-b border-neutral-800 px-4 py-3 text-sm font-semibold">
         Admin panel
       </div>

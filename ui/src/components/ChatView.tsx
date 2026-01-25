@@ -1,25 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useChat } from '../contexts/ChatContext'
 
-export default function ChatView() {
+export default function ChatView({ scrollRef }: { scrollRef: React.RefObject<HTMLDivElement> }) {
   const { activeSessionId, messages, loadMessages } = useChat()
-  const feedRef = useRef<HTMLDivElement>(null)
-  const [autoScroll, setAutoScroll] = useState(true)
 
   useEffect(() => {
     if (activeSessionId) loadMessages(activeSessionId)
   }, [activeSessionId])
 
-  // keep scroll at bottom when close to bottom
+  // Auto-scroll to bottom on load and new messages
   useEffect(() => {
-    const el = feedRef.current
-    if (!el) return
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 160
-    if (nearBottom || autoScroll) {
-      el.scrollTop = el.scrollHeight
-      setAutoScroll(true)
-    }
-  }, [messages, autoScroll])
+    if (!messages.length || !scrollRef.current) return
+    
+    // Always scroll to bottom when messages change (including initial load)
+    requestAnimationFrame(() => {
+      if (scrollRef.current) {
+        scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+      }
+    })
+  }, [messages, scrollRef])
 
   const rendered = useMemo(() => {
     return messages.map((m, idx) => {
@@ -49,17 +48,9 @@ export default function ChatView() {
   }, [messages])
 
   return (
-    <div
-      ref={feedRef}
-      className="flex-1 overflow-y-auto px-4 md:px-6"
-      onScroll={(e) => {
-        const el = e.currentTarget
-        const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 160
-        setAutoScroll(nearBottom)
-      }}
-    >
+    <>
       {!activeSessionId && (
-        <div className="flex h-full items-center justify-center">
+        <div className="flex h-[60vh] items-center justify-center">
           <div className="text-center space-y-2">
             <div className="text-2xl font-semibold text-neutral-50">Velkommen til Jarvis</div>
             <div className="text-sm text-neutral-400">Start en ny chat eller vælg en i venstre side.</div>
@@ -68,7 +59,7 @@ export default function ChatView() {
       )}
 
       {activeSessionId && messages.length === 0 && (
-        <div className="flex h-full items-center justify-center">
+        <div className="flex h-[60vh] items-center justify-center">
           <div className="text-center space-y-2">
             <div className="text-xl font-semibold text-neutral-50">Ingen beskeder endnu</div>
             <div className="text-sm text-neutral-400">Skriv til Jarvis for at komme i gang.</div>
@@ -76,9 +67,11 @@ export default function ChatView() {
         </div>
       )}
 
-      <div className="mx-auto w-full max-w-3xl py-6 flex flex-col gap-4">
-        {rendered}
-      </div>
-    </div>
+      {activeSessionId && messages.length > 0 && (
+        <div className="flex flex-col gap-4">
+          {rendered}
+        </div>
+      )}
+    </>
   )
 }

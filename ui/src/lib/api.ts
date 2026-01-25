@@ -1,9 +1,22 @@
 export type FetchInit = RequestInit
 
+function getAuthHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {}
+  // Always send devkey as Authorization Bearer
+  headers['Authorization'] = 'Bearer devkey'
+  // Send jarvis_token from cookie as X-User-Token if available
+  const cookie = document.cookie.match(/jarvis_token=([^;]*)/)?.[1]
+  if (cookie) {
+    headers['X-User-Token'] = decodeURIComponent(cookie)
+  }
+  return headers
+}
+
 async function apiFetch(path: string, init: FetchInit = {}) {
+  const authHeaders = getAuthHeaders()
   const res = await fetch(path, {
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json', ...(init.headers || {}) },
+    headers: { 'Content-Type': 'application/json', ...authHeaders, ...(init.headers || {}) },
     ...init,
   })
 
@@ -74,9 +87,14 @@ export async function sendChatMessage(opts: SendOpts) {
 
 // Streaming helper: calls `onChunk` for each text increment received from the server.
 // Returns an object with `abort()` to cancel the stream.
-export async function sendChatMessageStream(opts: { sessionId?: string; prompt: string }, onChunk: (chunk: string) => void) {
+export async function sendChatMessageStream(
+  opts: { sessionId?: string; prompt: string },
+  onChunk: (chunk: string) => void,
+  onStatus?: (status: string) => void,
+) {
   const { sessionId, prompt } = opts
-  const headers: Record<string,string> = { 'Content-Type': 'application/json' }
+  const authHeaders = getAuthHeaders()
+  const headers: Record<string,string> = { 'Content-Type': 'application/json', ...authHeaders }
   if (sessionId) headers['X-Session-Id'] = sessionId
   const ac = new AbortController()
   const res = await fetch('/v1/chat/completions', {
@@ -96,7 +114,6 @@ export async function sendChatMessageStream(opts: { sessionId?: string; prompt: 
     throw err
   }
 
-  const ct = res.headers.get('content-type') || ''
   const reader = res.body?.getReader()
   if (!reader) return { abort: () => ac.abort() }
   const dec = new TextDecoder()
@@ -108,15 +125,16 @@ export async function sendChatMessageStream(opts: { sessionId?: string; prompt: 
         const { done, value } = await reader.read()
         if (done) break
         buf += dec.decode(value, { stream: true })
-        // Split into SSE-style records: "data: ...\n\n" or newline-delimited JSON/text
         const parts = buf.split(/\n\n/)
         buf = parts.pop() || ''
 
         for (const part of parts) {
-          // part may contain multiple lines (event:, data:, etc.) – focus on data lines
           const lines = part.split(/\n/).map(l => l.trim()).filter(Boolean)
+
           for (const line of lines) {
+            if (line.startsWith('event:')) continue
             if (!line.startsWith('data:')) continue
+
             const payload = line.replace(/^data:\s*/, '')
             if (payload === '[DONE]') {
               ac.abort()
@@ -124,29 +142,42 @@ export async function sendChatMessageStream(opts: { sessionId?: string; prompt: 
             }
             try {
               const parsed = JSON.parse(payload)
-              // OpenAI-ish delta
+
+              // status handling (e.g. { status: { state: "thinking" } })
+              if (parsed.status && typeof parsed.status.state === 'string') {
+                onStatus?.(parsed.status.state)
+                continue
+              }
+
+              // Only append assistant content from OpenAI-style choices
               if (parsed.choices && parsed.choices[0]) {
-                const delta = parsed.choices[0].delta || parsed.choices[0]
-                const txt = delta?.content || parsed.text || ''
+                const choice = parsed.choices[0]
+                const delta = choice.delta
+                const message = choice.message
+                const txt =
+                  (delta && delta.content) ||
+                  (message && message.content) ||
+                  parsed.text ||
+                  ''
                 if (txt) onChunk(txt)
-              } else if (parsed.text) {
+                continue
+              }
+
+              // If explicit text field (non-status), append
+              if (parsed.text) {
                 onChunk(parsed.text)
-              } else {
-                onChunk(JSON.stringify(parsed))
               }
             } catch (_) {
-              onChunk(payload)
+              // Non-JSON chunks are ignored for text append to avoid noisy UI
             }
           }
         }
       }
     } catch (err) {
-      // propagate aborts silently
       if ((err as any)?.name !== 'AbortError') throw err
     }
   }
 
-  // Start pumping in background
   pump().catch(() => {})
 
   return {

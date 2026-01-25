@@ -28,9 +28,9 @@ export const ProfileProvider: React.FC<{ children: React.ReactNode }> = ({ child
       setProfile(null);
       if (hadProfile) {
         // if we previously had a profile and now don't, bounce to login
-        window.location.href = "/login";
+        window.location.href = "/ui/login";
       } else {
-        window.location.href = "/login";
+        window.location.href = "/ui/login";
       }
     }
     setLoading(false);

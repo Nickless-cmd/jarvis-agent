@@ -1,9 +1,35 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import { execSync } from 'child_process'
+
+const buildCommit = (() => {
+  try {
+    return execSync('git rev-parse --short HEAD').toString().trim()
+  } catch {
+    return 'unknown'
+  }
+})()
+
+const buildCommitFull = (() => {
+  try {
+    return execSync('git rev-parse HEAD').toString().trim()
+  } catch {
+    return 'unknown'
+  }
+})()
+
+const repoUrl = 'https://github.com/yourusername/jarvis-agent'
+const buildTime = new Date().toISOString()
 
 export default defineConfig({
   base: '/ui/',
   plugins: [react()],
+  define: {
+    'import.meta.env.VITE_BUILD_COMMIT': JSON.stringify(buildCommit),
+    'import.meta.env.VITE_BUILD_COMMIT_FULL': JSON.stringify(buildCommitFull),
+    'import.meta.env.VITE_BUILD_TIME': JSON.stringify(buildTime),
+    'import.meta.env.VITE_REPO_URL': JSON.stringify(repoUrl),
+  },
   server: {
     host: '127.0.0.1',
     strictPort: true,

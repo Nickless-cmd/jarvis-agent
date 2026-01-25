@@ -21,9 +21,9 @@ export default function Composer() {
   const disabled = busy || !value.trim() || !activeSessionId
 
   return (
-    <div className="w-full bg-gradient-to-t from-neutral-950 via-neutral-950 to-transparent">
-      <div className="max-w-3xl w-full mx-auto px-4 pb-6">
-        <div className="rounded-3xl border border-neutral-800 bg-neutral-900/90 backdrop-blur shadow-lg shadow-black/30 px-4 py-3">
+    <div className="w-full px-4 py-4 bg-neutral-950">
+      <div className="max-w-4xl w-full mx-auto">
+        <div className="rounded-full bg-neutral-900 px-4 py-3">
           <div className="flex items-end gap-3">
             <button
               type="button"

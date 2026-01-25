@@ -15,11 +15,6 @@ export default function Sidebar({ onNavigate }: Props) {
     onNavigate?.()
   }
 
-  function handleAdminClick() {
-    navigate('/admin')
-    onNavigate?.()
-  }
-
   function handleSettings() {
     navigate('/settings')
     onNavigate?.()
@@ -29,6 +24,12 @@ export default function Sidebar({ onNavigate }: Props) {
     <div className="h-full flex flex-col bg-neutral-900">
       {/* Top */}
       <div className="px-3 pt-4 pb-3 border-b border-neutral-800">
+        <button
+          onClick={() => { navigate('/dashboard'); onNavigate?.() }}
+          className="w-full mb-2 rounded-lg border border-neutral-700 bg-neutral-800 hover:bg-neutral-700 px-3 py-2 text-sm font-medium transition"
+        >
+          Dashboard
+        </button>
         <button
           onClick={createNewChat}
           className="w-full rounded-lg border border-neutral-700 bg-neutral-800 hover:bg-neutral-700 px-3 py-2 text-sm font-medium transition"
@@ -106,12 +107,13 @@ export default function Sidebar({ onNavigate }: Props) {
             Settings
           </button>
           {profile?.is_admin && (
-            <button
-              onClick={handleAdminClick}
-              className="w-full text-left px-3 py-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 transition"
+            <NavLink
+              to="/admin/dashboard"
+              onClick={() => onNavigate?.()}
+              className="block px-3 py-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 transition"
             >
               Admin
-            </button>
+            </NavLink>
           )}
           <NavLink
             to="/logout"

@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react'
 import * as api from '../lib/apiClient'
+import { t } from '../lib/i18n'
 
 type Message = { id?: string; role: string; content: string; created_at?: string }
 
@@ -10,16 +11,15 @@ type ChatState = {
   profileLoading: boolean
   sessions: Session[]
   selectedSessionId?: string
-  // legacy-friendly aliases used across components
   activeSessionId?: string
   setActiveSessionId: (id: string) => void
   createNewChat: () => Promise<void>
   loadMessages: (id: string) => void
   messages: Message[]
   loading: boolean
+  isThinking: boolean
   selectSession: (id: string) => void
   newSession: () => Promise<void>
-  // sendMessage accepts either a prompt string or an object {sessionId?, prompt}
   sendMessage: (promptOrOpts: string | { sessionId?: string; prompt: string }) => Promise<void>
   logout: () => Promise<void>
 }
@@ -35,6 +35,7 @@ export const ChatProvider: React.FC<{children:any}> = ({ children }) => {
   const [selectedSessionId, setSelectedSessionId] = useState<string|undefined>(undefined)
   const [messages, setMessages] = useState<Message[]>([])
   const [loading, setLoading] = useState(false)
+  const [isThinking, setIsThinking] = useState(false)
 
   useEffect(() => {
     let mounted = true
@@ -86,6 +87,9 @@ export const ChatProvider: React.FC<{children:any}> = ({ children }) => {
     const sessionId = opts.sessionId || selectedSessionId
     if(!sessionId) return
     const prompt = opts.prompt
+    
+    setIsThinking(true)
+    
     // optimistic user message
     const userMsg: Message = { id: `u-${Date.now()}-${Math.random().toString(36).slice(2,8)}`, role: 'user', content: prompt }
     setMessages(prev => [...prev, userMsg])
@@ -108,6 +112,8 @@ export const ChatProvider: React.FC<{children:any}> = ({ children }) => {
     }catch(err){
       // replace assistant placeholder with error message
       setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: 'Fejl ved hentning af svar.' } : m))
+    }finally{
+      setIsThinking(false)
     }
   }
 
@@ -118,7 +124,7 @@ export const ChatProvider: React.FC<{children:any}> = ({ children }) => {
     setSessions([])
     setSelectedSessionId(undefined)
     setMessages([])
-    try { window.location.href = '/login' } catch {}
+    try { window.location.href = '/ui/login' } catch {}
   }
 
   const value: ChatState = {
@@ -132,6 +138,7 @@ export const ChatProvider: React.FC<{children:any}> = ({ children }) => {
     loadMessages: (id: string) => selectSession(id),
     messages,
     loading,
+    isThinking,
     selectSession,
     newSession,
     sendMessage,

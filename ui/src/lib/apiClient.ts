@@ -33,7 +33,7 @@ async function apiFetch(path: string, init: RequestInit = {}) {
   if (res.status === 401 || res.status === 403) {
     // Centralized handling: redirect to login and throw typed error
     try {
-      window.location.href = '/login'
+      window.location.href = '/ui/login'
     } catch {}
     throw new AuthError('Unauthorized', res.status, null)
   }
@@ -166,7 +166,7 @@ export async function logout() {
   try {
     document.cookie = 'jarvis_token=;path=/;expires=Thu, 01 Jan 1970 00:00:00 GMT'
   } catch {}
-  try { window.location.href = '/login' } catch {}
+  try { window.location.href = '/ui/login' } catch {}
 }
 
 export default {

@@ -27,6 +27,10 @@ _callback_tasks: Dict[str, List[asyncio.Task]] = {}  # request_id -> list of cal
 _MAX_BATCH_TIME_MS = 75  # Flush every 75ms (debounce)
 _MAX_BATCH_SIZE_BYTES = 1024  # Flush when buffer exceeds 1KB
 
+# Status/thinking event rate-limiting (separate from content tokens)
+_status_rate_limit: Dict[str, List[float]] = {}  # request_id -> list of timestamps
+_MAX_STATUS_UPDATES_PER_SEC = 10  # Max 10 status updates per second
+
 
 def _run_callback(cb: Callable[[Any], None], event_type: str, payload: Any) -> None:
     """Run a subscriber callback; await/schedule if it is async to avoid RuntimeWarning."""
@@ -130,6 +134,54 @@ def _should_flush_immediately(buffer: Dict[str, Any]) -> bool:
     return size_bytes >= _MAX_BATCH_SIZE_BYTES
 
 
+def _check_status_rate_limit(request_id: str) -> bool:
+    """Check if status update is within rate limit (max 10/sec). Returns True if allowed."""
+    import time
+    now = time.time()
+    
+    # Clean up old entries (older than 1 second)
+    if request_id in _status_rate_limit:
+        _status_rate_limit[request_id] = [
+            ts for ts in _status_rate_limit[request_id] 
+            if now - ts < 1.0
+        ]
+    else:
+        _status_rate_limit[request_id] = []
+    
+    # Check if under limit
+    if len(_status_rate_limit[request_id]) >= _MAX_STATUS_UPDATES_PER_SEC:
+        _logger.debug(f"status_rate_limited request_id={request_id} count={len(_status_rate_limit[request_id])}")
+        return False
+    
+    # Record this update
+    _status_rate_limit[request_id].append(now)
+    return True
+
+
+def _check_status_rate_limit(request_id: str) -> bool:
+    """Check if status update is within rate limit (max 10/sec). Returns True if allowed."""
+    import time
+    now = time.time()
+    
+    # Clean up old entries (older than 1 second)
+    if request_id in _status_rate_limit:
+        _status_rate_limit[request_id] = [
+            ts for ts in _status_rate_limit[request_id] 
+            if now - ts < 1.0
+        ]
+    else:
+        _status_rate_limit[request_id] = []
+    
+    # Check if under limit
+    if len(_status_rate_limit[request_id]) >= _MAX_STATUS_UPDATES_PER_SEC:
+        _logger.debug(f"status_rate_limited request_id={request_id} count={len(_status_rate_limit[request_id])}")
+        return False
+    
+    # Record this update
+    _status_rate_limit[request_id].append(now)
+    return True
+
+
 def _handle_chat_token_event(payload: Dict[str, Any]) -> None:
     """Handle chat.token event with async batching (NON-BLOCKING)."""
     request_id = payload.get("request_id")
@@ -191,8 +243,33 @@ def _handle_chat_token_event(payload: Dict[str, Any]) -> None:
             _flush_tasks[request_id] = task
             _logger.debug(f"flush_scheduled request_id={request_id}")
         except RuntimeError:
-            # No event loop - fallback to immediate publish
-            _publish_direct("chat.token", payload)
+            # No event loop - fallback to immediate direct publish (no buffering)
+            _publish_direct("chat.token", {
+                "session_id": payload.get("session_id"),
+                "trace_id": payload.get("trace_id"),
+                "request_id": request_id,
+                "token": token,
+                "sequence": payload.get("sequence", 0),
+                "batched": False,
+            })
+
+
+def _handle_status_event(payload: Dict[str, Any]) -> None:
+    """Handle chat.status/thinking events with rate-limiting (NOT buffered like tokens)."""
+    request_id = payload.get("request_id")
+    if not request_id:
+        # No request_id - publish directly without rate limiting
+        _publish_direct("chat.status", payload)
+        return
+    
+    # Check rate limit
+    if not _check_status_rate_limit(request_id):
+        # Drop event if over rate limit (prevent spam)
+        return
+    
+    # Publish directly - NO BUFFERING for status events
+    _publish_direct("chat.status", payload)
+    _logger.debug(f"status_published request_id={request_id} status={payload.get('status', 'N/A')}")
 
 
 def _handle_chat_end_error(event_type: str, payload: Dict[str, Any]) -> None:
@@ -223,6 +300,9 @@ def _handle_chat_end_error(event_type: str, payload: Dict[str, Any]) -> None:
             _logger.debug(f"flush_on_end request_id={request_id} size={len(accumulated)}")
         
         _chat_token_buffers.pop(request_id, None)
+    
+    # Clean up status rate limiting state
+    _status_rate_limit.pop(request_id, None)
 
 
 def subscribe(event_type: str, callback: Callable[[str, Any], None]) -> Callable[[], None]:
@@ -300,6 +380,10 @@ def publish(event_type: str, payload: Any) -> None:
     if event_type == "chat.token":
         _handle_chat_token_event(payload)
         return
+    elif event_type in ("chat.status", "chat.thinking"):
+        # Status/thinking events: rate-limited, NOT buffered, can be dropped
+        _handle_status_event(payload)
+        return
     elif event_type in ("chat.end", "chat.error"):
         _handle_chat_end_error(event_type, payload)
     
@@ -346,6 +430,10 @@ def close() -> None:
                 "batched": True,
             })
     _chat_token_buffers.clear()
+    
+    # Clear status rate limiting state
+    _status_rate_limit.clear()
+    
     _logger.info("events_bus_closed")
 
 
@@ -369,6 +457,9 @@ def reset_for_tests() -> None:
     _callback_tasks.clear()
     
     _chat_token_buffers.clear()
+    
+    # Clear status rate limiting state
+    _status_rate_limit.clear()
 
 
 def shutdown() -> None:
@@ -412,5 +503,8 @@ def cleanup_request_buffers(request_id: str) -> None:
         
         _chat_token_buffers.pop(request_id, None)
         _logger.debug(f"cleanup_buffer request_id={request_id}")
+    
+    # Clean up status rate limiting state
+    _status_rate_limit.pop(request_id, None)
     
     _logger.info(f"cleanup_request_complete request_id={request_id}")

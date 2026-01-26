@@ -339,6 +339,10 @@ def _ndjson_status(status: str, stream_id: str | None = None, **kwargs) -> str:
     """Emit status event"""
     return _ndjson_event("status", None, stream_id=stream_id, status=status, **kwargs)
 
+def _ndjson_thinking(message: str, stream_id: str | None = None, **kwargs) -> str:
+    """Emit thinking event (alias for status with thinking=True flag)"""
+    return _ndjson_event("thinking", message, stream_id=stream_id, **kwargs)
+
 def _ndjson_token(token: str, stream_id: str | None = None, **kwargs) -> str:
     """Emit token event"""
     return _ndjson_event("token", token, stream_id=stream_id, **kwargs)
@@ -686,6 +690,18 @@ def emit_chat_token(session_id: str | None, request_id: str, token: str, sequenc
         "request_id": request_id,
         "token": token,
         "sequence": sequence,
+        "ts": time.time(),
+        "trace_id": trace_id,
+    })
+
+
+def emit_chat_status(session_id: str | None, request_id: str, status: str, trace_id: str | None = None) -> None:
+    """Emit a chat.status event (rate-limited, NOT buffered, can be dropped)."""
+    _emit_event("chat.status", {
+        "session_id": session_id,
+        "message_id": request_id,
+        "request_id": request_id,
+        "status": status,
         "ts": time.time(),
         "trace_id": trace_id,
     })

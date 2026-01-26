@@ -65,7 +65,7 @@ export default function Composer() {
               {isStreaming && (
                 <button
                   onClick={stopStreaming}
-                  className="h-10 px-4 rounded-full bg-red-600 hover:bg-red-500 text-sm font-medium text-neutral-50 transition"
+                  className="h-10 px-4 rounded-full bg-red-600 hover:bg-red-500 text-sm font-medium text-neutral-50 transition disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Stop
                 </button>

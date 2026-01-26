@@ -182,6 +182,7 @@ class StreamRegistry:
         self._by_session: dict[str, str] = {}
 
     async def register(self, entry: _StreamEntry):
+        """Register a new stream, cancelling any existing stream for same session and WAITING for cleanup."""
         async with self._lock:
             # Cancel any existing stream for same session
             if entry["session_id"]:
@@ -191,8 +192,32 @@ class StreamRegistry:
                     try:
                         prev["cancel_event"].set()
                         prev["task"].cancel()
+                        prev_task = prev["task"]
                     except Exception:
-                        pass
+                        prev_task = None
+                else:
+                    prev_task = None
+            else:
+                prev_task = None
+            
+            # Release lock while waiting for old task to finish
+        
+        # Wait for old task to complete (outside lock) with timeout
+        if prev_task:
+            try:
+                # Wait up to 2s for old stream to finish cleanup
+                await asyncio.wait_for(prev_task, timeout=2.0)
+                _req_logger.info(f"prev_stream_finished_cleanly session={entry['session_id']} trace={entry['trace_id']}")
+            except asyncio.TimeoutError:
+                _req_logger.warning(f"prev_stream_timeout_on_cancel session={entry['session_id']} trace={entry['trace_id']}")
+            except asyncio.CancelledError:
+                # Old task was cancelled, that's expected
+                _req_logger.debug(f"prev_stream_cancelled session={entry['session_id']} trace={entry['trace_id']}")
+            except Exception as e:
+                _req_logger.debug(f"prev_stream_wait_error session={entry['session_id']} err={e}")
+        
+        # Now acquire lock and register new stream
+        async with self._lock:
             self._by_trace[entry["trace_id"]] = entry
             if entry["session_id"]:
                 self._by_session[entry["session_id"]] = entry["trace_id"]
@@ -212,8 +237,10 @@ class StreamRegistry:
                 entry["task"].cancel()
             except Exception:
                 pass
-            _req_logger.info(f"stream_cancelled trace={trace_id} reason={reason or 'manual'}")
-            return True
+        # Set cancellation flag so Ollama client can check it
+        await set_stream_cancelled(trace_id)
+        _req_logger.info(f"stream_cancelled trace={trace_id} reason={reason or 'manual'}")
+        return True
 
     async def cancel_by_session(self, session_id: str, reason: str | None = None):
         async with self._lock:
@@ -297,6 +324,37 @@ def is_test_mode():
         return cfg_test()
     except Exception:
         return os.getenv("JARVIS_TEST_MODE", "0") == "1"
+
+# Streaming protocol helpers - standardized NDJSON format
+# TEMP: stream_id guard to prevent stale streams (remove after debugging)
+def _ndjson_event(event_type: str, content: str | None = None, stream_id: str | None = None, **kwargs) -> str:
+    """Emit one NDJSON event: single JSON object per line with stream_id guard"""
+    payload = {"type": event_type, "content": content}
+    if stream_id:
+        payload["stream_id"] = stream_id  # TEMP: For debugging stale streams
+    payload.update(kwargs)
+    return json.dumps(payload) + "\n"
+
+def _ndjson_status(status: str, stream_id: str | None = None, **kwargs) -> str:
+    """Emit status event"""
+    return _ndjson_event("status", None, stream_id=stream_id, status=status, **kwargs)
+
+def _ndjson_thinking(message: str, stream_id: str | None = None, **kwargs) -> str:
+    """Emit thinking event (alias for status with thinking=True flag)"""
+    return _ndjson_event("thinking", message, stream_id=stream_id, **kwargs)
+
+def _ndjson_token(token: str, stream_id: str | None = None, **kwargs) -> str:
+    """Emit token event"""
+    return _ndjson_event("token", token, stream_id=stream_id, **kwargs)
+
+def _ndjson_done(reason: str | None = None, stream_id: str | None = None, **kwargs) -> str:
+    """Emit done event"""
+    return _ndjson_event("done", None, stream_id=stream_id, reason=reason, **kwargs)
+
+def _ndjson_error(error: str, stream_id: str | None = None, **kwargs) -> str:
+    """Emit error event"""
+    return _ndjson_event("error", error, stream_id=stream_id, **kwargs)
+
 _PROMPT_CACHE: dict[str, str] = {}
 _EXPOSE_SYSTEM_PROMPT = os.getenv("JARVIS_EXPOSE_SYSTEM_PROMPT", "0") == "1"
 _PROMPT_MANAGER = get_prompt_manager()
@@ -632,6 +690,18 @@ def emit_chat_token(session_id: str | None, request_id: str, token: str, sequenc
         "request_id": request_id,
         "token": token,
         "sequence": sequence,
+        "ts": time.time(),
+        "trace_id": trace_id,
+    })
+
+
+def emit_chat_status(session_id: str | None, request_id: str, status: str, trace_id: str | None = None) -> None:
+    """Emit a chat.status event (rate-limited, NOT buffered, can be dropped)."""
+    _emit_event("chat.status", {
+        "session_id": session_id,
+        "message_id": request_id,
+        "request_id": request_id,
+        "status": status,
         "ts": time.time(),
         "trace_id": trace_id,
     })
@@ -2659,7 +2729,14 @@ async def chat(
             trace_id = uuid.uuid4().hex
             return StreamingResponse(
                 _stream_simple_response(req, reply, model, session_id, trace_id),
-                media_type="text/event-stream"
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache, no-store, must-revalidate, max-age=0",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no",
+                    "Pragma": "no-cache",
+                    "Expires": "0",
+                }
             )
         return {
             "id": f"chatcmpl-{uuid.uuid4().hex}",
@@ -2734,7 +2811,14 @@ async def chat(
                 trace_id = uuid.uuid4().hex
                 return StreamingResponse(
                     _stream_simple_response(req, reply, model, session_id, trace_id),
-                    media_type="text/event-stream"
+                    media_type="text/event-stream",
+                    headers={
+                        "Cache-Control": "no-cache, no-store, must-revalidate, max-age=0",
+                        "Connection": "keep-alive",
+                        "X-Accel-Buffering": "no",
+                        "Pragma": "no-cache",
+                        "Expires": "0",
+                    }
                 )
             return {
                 "id": f"chatcmpl-{uuid.uuid4().hex}",
@@ -2771,7 +2855,14 @@ async def chat(
                 trace_id = uuid.uuid4().hex
                 return StreamingResponse(
                     _stream_simple_response(req, reply, model, session_id, trace_id),
-                    media_type="text/event-stream"
+                    media_type="text/event-stream",
+                    headers={
+                        "Cache-Control": "no-cache, no-store, must-revalidate, max-age=0",
+                        "Connection": "keep-alive",
+                        "X-Accel-Buffering": "no",
+                        "Pragma": "no-cache",
+                        "Expires": "0",
+                    }
                 )
             return {
                 "id": f"chatcmpl-{uuid.uuid4().hex}",
@@ -2844,7 +2935,17 @@ async def chat(
                     finally:
                         await clear_stream_cancelled(trace_id)
                 
-                return StreamingResponse(quota_gen_async(), media_type="text/event-stream")
+                return StreamingResponse(
+                    quota_gen_async(),
+                    media_type="text/event-stream",
+                    headers={
+                        "Cache-Control": "no-cache, no-store, must-revalidate, max-age=0",
+                        "Connection": "keep-alive",
+                        "X-Accel-Buffering": "no",
+                        "Pragma": "no-cache",
+                        "Expires": "0",
+                    }
+                )
             response = {
                 "id": f"chatcmpl-{uuid.uuid4().hex}",
                 "object": "chat.completion",
@@ -2882,7 +2983,8 @@ async def chat(
             done_sent = False
             agent_start_time = time.time()
             chat_start_time = time.time()
-            _req_logger.info(f"stream_start trace={trace_id} session={session_id} user={user['username']}")
+            # TEMP: Log stream_id for debugging stale streams
+            _req_logger.info(f"stream_start trace={trace_id} stream_id={stream_id} session={session_id} user={user['username']}")
             emit_chat_start(session_id, stream_id, model, trace_id=trace_id)
             cancel_event = asyncio.Event()
             
@@ -2963,7 +3065,7 @@ async def chat(
                     nonlocal agent_result, agent_error
                     try:
                         _req_logger.debug(f"agent_task_start trace={trace_id}")
-                        # Run agent
+                        # Run agent - wrapped in to_thread to allow cancellation
                         result = await asyncio.to_thread(
                             run_agent,
                             user["username"],
@@ -2977,9 +3079,13 @@ async def chat(
                         agent_result = result
                         _req_logger.debug(f"agent_task_done trace={trace_id}")
                         
+                        # Check if we were cancelled before processing result
+                        if cancel_event.is_set():
+                            _req_logger.info(f"agent_task_cancelled_before_result trace={trace_id}")
+                            raise asyncio.CancelledError()
+                        
                         # Process result and emit streaming events
                         if result.get("meta", {}).get("tool_used"):
-                            # Emit agent.stream.status event for tool usage
                             try:
                                 publish("agent.stream.status", {
                                     "session_id": session_id,
@@ -2999,8 +3105,7 @@ async def chat(
                         if quota_warning:
                             text_stream = f"{quota_warning}\n\n{text_stream}"
                         
-                        # Emit EventBus events for streaming (canonical approach)
-                        # The main generator will listen for these events and yield SSE chunks to client
+                        # Emit EventBus events for streaming
                         await asyncio.to_thread(lambda: _emit_stream_text_events(
                             text_stream,
                             stream_id=stream_id,
@@ -3010,28 +3115,17 @@ async def chat(
                         ))
                         
                     except asyncio.CancelledError:
-                        # CancelledError should not emit error events - it's handled by the main generator
+                        _req_logger.debug(f"agent_task_cancelled trace={trace_id}")
                         raise  # Re-raise to be handled by main generator
                     except Exception as exc:
                         agent_error = exc
-                        # Emit agent.error event
+                        _req_logger.warning(f"agent_task_error trace={trace_id} err={exc.__class__.__name__}")
                         try:
-                            publish("agent.error", {
+                            publish("agent.stream.error", {
                                 "session_id": session_id,
                                 "trace_id": trace_id,
                                 "error_type": exc.__class__.__name__,
                                 "error_message": str(exc),
-                            })
-                        except Exception:
-                            pass
-                        # Emit agent.stream.error
-                        try:
-                            publish("agent.stream.error", {
-                                "session_id": session_id,
-                                "message_id": stream_id,
-                                "trace_id": trace_id,
-                                "error_type": "ProviderError",
-                                "error_message": "Provider or server error. Please retry.",
                             })
                         except Exception:
                             pass
@@ -3078,118 +3172,54 @@ async def chat(
                             pass
                         
                         if event_type == "agent.stream.start":
-                            # Yield the head chunk
-                            created = int(time.time())
-                            head = {
-                                "id": stream_id,
-                                "object": "chat.completion.chunk",
-                                "created": created,
-                                "model": model,
-                                "trace_id": trace_id,
-                                "request_id": stream_id,
-                                "session_id": session_id,
-                                "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
-                            }
-                            chunk = f"data: {json.dumps(head)}\n\n"
-                            yield chunk
+                            # Emit NDJSON: one JSON per line, no SSE prefix
                             if not first_chunk_sent:
+                                chunk = _ndjson_status("thinking", stream_id=stream_id, trace_id=trace_id, session_id=session_id)
+                                yield chunk
                                 _req_logger.info(f"first_chunk trace={trace_id} session={session_id}")
                                 first_chunk_sent = True
                             chunks_sent += 1
-                            bytes_sent += len(chunk)
                         
                         elif event_type == "agent.stream.delta":
-                            # Yield data chunk
-                            created = int(time.time())
-                            data = {
-                                "id": stream_id,
-                                "object": "chat.completion.chunk",
-                                "created": created,
-                                "model": model,
-                                "trace_id": trace_id,
-                                "request_id": stream_id,
-                                "session_id": session_id,
-                                "choices": [{"index": 0, "delta": {"content": payload["token"]}, "finish_reason": None}],
-                            }
-                            chunk = f"data: {json.dumps(data)}\n\n"
+                            # Emit NDJSON token event
+                            token = payload.get("token", "")
+                            chunk = _ndjson_token(token, stream_id=stream_id, trace_id=trace_id, session_id=session_id)
                             yield chunk
-                            if not first_chunk_sent:
-                                _req_logger.info(f"first_chunk trace={trace_id} session={session_id}")
-                                first_chunk_sent = True
                             chunks_sent += 1
-                            bytes_sent += len(chunk)
-                            # Emit chat.token (small payload)
-                            emit_chat_token(session_id, stream_id, payload.get("token") or "", sequence=payload.get("sequence"), trace_id=trace_id)
-                            tokens_emitted = True
                         
                         elif event_type == "agent.stream.status":
-                            # NEW: Send status events to client as explicit SSE messages (type=status)
-                            # These are separate from chat.completion.chunk events and UI can process them specially
-                            status = payload.get("status")  # "thinking", "using_tool", "searching_context", "writing"
-                            
-                            status_event = {
-                                "type": "status",
-                                "status": status,
-                                "trace_id": trace_id,
-                                "session_id": session_id,
-                            }
-                            
-                            # Add tool info if present (for "using_tool" status)
-                            if status == "using_tool" and payload.get("tool"):
-                                status_event["tool"] = payload.get("tool")
-                            
-                            chunk = f"data: {json.dumps(status_event)}\n\n"
+                            # Emit NDJSON status event
+                            status = payload.get("status")
+                            chunk = _ndjson_status(status, stream_id=stream_id, trace_id=trace_id, session_id=session_id)
                             yield chunk
                             if not first_chunk_sent:
                                 _req_logger.info(f"first_event (status) trace={trace_id} session={session_id} status={status}")
                                 first_chunk_sent = True
                             chunks_sent += 1
-                            bytes_sent += len(chunk)
                             _req_logger.debug(f"stream_status trace={trace_id} status={status}")
                             continue
                         
                         elif event_type == "agent.stream.final":
                             if not tokens_emitted:
-                                # Ensure at least one chat.token event for streaming (guarantees chat.token before chat.end)
+                                # Ensure at least one token for streaming
                                 emit_chat_token(session_id, stream_id, payload.get("text") or "", sequence=payload.get("parts"), trace_id=trace_id)
-                            # Yield tail chunk and DONE
-                            created = int(time.time())
-                            tail = {
-                                "id": stream_id,
-                                "object": "chat.completion.chunk",
-                                "created": created,
-                                "model": model,
-                                "trace_id": trace_id,
-                                "request_id": stream_id,
-                                "session_id": session_id,
-                                "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
-                            }
-                            tail_chunk = f"data: {json.dumps(tail)}\n\n"
-                            yield tail_chunk
+                            # Emit NDJSON done event
+                            chunk = _ndjson_done(reason="success", stream_id=stream_id, trace_id=trace_id, session_id=session_id)
+                            yield chunk
                             chunks_sent += 1
-                            bytes_sent += len(tail_chunk)
-                            done_chunk = "data: [DONE]\n\n"
-                            yield done_chunk
-                            bytes_sent += len(done_chunk)
                             done_sent = True
-                            _req_logger.info(f"stream_done trace={trace_id} chunks_sent={chunks_sent} bytes_sent={bytes_sent}")
+                            _req_logger.info(f"stream_done trace={trace_id} chunks_sent={chunks_sent}")
                             emit_chat_end(session_id, stream_id, ok=True, trace_id=trace_id)
                             break
                         
                         elif event_type == "agent.stream.error":
-                            error_resp = _stream_error_event(
-                                payload.get("error_message", "Stream error"),
-                                payload.get("error_type", "Error"),
-                                trace_id,
-                                session_id,
-                            )
-                            yield error_resp
+                            error_msg = payload.get("error_message", "Stream error")
+                            chunk = _ndjson_error(error_msg, stream_id=stream_id, error_type=payload.get("error_type", "Error"), trace_id=trace_id, session_id=session_id)
+                            yield chunk
                             chunks_sent += 1
-                            bytes_sent += len(error_resp)
-                            done_chunk = "data: [DONE]\n\n"
-                            yield done_chunk
-                            bytes_sent += len(done_chunk)
-                            _req_logger.info(f"stream_error trace={trace_id} error_type={payload.get('error_type')} chunks_sent={chunks_sent} bytes_sent={bytes_sent}")
+                            yield _ndjson_done(reason="error", stream_id=stream_id, trace_id=trace_id, session_id=session_id)
+                            done_sent = True
+                            _req_logger.info(f"stream_error trace={trace_id} stream_id={stream_id} error_type={payload.get('error_type')}")
                             emit_chat_end(
                                 session_id,
                                 stream_id,
@@ -3412,37 +3442,62 @@ async def chat(
                         # If we can't send the error, client is already gone
                         _req_logger.warning(f"Could not send error to disconnected client trace={trace_id}")
             finally:
-                # Cleanup
+                # Cleanup: ensure agent task is cancelled before cleanup
                 _req_logger.info(f"stream_cleanup trace={trace_id} session={session_id}")
-                # Emit final stream_end event if not already sent
-                if not done_sent:
-                    try:
-                        yield f'data: {{"type":"done","trace_id":"{trace_id}"}}\n\n'
-                    except Exception:
-                        pass
-                try:
-                    event_queue.cleanup()
-                except Exception:
-                    pass
+                # First, try to cancel agent task gracefully
                 if agent_task and not agent_task.done():
                     _req_logger.debug(f"cancelling_agent_task trace={trace_id}")
                     agent_task.cancel()
                     try:
-                        await asyncio.wait_for(agent_task, timeout=1.0)
+                        # Give agent task 0.5s to respond to cancellation
+                        await asyncio.wait_for(agent_task, timeout=0.5)
+                    except asyncio.CancelledError:
+                        pass  # Expected - task was cancelled
+                    except asyncio.TimeoutError:
+                        _req_logger.warning(f"agent_task_timeout_on_cancel trace={trace_id}")
+                    except Exception as e:
+                        _req_logger.debug(f"agent_task_cancel_error trace={trace_id} err={e}")
+                # Send final done if not already sent
+                if not done_sent:
+                    try:
+                        yield _ndjson_done(reason="stream_cancelled", stream_id=stream_id, trace_id=trace_id, session_id=session_id)
                     except Exception:
-                        _req_logger.info(f"stream_force_cancel trace={trace_id} session={session_id} timeout_waiting_task_ms=1000")
+                        pass
+                # Cleanup event queue
+                try:
+                    event_queue.cleanup()
+                except Exception:
+                    pass
+                # Cleanup event buffers (cancel any pending flush tasks)
+                try:
+                    from jarvis.events import cleanup_request_buffers
+                    cleanup_request_buffers(stream_id)
+                    _req_logger.debug(f"event_buffers_cleaned trace={trace_id}")
+                except Exception as e:
+                    _req_logger.debug(f"event_buffer_cleanup_error trace={trace_id} err={e}")
                 # Clear cancellation flag
                 try:
                     await clear_stream_cancelled(trace_id)
                 except Exception:
                     pass
+                # Unregister from registry
                 try:
                     await _stream_registry.pop(trace_id)
                 except Exception:
                     pass
-                _req_logger.info(f"stream_end trace={trace_id} session={session_id} duration_ms={int((time.time()-chat_start_time)*1000)}")
+                _req_logger.info(f"stream_end trace={trace_id} stream_id={stream_id} session={session_id} duration_ms={int((time.time()-chat_start_time)*1000)} cleanup_done=True")
 
-        return StreamingResponse(generator(), media_type="text/event-stream")
+        return StreamingResponse(
+            generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate, max-age=0",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",  # Disable nginx buffering
+                "Pragma": "no-cache",
+                "Expires": "0",
+            }
+        )
 
     ui_city = req.headers.get("x-ui-city")
     start_time = time.time()

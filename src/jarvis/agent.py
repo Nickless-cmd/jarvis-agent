@@ -341,6 +341,7 @@ def call_ollama(messages, model_profile: str = "balanced"):
     # Get profile parameters
     profile_params = get_model_profile_params(model_profile)
     
+    trace_id = uuid.uuid4().hex[:8]
     payload = {
         "model": os.getenv("OLLAMA_MODEL"),
         "messages": messages,
@@ -348,13 +349,14 @@ def call_ollama(messages, model_profile: str = "balanced"):
         **profile_params  # Add profile parameters
     }
     timeout = int(os.getenv("OLLAMA_TIMEOUT_SECONDS", "120"))
-    trace_id = uuid.uuid4().hex[:8]
     resp = ollama_request(
         os.getenv("OLLAMA_URL"),
         payload,
         connect_timeout=2.0,
-        read_timeout=60.0,
-        retries=2,
+        read_timeout=timeout,
+        retries=0,
+        trace_id=trace_id,
+        is_streaming=False,
     )
     if resp.get("ok"):
         data = resp.get("data") or {}

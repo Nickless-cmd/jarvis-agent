@@ -5,6 +5,8 @@ import os
 import re
 import time
 import random
+import signal
+import faulthandler
 from pathlib import Path
 from zoneinfo import ZoneInfo
 from logging.handlers import TimedRotatingFileHandler
@@ -15,11 +17,14 @@ import sqlite3
 from fastapi import BackgroundTasks, Cookie, Depends, FastAPI, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse, JSONResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, TypedDict
 
+import logging
+logger = logging.getLogger(__name__)
 
 @dataclass
 class AppState:
@@ -159,6 +164,78 @@ _last_log_cleanup = 0.0
 _stream_cancellations: dict[str, bool] = {}
 _stream_cancellations_lock = asyncio.Lock()
 
+# Stream registry to ensure only one live stream per session/request and guarantee cleanup
+class _StreamEntry(TypedDict):
+    session_id: str | None
+    trace_id: str
+    request_id: str
+    task: asyncio.Task
+    cancel_event: asyncio.Event
+    started_at: float
+    last_activity_at: float
+
+
+class StreamRegistry:
+    def __init__(self):
+        self._lock = asyncio.Lock()
+        self._by_trace: dict[str, _StreamEntry] = {}
+        self._by_session: dict[str, str] = {}
+
+    async def register(self, entry: _StreamEntry):
+        async with self._lock:
+            # Cancel any existing stream for same session
+            if entry["session_id"]:
+                prev_trace = self._by_session.get(entry["session_id"])
+                if prev_trace and prev_trace in self._by_trace:
+                    prev = self._by_trace[prev_trace]
+                    try:
+                        prev["cancel_event"].set()
+                        prev["task"].cancel()
+                    except Exception:
+                        pass
+            self._by_trace[entry["trace_id"]] = entry
+            if entry["session_id"]:
+                self._by_session[entry["session_id"]] = entry["trace_id"]
+
+    async def mark_activity(self, trace_id: str):
+        async with self._lock:
+            if trace_id in self._by_trace:
+                self._by_trace[trace_id]["last_activity_at"] = time.monotonic()
+
+    async def cancel(self, trace_id: str, reason: str | None = None):
+        async with self._lock:
+            entry = self._by_trace.get(trace_id)
+            if not entry:
+                return False
+            entry["cancel_event"].set()
+            try:
+                entry["task"].cancel()
+            except Exception:
+                pass
+            _req_logger.info(f"stream_cancelled trace={trace_id} reason={reason or 'manual'}")
+            return True
+
+    async def cancel_by_session(self, session_id: str, reason: str | None = None):
+        async with self._lock:
+            trace_id = self._by_session.get(session_id)
+        if trace_id:
+            return await self.cancel(trace_id, reason=reason)
+        return False
+
+    async def pop(self, trace_id: str):
+        async with self._lock:
+            entry = self._by_trace.pop(trace_id, None)
+            if entry and entry.get("session_id"):
+                self._by_session.pop(entry["session_id"], None)
+            return entry
+
+    async def get(self, trace_id: str) -> _StreamEntry | None:
+        async with self._lock:
+            return self._by_trace.get(trace_id)
+
+
+_stream_registry = StreamRegistry()
+
 async def set_stream_cancelled(trace_id: str):
     """Mark a stream as cancelled."""
     async with _stream_cancellations_lock:
@@ -190,6 +267,7 @@ async def _stream_simple_response(
     Async generator that streams a simple text response with frequent disconnect checks.
     Used for pre-agent responses (sensitive content, quota, banner, etc).
     """
+    start_ts = time.time()
     try:
         stream_id = f"chatcmpl-{uuid.uuid4().hex}"
         _req_logger.info(f"stream_simple_start trace={trace_id} session={session_id}")
@@ -203,9 +281,9 @@ async def _stream_simple_response(
             yield chunk
         
         # Note: _stream_chunks already yields "data: [DONE]\n\n" at the end, so no need to yield again
-        _req_logger.info(f"stream_simple_done trace={trace_id} session={session_id}")
-    except asyncio.CancelledError:
-        _req_logger.info(f"stream_simple_cancelled trace={trace_id} session={session_id}")
+        _req_logger.info(f"stream_simple_done trace={trace_id} session={session_id} duration_ms={int((time.time()-start_ts)*1000)}")
+    except (asyncio.CancelledError, GeneratorExit, BrokenPipeError):
+        _req_logger.info(f"stream_simple_cancelled trace={trace_id} session={session_id} duration_ms={int((time.time()-start_ts)*1000)}")
         raise
     except Exception as exc:
         _req_logger.exception(f"stream_simple_error trace={trace_id}: {exc}")
@@ -253,6 +331,13 @@ async def lifespan(app: FastAPI):
     app_state.paths_logged = True
     _log_startup_paths()
     
+    # Enable faulthandler for debugging hangs: send SIGUSR1 to dump stack traces
+    faulthandler.enable()
+    faulthandler.register(signal.SIGUSR1)
+    #logger.info("Faulthandler enabled: send SIGUSR1 to dump stack traces")
+    import logging    
+    logging.getLogger(__name__).info("Faulthandler enabled: send SIGUSR1 to dump stack traces") 
+
     app_state.demo_user_ensured = True
     ensure_demo_user()
     
@@ -2793,11 +2878,13 @@ async def chat(
             trace_id = uuid.uuid4().hex
             stream_id = request_id
             deadline = time.monotonic() + MAX_STREAM_SECONDS
+            inactivity_deadline = time.monotonic() + int(os.getenv("JARVIS_STREAM_INACTIVITY_SECONDS", "120"))
             done_sent = False
             agent_start_time = time.time()
             chat_start_time = time.time()
             _req_logger.info(f"stream_start trace={trace_id} session={session_id} user={user['username']}")
             emit_chat_start(session_id, stream_id, model, trace_id=trace_id)
+            cancel_event = asyncio.Event()
             
             # Subscribe to agent.stream events for this trace_id
             event_queue = await subscribe_async(
@@ -2806,6 +2893,20 @@ async def chat(
             )
             
             try:
+                # Register stream (cancel any previous for session)
+                try:
+                    await _stream_registry.register({
+                        "session_id": session_id,
+                        "trace_id": trace_id,
+                        "request_id": stream_id,
+                        "task": asyncio.current_task(),
+                        "cancel_event": cancel_event,
+                        "started_at": time.monotonic(),
+                        "last_activity_at": time.monotonic(),
+                    })
+                except Exception:
+                    _req_logger.exception(f"stream_registry_register_failed trace={trace_id} session={session_id}")
+
                 # Emit chat.start
                 try:
                     publish("chat.start", {
@@ -2943,22 +3044,38 @@ async def chat(
                 first_chunk_sent = False
                 bytes_sent = 0
                 while True:
-                    # Check for disconnect before processing events
+                    # Check for disconnect/cancel before processing events
+                    if cancel_event.is_set():
+                        _req_logger.info(f"stream_cancelled trace={trace_id} session={session_id} reason=external_cancel")
+                        raise asyncio.CancelledError()
                     if await req.is_disconnected():
                         _req_logger.info(f"stream_disconnected trace={trace_id} session={session_id}")
                         await set_stream_cancelled(trace_id)
                         if agent_task and not agent_task.done():
                             agent_task.cancel()
+                            try:
+                                # Give agent task 0.5s to respond to cancellation before giving up
+                                await asyncio.wait_for(agent_task, timeout=0.5)
+                            except (asyncio.TimeoutError, asyncio.CancelledError):
+                                _req_logger.info(f"agent_task cancelled/timed_out (trace={trace_id})")
+                                pass
                         try:
-                            # Attempt to terminate SSE cleanly
-                            yield "data: [DONE]\n\n"
+                            # Ensure stream terminated cleanly with [DONE]
+                            if not done_sent:
+                                yield "data: [DONE]\n\n"
+                                done_sent = True
                         except Exception:
                             pass
-                        _req_logger.info(f"stream_cleanup trace={trace_id} session={session_id}")
+                        _req_logger.info(f"stream_cleanup (disconnect) trace={trace_id} session={session_id}")
                         return
                     
                     try:
                         event_type, payload = await asyncio.wait_for(event_queue.get(), timeout=0.1)
+                        inactivity_deadline = time.monotonic() + int(os.getenv("JARVIS_STREAM_INACTIVITY_SECONDS", "120"))
+                        try:
+                            await _stream_registry.mark_activity(trace_id)
+                        except Exception:
+                            pass
                         
                         if event_type == "agent.stream.start":
                             # Yield the head chunk
@@ -3006,8 +3123,29 @@ async def chat(
                             tokens_emitted = True
                         
                         elif event_type == "agent.stream.status":
-                            # Status events are NOT sent to client - they break OpenAI SSE format
-                            _req_logger.debug(f"stream_status trace={trace_id} status={payload.get('status')}")
+                            # NEW: Send status events to client as explicit SSE messages (type=status)
+                            # These are separate from chat.completion.chunk events and UI can process them specially
+                            status = payload.get("status")  # "thinking", "using_tool", "searching_context", "writing"
+                            
+                            status_event = {
+                                "type": "status",
+                                "status": status,
+                                "trace_id": trace_id,
+                                "session_id": session_id,
+                            }
+                            
+                            # Add tool info if present (for "using_tool" status)
+                            if status == "using_tool" and payload.get("tool"):
+                                status_event["tool"] = payload.get("tool")
+                            
+                            chunk = f"data: {json.dumps(status_event)}\n\n"
+                            yield chunk
+                            if not first_chunk_sent:
+                                _req_logger.info(f"first_event (status) trace={trace_id} session={session_id} status={status}")
+                                first_chunk_sent = True
+                            chunks_sent += 1
+                            bytes_sent += len(chunk)
+                            _req_logger.debug(f"stream_status trace={trace_id} status={status}")
                             continue
                         
                         elif event_type == "agent.stream.final":
@@ -3062,6 +3200,13 @@ async def chat(
                             return
                             
                     except asyncio.TimeoutError:
+                        # inactivity watchdog
+                        if time.monotonic() > inactivity_deadline:
+                            _req_logger.info(f"stream_cancelled trace={trace_id} session={session_id} reason=inactivity")
+                            if agent_task and not agent_task.done():
+                                agent_task.cancel()
+                            cancel_event.set()
+                            break
                         # Check if agent task is done - if so, wait a bit more for any remaining events
                         if agent_task and agent_task.done():
                             # Wait a short time for any remaining events
@@ -3132,6 +3277,9 @@ async def chat(
                                 break
                         
                         # Check for disconnect/timeout
+                        if cancel_event.is_set():
+                            _req_logger.info(f"stream_cancelled trace={trace_id} session={session_id} reason=external_cancel_timeout_loop")
+                            break
                         if await req.is_disconnected():
                             _req_logger.info(f"Client disconnected: trace={trace_id}")
                             await set_stream_cancelled(trace_id)
@@ -3186,7 +3334,7 @@ async def chat(
                         result = agent_result
                     except asyncio.CancelledError:
                         _req_logger.info("Streaming run_agent cancelled trace=%s", trace_id)
-                        return
+                        raise
                     except Exception as exc:
                         _req_logger.exception("Streaming run_agent failed trace=%s", trace_id)
                         yield _stream_error_event(
@@ -3196,7 +3344,8 @@ async def chat(
                             session_id,
                         )
                         yield "data: [DONE]\n\n"
-                        return
+                        done_sent = True
+                        raise
                 
                 # Do not send status events to client; stream is complete
                 
@@ -3235,19 +3384,42 @@ async def chat(
                         f"data: {json.dumps(payload)}\n\n"
                     )
                 
+            except asyncio.CancelledError:
+                _req_logger.info(f"stream_cancelled trace={trace_id} session={session_id}")
+                # Cancelled streams are already logged; cleanup in finally block
+                raise
+            except GeneratorExit:
+                _req_logger.info(f"stream_generator_exit trace={trace_id} session={session_id}")
+                raise
+            except BrokenPipeError as exc:
+                _req_logger.info(f"stream_broken_pipe trace={trace_id} session={session_id} err={exc}")
+                # Client disconnected abruptly - cleanup in finally
+            except ConnectionResetError as exc:
+                _req_logger.info(f"stream_connection_reset trace={trace_id} session={session_id} err={exc}")
+                # Network disconnection - cleanup in finally
             except Exception as exc:
                 _req_logger.exception("Streaming generator failed trace=%s", trace_id)
                 if not done_sent:
-                    yield _stream_error_event(
-                        "Internal server error",
-                        "InternalError",
-                        trace_id,
-                        session_id,
-                    )
-                    yield "data: [DONE]\n\n"
+                    try:
+                        yield _stream_error_event(
+                            "Internal server error",
+                            "InternalError",
+                            trace_id,
+                            session_id,
+                        )
+                        yield "data: [DONE]\n\n"
+                    except Exception:
+                        # If we can't send the error, client is already gone
+                        _req_logger.warning(f"Could not send error to disconnected client trace={trace_id}")
             finally:
                 # Cleanup
                 _req_logger.info(f"stream_cleanup trace={trace_id} session={session_id}")
+                # Emit final stream_end event if not already sent
+                if not done_sent:
+                    try:
+                        yield f'data: {{"type":"done","trace_id":"{trace_id}"}}\n\n'
+                    except Exception:
+                        pass
                 try:
                     event_queue.cleanup()
                 except Exception:
@@ -3255,11 +3427,20 @@ async def chat(
                 if agent_task and not agent_task.done():
                     _req_logger.debug(f"cancelling_agent_task trace={trace_id}")
                     agent_task.cancel()
+                    try:
+                        await asyncio.wait_for(agent_task, timeout=1.0)
+                    except Exception:
+                        _req_logger.info(f"stream_force_cancel trace={trace_id} session={session_id} timeout_waiting_task_ms=1000")
                 # Clear cancellation flag
                 try:
                     await clear_stream_cancelled(trace_id)
                 except Exception:
                     pass
+                try:
+                    await _stream_registry.pop(trace_id)
+                except Exception:
+                    pass
+                _req_logger.info(f"stream_end trace={trace_id} session={session_id} duration_ms={int((time.time()-chat_start_time)*1000)}")
 
         return StreamingResponse(generator(), media_type="text/event-stream")
 
@@ -3416,9 +3597,13 @@ async def chat_stop(
     if trace_id:
         _req_logger.info(f"stream_stop_requested trace={trace_id}")
         try:
-            await set_stream_cancelled(trace_id)
+            await _stream_registry.cancel(trace_id, reason="stop_endpoint")
         except Exception as e:
-            _req_logger.warning(f"Failed to set stream cancelled: {e}")
+            _req_logger.warning(f"Failed to cancel stream via registry: {e}")
+            try:
+                await set_stream_cancelled(trace_id)
+            except Exception:
+                pass
         return {"ok": True, "trace_id": trace_id}
     
     return {"ok": False, "error": "Missing trace_id"}

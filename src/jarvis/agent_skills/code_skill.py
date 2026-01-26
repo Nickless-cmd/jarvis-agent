@@ -271,15 +271,15 @@ def handle_code_question(
     elif not _code_question_intent(prompt):
         return None
 
-    # Try to get cached RAG results first (non-blocking, with short timeout)
+    # Try to get cached RAG results first (non-blocking, with short timeout) - only if enabled
     hits = []
-    if rag_hash:
+    if rag_hash and os.getenv("JARVIS_ENABLE_RAG") == "1":
         from jarvis.agent_core.rag_async import get_code_rag_results
         hits = get_code_rag_results(rag_hash, max_wait=0.5, trace_id=trace_id)
 
     
-    # If no cached results, do blocking search
-    if not hits:
+    # If no cached results and RAG is enabled, do blocking search
+    if not hits and os.getenv("JARVIS_ENABLE_RAG") == "1":
         try:
             hits = search_code(query, k=5, repo_root=repo_root, index_dir=index_dir, trace_id=trace_id)
         except Exception as exc:

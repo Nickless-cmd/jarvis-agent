@@ -174,6 +174,9 @@ def get_embedding_dim() -> int:
 
 def _encode(text: str, best_effort: bool = True, *, expected_dim: int | None = None, trace_id: str | None = None):
     """Encode text to embedding. Falls back to hash-embed on error if best_effort=True.
+    
+    Respects cancellation signal from streaming. If trace_id provided and stream is cancelled,
+    raises early to prevent wasted computation.
 
     Args:
         expected_dim: If provided, validate returned vector length and raise EmbeddingDimMismatch on mismatch.
@@ -183,14 +186,17 @@ def _encode(text: str, best_effort: bool = True, *, expected_dim: int | None = N
     if os.getenv("JARVIS_DISABLE_EMBEDDINGS") == "1" or os.getenv("DISABLE_EMBEDDINGS") == "1":
         return _to_vec(_hash_embed(text))
 
-    # Cancellation check (non-async context)
+    # Cancellation check BEFORE starting expensive operation
     if trace_id:
         try:
             from jarvis.server import check_stream_cancelled_sync  # type: ignore
             if check_stream_cancelled_sync(trace_id):
-                raise RuntimeError("Cancelled")
+                logger.info(f"[EMBED] Cancelled before request (trace_id={trace_id})")
+                raise RuntimeError(f"Embedding cancelled by stream stop (trace_id={trace_id})")
+        except RuntimeError:
+            raise  # Re-raise cancellation
         except Exception:
-            pass
+            pass  # Server module not available, continue
 
     embedder = _get_embedder()
     backend = os.getenv("EMBEDDINGS_BACKEND", "ollama")
@@ -233,6 +239,19 @@ def _encode(text: str, best_effort: bool = True, *, expected_dim: int | None = N
                         _logged_embed_len_traces.add(tid)
                     if expected_dim is not None and int(arr.size) != int(expected_dim):
                         raise EmbeddingDimMismatch(int(arr.size), int(expected_dim), model)
+                    
+                    # Cancellation check AFTER response received (before returning to caller)
+                    if trace_id:
+                        try:
+                            from jarvis.server import check_stream_cancelled_sync  # type: ignore
+                            if check_stream_cancelled_sync(trace_id):
+                                logger.info(f"[EMBED] Cancelled after response (trace_id={trace_id})")
+                                raise RuntimeError(f"Embedding cancelled after response (trace_id={trace_id})")
+                        except RuntimeError:
+                            raise  # Re-raise cancellation
+                        except Exception:
+                            pass  # Server module not available, continue
+                    
                     return arr
                 except EmbeddingDimMismatch:
                     raise
@@ -244,7 +263,8 @@ def _encode(text: str, best_effort: bool = True, *, expected_dim: int | None = N
             error = resp.get("error") or {}
             # If cancelled, short-circuit without retry loops
             if (error.get("type") or "").lower() == "clientcancelled".lower():
-                raise RuntimeError("Cancelled")
+                logger.info(f"[EMBED] Cancelled during request (trace_id={trace_id})")
+                raise RuntimeError(f"Embedding cancelled during request (trace_id={trace_id})")
             msg = f"Ollama embeddings failed ({error.get('type')}): {error.get('message')} [trace_id={error.get('trace_id')}]"
             logger.warning(msg)
             if best_effort:
@@ -336,6 +356,12 @@ def add_memory(role: str, text: str, user_id: str = "default") -> None:
     entry = f"{role}: {text}"
     if len(text) < 20:
         return
+    
+    # Memory indexing uses embeddings - only enable if RAG is enabled
+    if os.getenv("JARVIS_ENABLE_RAG") != "1":
+        logger.debug(f"Memory add skipped (JARVIS_ENABLE_RAG not set)")
+        return
+    
     store = _get_store(user_id)
     _search_cache.clear()
     try:
@@ -351,6 +377,11 @@ def add_memory(role: str, text: str, user_id: str = "default") -> None:
 
 def search_memory(query: str, k: int = 3, user_id: str | None = None, trace_id: str | None = None) -> list[str]:
     global _last_cache_status
+    
+    # Memory search uses embeddings - only enable if RAG is enabled
+    if os.getenv("JARVIS_ENABLE_RAG") != "1":
+        logger.debug(f"search_memory skipped (JARVIS_ENABLE_RAG not set)")
+        return []
     
     # Check if stream has been cancelled
     if trace_id:

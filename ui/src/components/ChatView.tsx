@@ -39,6 +39,7 @@ export default function ChatView({ scrollRef }: { scrollRef: React.RefObject<HTM
         hour: '2-digit', 
         minute: '2-digit' 
       })
+      const statusLabel = !isUser && m.status && m.status !== 'done' ? m.status : null
 
       return (
         <div
@@ -69,6 +70,9 @@ export default function ChatView({ scrollRef }: { scrollRef: React.RefObject<HTM
             "whitespace-pre-wrap break-words text-neutral-100",
             isUser ? "text-right" : ""
           ].join(" ")}>
+            {!isUser && statusLabel && (
+              <div className="mb-1 text-xs text-amber-400">{statusLabel === 'thinking' ? 'Thinking…' : statusLabel}</div>
+            )}
             {m.content || (m as any).text || ''}
           </div>
         </div>

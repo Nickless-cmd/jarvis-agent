@@ -14,10 +14,19 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<{ data: T
   });
   const status = res.status;
   if (status === 204) return { data: null, status };
+  const contentType = res.headers.get('content-type') || '';
+  const isJson = contentType.includes('application/json');
   let data: T | null = null;
-  try {
-    data = (await res.json()) as T;
-  } catch {
+  if (isJson) {
+    try {
+      data = (await res.json()) as T;
+    } catch (err) {
+      console.warn('[fetchJson] failed to parse JSON', { status, path, contentType, err });
+      data = null;
+    }
+  } else {
+    const text = await res.text();
+    console.warn('[fetchJson] non-JSON response', { status, path, contentType, sample: text?.slice(0, 200) });
     data = null;
   }
   return { data, status };

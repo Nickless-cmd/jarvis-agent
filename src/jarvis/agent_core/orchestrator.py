@@ -5,6 +5,7 @@ Agent orchestrator - coordinates agent execution.
 from dataclasses import dataclass
 from typing import Dict, Any, Optional
 import logging
+import os
 
 from jarvis.agent_core.state_service import AgentStateService
 from jarvis.notifications import add_notification
@@ -149,7 +150,12 @@ def handle_turn(
         return resp
 
     start = time.time()
-    mem = search_memory(prompt, user_id=user_id, trace_id=trace_id)
+    # Memory search also uses embeddings - only enable if RAG is enabled
+    mem = []
+    if os.getenv("JARVIS_ENABLE_RAG") == "1":
+        mem = search_memory(prompt, user_id=user_id, trace_id=trace_id)
+    else:
+        logger.debug(f"Memory search disabled (JARVIS_ENABLE_RAG not set)")
     try:
         from jarvis.memory import get_last_cache_status
         timings["memory_cache"] = get_last_cache_status()
@@ -164,9 +170,13 @@ def handle_turn(
     session_hist = get_recent_messages(session_id, limit=8) if session_id else []
     _debug(f"🧭 run_agent: user={user_id} session={session_id} prompt={prompt!r}")
     
-    # Start RAG retrieval in background (non-blocking for streaming)
-    rag_hash = hashlib.md5(f"{prompt}:{session_id}".encode()).hexdigest()
-    retrieve_code_rag_async(prompt, rag_hash, trace_id=trace_id)
+    # Start RAG retrieval in background (non-blocking for streaming) - only if enabled
+    rag_hash = None
+    if os.getenv("JARVIS_ENABLE_RAG") == "1":
+        rag_hash = hashlib.md5(f"{prompt}:{session_id}".encode()).hexdigest()
+        retrieve_code_rag_async(prompt, rag_hash, trace_id=trace_id)
+    else:
+        logger.debug(f"RAG disabled (JARVIS_ENABLE_RAG not set)")
     
     if session_id:
         wants_prompt, custom = _session_prompt_intent(prompt)

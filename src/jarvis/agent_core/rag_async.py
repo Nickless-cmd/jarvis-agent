@@ -44,12 +44,14 @@ def retrieve_code_rag_async(
     Retrieve code RAG results in background thread with timeout.
     Results are stored in cache keyed by prompt_hash.
     
+    RAG is DISABLED by default. Enable via JARVIS_ENABLE_RAG=1 environment variable.
+    
     Args:
         trace_id: optional trace ID for cancellation-aware embeddings
     """
-    # Check if RAG is disabled
-    if os.getenv("JARVIS_DISABLE_EMBEDDINGS") == "1":
-        logger.debug(f"Skipping RAG (JARVIS_DISABLE_EMBEDDINGS=1) for prompt_hash={prompt_hash}")
+    # RAG is opt-in - disabled by default
+    if os.getenv("JARVIS_ENABLE_RAG") != "1":
+        logger.debug(f"Skipping RAG (JARVIS_ENABLE_RAG not set) for prompt_hash={prompt_hash}")
         _rag_cache.set(prompt_hash, [])
         return
 

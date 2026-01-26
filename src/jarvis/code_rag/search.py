@@ -69,7 +69,11 @@ def search_code(
   k: int = 8,
   trace_id: str | None = None,
 ) -> list[CodeHit]:
-  """Search the code index for relevant chunks. Best-effort: returns fallback on embedding errors.
+  """Search the code index for relevant chunks. ALWAYS returns fallback on any error - NEVER raises.
+  
+  This function is non-blocking and cancellation-aware. If embedding/FAISS fails (including
+  cancellation), it silently returns empty results so chat can continue without code context.
+  This ensures the streaming pipeline is never blocked by RAG failures.
   
   Args:
       trace_id: optional trace ID for cancellation-aware embeddings
@@ -79,47 +83,72 @@ def search_code(
 
   # Check if embeddings are disabled or if we should use fallback
   if os.getenv("JARVIS_DISABLE_EMBEDDINGS") == "1" or os.getenv("DISABLE_EMBEDDINGS") == "1":
+    logger.debug("[RAG] Embeddings disabled, using fallback")
     return _search_fallback(query, target)
 
-  existing = load_index(index_dir=target)
-  if not existing:
-    existing = ensure_index(repo_root=root, index_dir=target)
-  if not existing:
-    return []
-  idx, chunks = existing
-
+  # Wrap entire RAG operation in try/except - NEVER let RAG failures stop the stream
   try:
-    from jarvis.memory import EmbeddingDimMismatch
-    vec = _encode(query, best_effort=True, expected_dim=idx.d, trace_id=trace_id)
-    vec = np.asarray(vec, dtype=np.float32).reshape(1, -1)
-  except EmbeddingDimMismatch as exc:
-    logger.error(
-      f"embedding dimension mismatch (actual={exc.actual}, expected={exc.expected}, model={exc.model}); "
-      f"skipping RAG and using fallback"
-    )
-    return _search_fallback(query, target)
-  except Exception as e:
-    logger.warning(f"Failed to encode query for search (using fallback): {e}")
-    return _search_fallback(query, target)
+    existing = load_index(index_dir=target)
+    if not existing:
+      existing = ensure_index(repo_root=root, index_dir=target)
+    if not existing:
+      logger.debug("[RAG] No index found, using fallback")
+      return _search_fallback(query, target)
+    idx, chunks = existing
 
-  try:
-    scores, ids = idx.search(vec, min(k, len(chunks)))
-  except Exception as e:
-    logger.warning(f"FAISS search failed (using fallback): {e}")
-    return _search_fallback(query, target)
-
-  hits: list[CodeHit] = []
-  for score, chunk_idx in zip(scores[0], ids[0]):
-    if chunk_idx < 0 or chunk_idx >= len(chunks):
-      continue
-    chunk = chunks[chunk_idx]
-    hits.append(
-      CodeHit(
-        path=chunk.path if hasattr(chunk, "path") else chunk.get("path", ""),
-        start_line=chunk.start_line if hasattr(chunk, "start_line") else chunk.get("start_line", 0),
-        end_line=chunk.end_line if hasattr(chunk, "end_line") else chunk.get("end_line", 0),
-        score=float(score),
-        content=chunk.content if hasattr(chunk, "content") else chunk.get("excerpt", "") or "",
+    # ENCODING PHASE - May fail or be cancelled
+    try:
+      from jarvis.memory import EmbeddingDimMismatch
+      vec = _encode(query, best_effort=True, expected_dim=idx.d, trace_id=trace_id)
+      vec = np.asarray(vec, dtype=np.float32).reshape(1, -1)
+    except RuntimeError as e:
+      # Includes cancellation: "Embedding cancelled by stream stop"
+      if "cancelled" in str(e).lower():
+        logger.info(f"[RAG] Encoding cancelled (trace_id={trace_id})")
+      else:
+        logger.warning(f"[RAG] Encoding failed (reason: {e}), using fallback")
+      return _search_fallback(query, target)
+    except EmbeddingDimMismatch as exc:
+      logger.warning(
+        f"[RAG] Embedding dimension mismatch (actual={exc.actual}, expected={exc.expected}, model={exc.model}), using fallback"
       )
-    )
-  return hits
+      return _search_fallback(query, target)
+    except Exception as e:
+      logger.warning(f"[RAG] Failed to encode query (reason: {e.__class__.__name__}: {e}), using fallback")
+      return _search_fallback(query, target)
+
+    # FAISS SEARCH PHASE - May fail or be cancelled
+    try:
+      scores, ids = idx.search(vec, min(k, len(chunks)))
+    except RuntimeError as e:
+      # Includes cancellation
+      if "cancelled" in str(e).lower():
+        logger.info(f"[RAG] FAISS search cancelled (trace_id={trace_id})")
+      else:
+        logger.warning(f"[RAG] FAISS search failed (reason: {e}), using fallback")
+      return _search_fallback(query, target)
+    except Exception as e:
+      logger.warning(f"[RAG] FAISS search failed (reason: {e.__class__.__name__}: {e}), using fallback")
+      return _search_fallback(query, target)
+
+    # Build results from FAISS output
+    hits: list[CodeHit] = []
+    for score, chunk_idx in zip(scores[0], ids[0]):
+      if chunk_idx < 0 or chunk_idx >= len(chunks):
+        continue
+      chunk = chunks[chunk_idx]
+      hits.append(
+        CodeHit(
+          path=chunk.path if hasattr(chunk, "path") else chunk.get("path", ""),
+          start_line=chunk.start_line if hasattr(chunk, "start_line") else chunk.get("start_line", 0),
+          end_line=chunk.end_line if hasattr(chunk, "end_line") else chunk.get("end_line", 0),
+          score=float(score),
+          content=chunk.content if hasattr(chunk, "content") else chunk.get("excerpt", "") or "",
+        )
+      )
+    return hits
+  
+  except Exception as e:
+    # OUTER CATCH: Any unexpected error in entire RAG operation -> fallback
+    logger.exception(f"[RAG] Unexpected error (reason: {e.__class__.__name__}: {e}), using fallback")
+    return _search_fallback(query, target)

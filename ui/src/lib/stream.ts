@@ -31,6 +31,7 @@ export async function streamChat(
 ) {
   const { sessionId, prompt, signal } = opts
   const headers = getAuthHeaders()
+  headers['Accept'] = 'text/event-stream, application/json'
   if (sessionId) headers['X-Session-Id'] = sessionId
 
   const ac = new AbortController()
@@ -48,7 +49,8 @@ export async function streamChat(
       messages: [{ role: 'user', content: prompt }],
       stream: true,
     }
-    if (typeof process !== 'undefined' && process.env?.NODE_ENV === 'development') {
+    const env = (typeof globalThis !== 'undefined' && (globalThis as any).process?.env?.NODE_ENV) || ''
+    if (env === 'development') {
       console.debug('[stream] body size', JSON.stringify(body).length)
     }
 
@@ -73,6 +75,22 @@ export async function streamChat(
       return { abort: () => ac.abort() }
     }
 
+    const contentType = res.headers.get('content-type') || ''
+    const isSse = contentType.includes('text/event-stream')
+
+    // Fallback: non-stream JSON response (backward compatible)
+    if (!isSse) {
+      try {
+        const json = await res.json()
+        const text = json?.choices?.[0]?.message?.content || json?.text || ''
+        if (text) onDelta(text)
+        onDone()
+      } catch (err: any) {
+        onError('Invalid response')
+      }
+      return { abort: () => ac.abort() }
+    }
+
     reader = res.body?.getReader() || null
     if (!reader) {
       onError('No stream')
@@ -85,6 +103,77 @@ export async function streamChat(
     let dataLines: string[] = []
 
     async function pump() {
+      const handlePayload = (raw: string, eventName: string) => {
+        // Status-only events
+        if (eventName === 'status' && raw) {
+          onStatus?.(raw)
+          return
+        }
+        try {
+          const parsed = JSON.parse(raw)
+
+          // Status updates (either explicit or embedded)
+          if (parsed.type === 'status' && typeof parsed.status === 'string') {
+            onStatus?.(parsed.status)
+            return
+          }
+          if (parsed.status && typeof parsed.status.state === 'string') {
+            onStatus?.(parsed.status.state)
+            return
+          }
+
+          // Done marker in JSON
+          if (parsed.type === 'done' || parsed.done) {
+            onDone()
+            ac.abort()
+            return
+          }
+
+          // Delta / message content
+          if (parsed.type === 'delta' && typeof parsed.delta === 'string') {
+            onDelta(parsed.delta)
+            return
+          }
+
+          if (parsed.choices && parsed.choices[0]) {
+            const choice = parsed.choices[0]
+            const delta = choice.delta
+            const message = choice.message
+            const content =
+              (delta && delta.content) ||
+              (message && message.content) ||
+              parsed.text ||
+              ''
+            if (content) onDelta(content)
+            return
+          }
+
+          if (typeof parsed.text === 'string') {
+            onDelta(parsed.text)
+            return
+          }
+
+          // Status fallback
+          if (typeof parsed.state === 'string') {
+            onStatus?.(parsed.state)
+            return
+          }
+
+          if (parsed.error) {
+            onError(typeof parsed.error === 'string' ? parsed.error : 'Error')
+            ac.abort()
+            return
+          }
+        } catch (_){
+          // Non-JSON payload
+          if (eventName === 'status') {
+            onStatus?.(raw)
+            return
+          }
+          onDelta(raw)
+        }
+      }
+
       try {
         while (true) {
           const { done, value } = await reader!.read()
@@ -118,74 +207,17 @@ export async function streamChat(
                 return
               }
 
-              // ignore noise events
-              if (evt === 'status' || evt === 'ping' || evt === 'heartbeat') {
-                continue
-              }
-
-              try {
-                const parsed = JSON.parse(payload)
-                // ignore pure status blobs
-                if (parsed.status && typeof parsed.status.state === 'string') {
-                  onStatus?.(parsed.status.state)
-                  continue
-                }
-                if (parsed.state && parsed.trace_id && !parsed.content && !parsed.delta) {
-                  onStatus?.(parsed.state)
-                  continue
-                }
-                if (parsed.error) {
-                  onError(typeof parsed.error === 'string' ? parsed.error : 'Error')
-                  ac.abort()
-                  return
-                }
-                if (parsed.choices && parsed.choices[0]) {
-                  const choice = parsed.choices[0]
-                  const delta = choice.delta
-                  const message = choice.message
-                  const content =
-                    (delta && delta.content) ||
-                    (message && message.content) ||
-                    parsed.text ||
-                    ''
-                  if (content) onDelta(content)
-                  continue
-                }
-                if (typeof parsed.text === 'string') {
-                  onDelta(parsed.text)
-                  continue
-                }
-                // Otherwise ignore
-              } catch (_) {
-                // non-JSON payload; only emit raw text for non-status events
-                onDelta(payload)
-              }
+              // Dispatch parsed frame
+              handlePayload(payload, evt)
             }
           }
         }
         // flush trailing buffer if any
         const pending = dataLines.join('\n')
         if (pending) {
-          try {
-            const parsed = JSON.parse(pending)
-            if (parsed.status && typeof parsed.status.state === 'string') {
-              onStatus?.(parsed.status.state)
-            } else if (parsed.choices && parsed.choices[0]) {
-              const choice = parsed.choices[0]
-              const delta = choice.delta
-              const message = choice.message
-              const content =
-                (delta && delta.content) ||
-                (message && message.content) ||
-                parsed.text ||
-                ''
-              if (content) onDelta(content)
-            } else if (typeof parsed.text === 'string') {
-              onDelta(parsed.text)
-            }
-          } catch (_) {
-            onDelta(pending)
-          }
+          const evt = currentEvent || 'message'
+          currentEvent = 'message'
+          handlePayload(pending, evt)
         }
         onDone()
       } catch (err: any) {
@@ -202,10 +234,10 @@ export async function streamChat(
       }
     }
 
-    pump()
+    await pump()
   } catch (err: any) {
     if (err?.name === 'AbortError') {
-      // silent
+      // Silent: user-initiated abort
     } else {
       onError('Network error')
       if (sessionId && onRehydrate) {
@@ -214,6 +246,16 @@ export async function streamChat(
           const msgs = await getSessionMessages(sessionId)
           onRehydrate(msgs)
         } catch {}
+      }
+    }
+  } finally {
+    // Always cleanup reader to prevent resource leaks
+    try {
+      reader?.cancel()
+    } catch (err: any) {
+      // Ignore AbortError from cancel during cleanup
+      if (err?.name !== 'AbortError') {
+        console.warn('[stream] Reader cancel error:', err)
       }
     }
   }

@@ -4,7 +4,7 @@ import { useAuth } from './AuthContext'
 import { t } from '../lib/i18n'
 import { streamChat } from '../lib/stream'
 
-type Message = { id?: string; role: string; content: string; created_at?: string }
+type Message = { id?: string; role: string; content: string; created_at?: string; status?: string }
 
 type Session = { id: string; name?: string }
 
@@ -103,7 +103,7 @@ export const ChatProvider: React.FC<{children:any}> = ({ children }) => {
     setMessages(prev => [...prev, userMsg])
     // create assistant placeholder with id so we can update safely
     const assistantId = `a-${Date.now()}-${Math.random().toString(36).slice(2,8)}`
-    setMessages(prev => [...prev, { id: assistantId, role: 'assistant', content: '' }])
+    setMessages(prev => [...prev, { id: assistantId, role: 'assistant', content: '', status: 'thinking' }])
 
     try {
       const controller = new AbortController()
@@ -115,22 +115,28 @@ export const ChatProvider: React.FC<{children:any}> = ({ children }) => {
             const idx = copy.findIndex(m => m.id === assistantId)
             if (idx === -1) return copy
             const msg = copy[idx]
-            copy[idx] = { ...msg, content: (msg.content || '') + delta }
+            copy[idx] = { ...msg, content: (msg.content || '') + delta, status: msg.status === 'thinking' ? 'streaming' : msg.status }
             return copy
           })
         },
         () => {
           setIsStreaming(false)
+          setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, status: 'done' } : m))
         },
         (errText: string) => {
           setIsStreaming(false)
           setStreamingError(errText)
-          setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: `Fejl: ${errText}` } : m))
+          setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: `Fejl: ${errText}`, status: 'error' } : m))
+        },
+        (status?: string) => {
+          if (!status) return
+          setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, status } : m))
         }
       )
       abortRef.current = () => {
         try { handle.abort() } catch {}
         setIsStreaming(false)
+        setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, status: 'stopped' } : m))
       }
     } catch (err) {
       setIsStreaming(false)

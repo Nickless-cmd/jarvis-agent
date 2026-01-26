@@ -35,12 +35,34 @@ async function apiFetch(path: string, init: FetchInit = {}) {
     headers: { 'Content-Type': 'application/json', ...authHeaders, ...(init.headers || {}) },
     ...init,
   })
+  const contentType = res.headers.get('content-type') || ''
+  const isJson = contentType.includes('application/json')
 
-  const text = await res.text()
-  let data: any = text
-  try { data = text ? JSON.parse(text) : null } catch (_) { /* keep text */ }
+  let data: any = null
+  if (isJson) {
+    try {
+      data = await res.json()
+    } catch (err) {
+      console.warn('[api] failed to parse JSON', { status: res.status, path, contentType, err })
+      data = null
+    }
+  } else {
+    const text = await res.text()
+    data = text
+    // Log once for non-JSON for debugging
+    console.warn('[api] non-JSON response', { status: res.status, path, contentType, sample: text?.slice(0, 200) })
+  }
 
   if (res.status === 401 || res.status === 403) {
+    try {
+      window.localStorage.removeItem('jarvis_token')
+    } catch {}
+    try {
+      window.sessionStorage.removeItem('jarvis_auth_redirected')
+    } catch {}
+    try {
+      document.cookie = 'jarvis_token=;path=/;expires=Thu, 01 Jan 1970 00:00:00 GMT'
+    } catch {}
     // Avoid redirect loops: only redirect once per session
     try {
       const key = 'jarvis_auth_redirected'

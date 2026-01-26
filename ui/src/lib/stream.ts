@@ -2,6 +2,7 @@ export type StreamOptions = {
   sessionId?: string
   prompt: string
   signal?: AbortSignal
+  requestId?: string  // Track request to avoid stale event processing
 }
 
 function getAuthHeaders(): Record<string, string> {
@@ -23,16 +24,20 @@ function getAuthHeaders(): Record<string, string> {
 
 export async function streamChat(
   opts: StreamOptions,
-  onDelta: (text: string) => void,
-  onDone: () => void,
-  onError: (errText: string) => void,
-  onStatus?: (status: string) => void,
+  onDelta: (text: string, requestId?: string) => void,
+  onDone: (requestId?: string) => void,
+  onError: (errText: string, requestId?: string) => void,
+  onStatus?: (status: string, requestId?: string) => void,
   onRehydrate?: (messages: any[]) => void,
+  onComplete?: () => void,  // New: called when stream fully completes for cleanup
 ) {
-  const { sessionId, prompt, signal } = opts
+  const { sessionId, prompt, signal, requestId } = opts
   const headers = getAuthHeaders()
   headers['Accept'] = 'text/event-stream, application/json'
   if (sessionId) headers['X-Session-Id'] = sessionId
+
+  // Track request ID to prevent stale event processing
+  const currentRequestId = requestId || `req-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 
   const ac = new AbortController()
   const outerSignal = signal
@@ -72,6 +77,7 @@ export async function streamChat(
           onRehydrate(msgs)
         } catch {}
       }
+      onComplete?.()
       return { abort: () => ac.abort() }
     }
 
@@ -83,147 +89,106 @@ export async function streamChat(
       try {
         const json = await res.json()
         const text = json?.choices?.[0]?.message?.content || json?.text || ''
-        if (text) onDelta(text)
-        onDone()
+        if (text) onDelta(text, currentRequestId)
+        onDone(currentRequestId)
       } catch (err: any) {
-        onError('Invalid response')
+        onError('Invalid response', currentRequestId)
       }
+      onComplete?.()
       return { abort: () => ac.abort() }
     }
 
     reader = res.body?.getReader() || null
     if (!reader) {
-      onError('No stream')
+      onError('No stream', currentRequestId)
+      onComplete?.()
       return { abort: () => ac.abort() }
     }
 
+    // Emit thinking status immediately so UI knows streaming is starting
+    onStatus?.('thinking', currentRequestId)
+
     const dec = new TextDecoder()
     let buffer = ''
-    let currentEvent = 'message'
-    let dataLines: string[] = []
 
     async function pump() {
-      const handlePayload = (raw: string, eventName: string) => {
-        // Status-only events
-        if (eventName === 'status' && raw) {
-          onStatus?.(raw)
-          return
-        }
+      const handlePayload = (raw: string) => {
+        // Skip empty lines
+        if (!raw.trim()) return
+        
         try {
           const parsed = JSON.parse(raw)
-
-          // Status updates (either explicit or embedded)
-          if (parsed.type === 'status' && typeof parsed.status === 'string') {
-            onStatus?.(parsed.status)
+          const eventType = parsed.type
+          const eventRequestId = parsed.request_id || parsed.stream_id || currentRequestId
+          
+          // Guard: ignore events from different request (prevents stale updates)
+          if (eventRequestId !== currentRequestId) {
+            console.debug('[stream] Ignoring event from different request:', {
+              expected: currentRequestId,
+              received: eventRequestId,
+              type: eventType,
+            })
             return
           }
-          if (parsed.status && typeof parsed.status.state === 'string') {
-            onStatus?.(parsed.status.state)
+          
+          if (eventType === 'status' || eventType === 'thinking') {
+            onStatus?.(parsed.status || parsed.content, currentRequestId)
             return
           }
-
-          // Done marker in JSON
-          if (parsed.type === 'done' || parsed.done) {
-            onDone()
+          
+          if (eventType === 'token') {
+            onDelta(parsed.content || '', currentRequestId)
+            return
+          }
+          
+          if (eventType === 'done' || eventType === 'final') {
+            onDone(currentRequestId)
             ac.abort()
             return
           }
-
-          // Delta / message content
-          if (parsed.type === 'delta' && typeof parsed.delta === 'string') {
-            onDelta(parsed.delta)
-            return
-          }
-
-          if (parsed.choices && parsed.choices[0]) {
-            const choice = parsed.choices[0]
-            const delta = choice.delta
-            const message = choice.message
-            const content =
-              (delta && delta.content) ||
-              (message && message.content) ||
-              parsed.text ||
-              ''
-            if (content) onDelta(content)
-            return
-          }
-
-          if (typeof parsed.text === 'string') {
-            onDelta(parsed.text)
-            return
-          }
-
-          // Status fallback
-          if (typeof parsed.state === 'string') {
-            onStatus?.(parsed.state)
-            return
-          }
-
-          if (parsed.error) {
-            onError(typeof parsed.error === 'string' ? parsed.error : 'Error')
+          
+          if (eventType === 'error') {
+            onError(parsed.content || parsed.error || 'Unknown error', currentRequestId)
             ac.abort()
             return
           }
-        } catch (_){
-          // Non-JSON payload
-          if (eventName === 'status') {
-            onStatus?.(raw)
-            return
-          }
-          onDelta(raw)
+        } catch (err) {
+          // Non-JSON line, skip it
+          // (could be intermediate newline or malformed chunk)
         }
       }
 
       try {
         while (true) {
           const { done, value } = await reader!.read()
-          if (done) break
+          if (done) {
+            // Reader end reached - flush buffer and mark complete
+            const pending = buffer.trim()
+            if (pending) {
+              handlePayload(pending)
+            }
+            // Signal completion for cleanup
+            onComplete?.()
+            break
+          }
           buffer += dec.decode(value, { stream: true })
           const lines = buffer.split(/\n/)
           buffer = lines.pop() || ''
 
           for (const lineRaw of lines) {
             const line = lineRaw.replace(/\r$/, '')
-            if (line.startsWith('event:')) {
-              currentEvent = line.replace(/^event:\s*/, '').trim() || 'message'
-              continue
-            }
-            if (line.startsWith('data:')) {
-              dataLines.push(line.replace(/^data:\s*/, ''))
-              continue
-            }
-            // blank line -> dispatch
-            const trimmed = line.trim()
-            if (trimmed === '') {
-              const payload = dataLines.join('\n')
-              dataLines = []
-              const evt = currentEvent || 'message'
-              currentEvent = 'message'
-
-              if (!payload) continue
-              if (payload === '[DONE]') {
-                onDone()
-                ac.abort()
-                return
-              }
-
-              // Dispatch parsed frame
-              handlePayload(payload, evt)
-            }
+            if (line) handlePayload(line)
           }
         }
-        // flush trailing buffer if any
-        const pending = dataLines.join('\n')
-        if (pending) {
-          const evt = currentEvent || 'message'
-          currentEvent = 'message'
-          handlePayload(pending, evt)
-        }
-        onDone()
       } catch (err: any) {
-        if (err?.name === 'AbortError') return
-        onError('Stream aborted')
-        // Rehydrate after aborted stream
+        if (err?.name === 'AbortError') {
+          // User abort - cleanup immediately
+          onComplete?.()
+          return
+        }
+        onError('Stream error', currentRequestId)
+        // Ensure cleanup even on error
+        onComplete?.()
         if (sessionId && onRehydrate) {
           try {
             const { getSessionMessages } = await import('./api')
@@ -237,9 +202,11 @@ export async function streamChat(
     await pump()
   } catch (err: any) {
     if (err?.name === 'AbortError') {
-      // Silent: user-initiated abort
+      // Silent: user-initiated abort - cleanup
+      onComplete?.()
     } else {
-      onError('Network error')
+      onError('Network error', currentRequestId)
+      onComplete?.()
       if (sessionId && onRehydrate) {
         try {
           const { getSessionMessages } = await import('./api')
@@ -263,6 +230,8 @@ export async function streamChat(
   function abort() {
     try { reader?.cancel() } catch {}
     ac.abort()
+    // Ensure cleanup on abort
+    onComplete?.()
   }
 
   return { abort }

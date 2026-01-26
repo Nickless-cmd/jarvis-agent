@@ -40,7 +40,9 @@ export const ChatProvider: React.FC<{children:any}> = ({ children }) => {
   const [loading, setLoading] = useState(false)
   const [isStreaming, setIsStreaming] = useState(false)
   const [streamingError, setStreamingError] = useState<string|null>(null)
-  const abortRef = useRef<() => void>(() => {})
+  const abortControllerRef = useRef<AbortController | null>(null)
+  const isAbortedRef = useRef(false)
+  const activeStreamIdRef = useRef<string | null>(null)  // TEMP: For debugging stale streams
 
   useEffect(() => {
     let mounted = true
@@ -95,6 +97,16 @@ export const ChatProvider: React.FC<{children:any}> = ({ children }) => {
     if(!sessionId) return
     const prompt = opts.prompt
     
+    // Cancel any previous stream
+    if (abortControllerRef.current && isStreaming) {
+      abortControllerRef.current.abort()
+    }
+    isAbortedRef.current = false
+    
+    // TEMP: Generate new stream ID for this request (for debugging stale streams)
+    const newStreamId = `stream-${Date.now()}-${Math.random().toString(36).slice(2,8)}`
+    activeStreamIdRef.current = newStreamId
+    
     setIsStreaming(true)
     setStreamingError(null)
     
@@ -107,38 +119,89 @@ export const ChatProvider: React.FC<{children:any}> = ({ children }) => {
 
     try {
       const controller = new AbortController()
+      abortControllerRef.current = controller
+      
+      let isFirstToken = true
+      
       const handle = await streamChat(
-        { sessionId, prompt, signal: controller.signal },
-        (delta: string) => {
+        { sessionId, prompt, signal: controller.signal, requestId: newStreamId },
+        (delta: string, requestId?: string) => {
+          // Guard: ignore updates after abort
+          if (isAbortedRef.current) return
+          // Guard: ignore tokens from stale streams
+          if (requestId && requestId !== activeStreamIdRef.current) {
+            console.log('[ChatContext] Stream ID mismatch in token:', { expected: activeStreamIdRef.current, received: requestId })
+            return
+          }
+          
           setMessages(prev => {
             const copy = prev.slice()
             const idx = copy.findIndex(m => m.id === assistantId)
             if (idx === -1) return copy
             const msg = copy[idx]
-            copy[idx] = { ...msg, content: (msg.content || '') + delta, status: msg.status === 'thinking' ? 'streaming' : msg.status }
+            
+            // On first token, remove thinking status and show streamed content
+            if (isFirstToken) {
+              isFirstToken = false
+              copy[idx] = { ...msg, content: delta, status: 'streaming' }
+            } else {
+              // Subsequent tokens: append
+              copy[idx] = { ...msg, content: msg.content + delta }
+            }
             return copy
           })
         },
-        () => {
+        (requestId?: string) => {
+          // Guard: ignore if aborted
+          if (isAbortedRef.current) return
+          // Guard: ignore done from stale streams
+          if (requestId && requestId !== activeStreamIdRef.current) {
+            console.log('[ChatContext] Stream ID mismatch in done:', { expected: activeStreamIdRef.current, received: requestId })
+            return
+          }
           setIsStreaming(false)
           setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, status: 'done' } : m))
         },
-        (errText: string) => {
+        (errText: string, requestId?: string) => {
+          // Guard: ignore if aborted (abort is not an error)
+          if (isAbortedRef.current) return
+          // Guard: ignore tokens from stale streams
+          if (requestId && requestId !== activeStreamIdRef.current) {
+            console.log('[ChatContext] Stream ID mismatch in error:', { expected: activeStreamIdRef.current, received: requestId })
+            return
+          }
           setIsStreaming(false)
           setStreamingError(errText)
           setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: `Fejl: ${errText}`, status: 'error' } : m))
         },
-        (status?: string) => {
+        (status?: string, requestId?: string) => {
+          // Guard: ignore if aborted
+          if (isAbortedRef.current) return
+          // Guard: ignore status updates from stale streams
+          if (requestId && requestId !== activeStreamIdRef.current) {
+            console.log('[ChatContext] Stream ID mismatch in status:', { expected: activeStreamIdRef.current, received: requestId })
+            return
+          }
           if (!status) return
           setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, status } : m))
+        },
+        undefined,  // onRehydrate
+        () => {
+          // onComplete: called when stream fully completes (reader done or error)
+          // This ensures cleanup happens regardless of how stream ends
+          if (activeStreamIdRef.current === newStreamId) {
+            // Only cleanup if this is still the active stream (prevent stale cleanup)
+            setIsStreaming(false)
+            setMessages(prev => prev.map(m => m.id === assistantId 
+              ? { ...m, status: m.status === 'done' || m.status === 'error' ? m.status : 'done' } 
+              : m))
+            console.debug('[ChatContext] Stream completed and cleaned up:', { requestId: newStreamId })
+          }
         }
       )
-      abortRef.current = () => {
-        try { handle.abort() } catch {}
-        setIsStreaming(false)
-        setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, status: 'stopped' } : m))
-      }
     } catch (err) {
+      // Guard: ignore if already aborted
+      if (isAbortedRef.current) return
       setIsStreaming(false)
       setStreamingError('Fejl ved hentning af svar.')
       setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: 'Fejl ved hentning af svar.' } : m))
@@ -146,7 +209,18 @@ export const ChatProvider: React.FC<{children:any}> = ({ children }) => {
   }
 
   function stopStreaming() {
-    abortRef.current?.()
+    if (!abortControllerRef.current || isAbortedRef.current) return
+    
+    // Mark as aborted first (before abort signal) to block all state updates
+    isAbortedRef.current = true
+    
+    // Abort the fetch signal
+    try {
+      abortControllerRef.current.abort()
+    } catch {}
+    
+    // Disable streaming UI immediately
+    setIsStreaming(false)
   }
 
   async function logout() {
